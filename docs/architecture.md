@@ -1,0 +1,41 @@
+# 架构与 EPUB 处理
+
+## 组件边界
+
+`ui` 只负责 HWND、非客户区、DPI 和 Direct2D 绘制，不读取书库，也不依赖 WebView2。`app` 组合窗口、WebView2 和 `engine`。`engine` 负责 EPUB 的所有持久内容处理，不包含界面或浏览器代码。
+
+WebView2 主页面发 `{id, method, params}` JSON 请求，C++ 返回 `{id, result}` 或 `{id, error}`。命令包含 `bootstrap`、`list`、`import`、`open`、`position`、`bookmark`、`search`、`settings`、`close`。文件选择器在 COM STA/UI 线程运行；导入、XML、拆分、检索和存储统一由后台串行队列处理，结果通过窗口消息回到 UI 线程。原生 WebView2 对象不跨线程调用。
+
+关闭窗口时前端提交最终位置，再请求关闭；原生设置超时兜底。已进入后台队列的存储操作在应用对象退出时完成。
+
+## 导入管线
+
+1. 在 C++ 流式计算源文件 ID，避免重复导入。
+2. ZIP 提取到新的 staging/content。拒绝绝对路径、父目录逃逸、反斜线、NTFS ADS、Windows 特殊设备名、重复路径与加密 ZIP。限制 20,000 项、单项 64 MiB、累计 512 MiB；miniz 验证 CRC。
+3. 解析 `META-INF/container.xml` → OPF，读取元数据、manifest、spine、封面与阅读方向。跳过 spine 中 `linear=no` 内容，不把它当主阅读顺序。
+4. 按 spine 顺序读取 XHTML，收集直接链接的 CSS 与嵌入 CSS，拆分 DOM。
+5. 确定每个原始文件的默认目标，以及每个 ID / name 锚点所在的输出文件。
+6. 用完整映射修复主阅读文档中的超链接，生成 remap 后的 EPUB3 nav / NCX 目录数据。图片、CSS 和字体保留原目录层级，拆分文件与源文件同目录，因此资源相对路径继续有效。
+7. 写入章节纯文本和 `book.json`，将 staging 整体移动为正式书籍目录。
+
+## DOM 拆分策略
+
+参考读取的 calibre 文件：
+
+- `src/calibre/ebooks/oeb/transforms/split.py`：分页边界、大小限制、anchor map 与 `fix_links`。
+- `src/calibre/ebooks/oeb/polish/split.py`：在嵌套 DOM 中保留祖先结构的拆分语义。
+
+本实现没有调用 Python/calibre，也没有复制上述文件中的代码。与其构造递归二分树，此处先将正文归约为一组有序、不可拆分的内容单元，为每个容器记录子树的单元区间。分页与大小预算产生区间分段；每个分段复制与其相交的祖先路径和完整内容单元，从而保留有效嵌套、样式继承、列表编号上下文及 head 引用。重复祖先的锚点只保留在第一次出现的位置。列表在跨文件后的连续计数尚未额外重写 `start`，需要后续补齐。
+
+表格、段落、pre、SVG、MathML、figure 和标题被视为原子内容；大于预算时保留而不是截断。普通超长段落内部的智能拆分、pre 空行拆分、完整 CSS 选择器/cascade，与 calibre 更强的容错和转换预处理目前不等价。
+
+## 渲染边界
+
+- `https://app.dr-reader.local` 仅映射发布的 `web/` 静态资源。
+- `https://books.dr-reader.local` 仅映射书库目录，用于本地取回缓存 XHTML、封面和资源。
+- 应用获取 C++ 已处理的 XHTML，插入确定的本地 base，再放到 `sandbox="allow-same-origin"` 的 srcdoc iframe；不开放 `allow-scripts`。应用仅通过 DOM 注入阅读样式、处理点击和测量浏览器排版后的尺寸。
+- 书籍 HTML 的 script、事件属性、嵌套 frame、object 等被 C++ 清理；额外 CSP 禁用脚本、网络连接和表单。
+- native bridge 只接受来源完全等于应用 `index.html` 的消息；不暴露 host objects、不允许任意文件路径导入、不允许网页导航替换应用或打开新窗口。
+- 封面和正文资源仍需浏览器进行字体、图像及 CSS 解码，这属于排版职责。C++ 不尝试复制浏览器布局引擎。
+
+WebView2 本地资源映射参考 [Microsoft 文档](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content)。云母背景采用 [DWM_SYSTEMBACKDROP_TYPE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)，Windows 11 22H2 以下回退标准标题栏。

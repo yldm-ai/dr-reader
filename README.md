@@ -1,0 +1,85 @@
+# DR Reader
+
+Windows 本地 EPUB 阅读器初版。C++20 + Win32 / Direct2D / DirectWrite + WebView2，不使用 Electron、Node.js 运行时或 Python 解析 EPUB。
+
+## 运行
+
+已经构建的程序：`build/bin/Release/dr-reader.exe`。保持同目录下的 `web/` 和 `resources/` 一起使用。首次启动会添加原创示例书《给阅读留一盏灯》；通过“添加图书”导入自己的无 DRM EPUB，支持多选。
+
+```powershell
+./build/bin/Release/dr-reader.exe
+./build/bin/Release/dr-reader.exe "D:/Books/example.epub"
+./build/bin/Release/dr-reader.exe --shell direct2d
+./build/bin/Release/dr-reader.exe --shell mica --data-dir "D:/ReaderData"
+```
+
+窗口外壳也可以在设置中即时切换。系统云母使用 Windows 11 22H2+ 的 DWM backdrop；旧版 Windows 自动使用标准原生标题栏。自绘外壳使用 Direct2D/DirectWrite，保留原生移动、缩放、最大化和系统贴靠交互。
+
+## 构建
+
+需要 Windows 10/11、Visual Studio 2022 或更新版的“使用 C++ 的桌面开发”工具链、Windows SDK、CMake 3.24+ 和 WebView2 Evergreen Runtime。依赖由 CMake 下载固定版本，首次配置需要联网，不需要 vcpkg。前端是原生 ES modules，无需 npm 构建。
+
+```powershell
+cmake -S . -B build -A x64
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+```
+
+也可以运行 `./scripts/build.ps1`；`CMakePresets.json` 的预设对应本机 Visual Studio 2026，使用 VS 2022 时执行上面的通用命令或向脚本传 `-Generator 'Visual Studio 17 2022'`。
+
+生成便携目录：
+
+```powershell
+./scripts/package.ps1
+```
+
+## 初版功能
+
+- 书架网格/列表、封面、书名/作者搜索、排序、作者筛选、最近阅读、未读/已读筛选。
+- C++ 后台导入：ZIP 解包、OPF 元数据、spine 阅读顺序、EPUB 3 nav / EPUB 2 NCX、封面与章节缓存。
+- C++ XHTML 拆分：保持 DOM 祖先和 head，分页标记、256 KiB 内容预算、锚点归属、跨章节链接与目录重映射。
+- WebView2 正文排版：目录、上下滚动/左右翻页、章节内锚点、字号、字体、行高、宽度、明亮/纸张/夜间主题。
+- 本地进度恢复、继续阅读、书签、C++ 书内搜索（每章返回第一处匹配，最多 100 章）。
+- 系统云母 / Direct2D 自绘两种原生标题栏，支持 DPI 缩放。
+
+快捷键：`Ctrl+O` 导入，`Ctrl+K` 搜索书库，阅读时 `Ctrl+F` 搜索正文，左右方向键 / PageUp / PageDown 翻页，`Esc` 返回书库。
+
+## 代码结构
+
+```text
+app/          应用组合、COM 生命周期、WebView2 宿主、消息桥、串行后台任务
+ui/           不依赖业务的 Win32 / Direct2D / DirectWrite 窗口外壳
+engine/       不依赖 WebView2 的 C++ EPUB、DOM 拆分、书库、检索、存储
+web/          书架和阅读器界面；浏览器只承担 UI、排版和分页测量
+resources/    可再分发的原创示例 EPUB
+tests/        C++ 集成测试，运行时生成 EPUB / 恶意 ZIP 测试夹具
+tools/        无界面 EPUB 导入检查工具 dr-epub
+scripts/      本地构建、示例书生成
+docs/         架构、拆分策略与验证记录
+```
+
+参考 MSIME-Windows 的 `ui/` 与业务分层、设置窗口 caption hit-test 和 DPI 处理方式；界面布局参考本机 Neat Reader 与 Starrea。此项目独立构建，不依赖它们的源码或安装目录。
+
+## 存储
+
+默认在 `%LOCALAPPDATA%/DRReader`，可用 `--data-dir` 指定独立目录。从带包标识的应用启动时，Windows 可能重定向到该包的 LocalCache；设置底部会显示实际书库路径。
+
+```text
+settings.json                  主题、原生外壳、阅读排版
+books/<content-id>/book.json   元数据、目录、进度、书签
+books/<content-id>/content/    解包资源、拆分后的 XHTML
+books/<content-id>/search/     C++ 提取的每节纯文本
+webview-profile/              WebView2 用户数据
+```
+
+原始 EPUB 不会被修改。导入先写 staging，成功后整体发布；失败清理临时内容。进度与设置通过临时文件替换保存。初版使用 JSON 文件管理书库，后续可以迁移 SQLite。
+
+## 当前边界
+
+初版针对无 DRM、可重排 EPUB。尚未实现 PDF、漫画/固定版式、竖排/RTL 分页、批注、云同步、书库删除与自定义分类。分页位置采用“章节 + 相对位置”，改变字号后恢复到附近位置，不是 EPUB CFI。
+
+拆分参考 calibre 的处理思路，独立用 C++ 实现，**不是 calibre 转换管线的等价移植**。支持内联分页声明、嵌入/直接链接 CSS 中的标签、类、ID 和后代选择器；尚无完整 CSS cascade、复杂选择器、`@import`、预处理清洗和损坏 HTML 修复。巨型段落、表格、SVG、pre 等保持完整并产生提示；256 KiB 是内容预算，不是含 head 的最终文档硬上限。字体混淆暂不解码；解析到明确 DRM 时拒绝导入。
+
+书籍脚本被移除并在 sandbox iframe 内禁用；原生消息只接受应用主页的请求。资源从本地虚拟主机提供，不启动 HTTP 服务器。细节见 [架构说明](docs/architecture.md)。
+
+第三方依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

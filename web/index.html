@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' https://books.dr-reader.local 'unsafe-inline'; img-src 'self' https://books.dr-reader.local data:; connect-src 'self' https://books.dr-reader.local; font-src 'self' https://books.dr-reader.local; frame-src 'self' about:; object-src 'none'"
+    />
+    <title>DR Reader</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <div id="app" class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" data-icon="book"></span>
+          <div>DR Reader<small>留一点时间给阅读</small></div>
+        </div>
+        <button id="import-side" class="primary import-button">
+          <span data-icon="plus"></span>添加电子书<kbd>Ctrl O</kbd>
+        </button>
+        <div class="nav-label">我的书库</div>
+        <nav id="library-nav">
+          <button class="nav-item active" data-filter="all">
+            <span data-icon="library"></span>全部图书<span
+              class="count"
+              id="count-all"
+              >0</span
+            >
+          </button>
+          <button class="nav-item" data-filter="recent">
+            <span data-icon="clock"></span>最近阅读<span
+              class="count"
+              id="count-recent"
+              >0</span
+            >
+          </button>
+          <button class="nav-item" data-filter="unread">
+            <span data-icon="bookmark"></span>尚未开始
+          </button>
+          <button class="nav-item" data-filter="finished">
+            <span data-icon="check"></span>已经读完
+          </button>
+        </nav>
+        <div class="nav-label separated">浏览分类</div>
+        <button id="authors-toggle" class="nav-item">
+          <span data-icon="user"></span>作者<span
+            data-icon="chevron"
+            class="small-icon trailing"
+          ></span>
+        </button>
+        <div id="authors" class="author-list" hidden></div>
+        <div class="sidebar-bottom">
+          <div class="local-note">
+            <span class="status-dot"></span>本地书库<small
+              >你的书，留在你的电脑里</small
+            >
+          </div>
+          <button id="open-settings" class="nav-item">
+            <span data-icon="settings"></span>设置与外观
+          </button>
+        </div>
+      </aside>
+      <main id="library-view" class="library-view">
+        <header class="library-header">
+          <div class="eyebrow">YOUR PERSONAL LIBRARY</div>
+          <div class="heading-row">
+            <div>
+              <h1 id="library-heading">
+                全部图书<span id="heading-count">0</span>
+              </h1>
+              <p id="library-subtitle">翻开一本书，让世界慢下来。</p>
+            </div>
+            <button id="import-main" class="primary">
+              <span data-icon="plus"></span>添加图书
+            </button>
+          </div>
+        </header>
+        <section id="continue-section" class="continue-section" hidden>
+          <div class="section-label">
+            接着上次的故事 <span>CONTINUE READING</span>
+          </div>
+          <button id="continue-book" class="continue-card"></button>
+        </section>
+        <div class="library-toolbar">
+          <label class="search-field"
+            ><span data-icon="search"></span
+            ><input
+              id="library-search"
+              type="search"
+              placeholder="搜索书名、作者…"
+              aria-label="搜索书库"
+            /><kbd>Ctrl K</kbd></label
+          >
+          <div class="toolbar-right">
+            <select id="sort" aria-label="图书排序">
+              <option value="added">最近添加</option>
+              <option value="read">最近阅读</option>
+              <option value="title">书名排序</option>
+              <option value="author">作者排序</option>
+            </select>
+            <div class="view-toggle">
+              <button
+                id="grid-view"
+                class="icon-button selected"
+                title="网格视图"
+                aria-label="网格视图"
+              >
+                <span data-icon="grid"></span></button
+              ><button
+                id="list-view"
+                class="icon-button"
+                title="列表视图"
+                aria-label="列表视图"
+              >
+                <span data-icon="list"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div id="book-grid" class="book-grid"></div>
+        <div id="empty-state" class="empty-state" hidden>
+          <span data-icon="book"></span>
+          <h2>下一段故事，从这里开始</h2>
+          <p>添加一本 EPUB，建立属于自己的书架。</p>
+          <button id="import-empty" class="primary">选择 EPUB 文件</button>
+        </div>
+        <footer class="library-footer">
+          <span id="library-total">0 本图书</span
+          ><span>一本书，一段不被打扰的时光。</span><span>EPUB · 本地阅读</span>
+        </footer>
+      </main>
+      <main id="reader-view" class="reader-view" hidden>
+        <header class="reader-toolbar">
+          <button id="back-library" class="text-button">
+            <span data-icon="arrow-left"></span>书库</button
+          ><span class="toolbar-divider"></span>
+          <div class="reader-book-title" id="reader-book-title"></div>
+          <div class="reader-actions">
+            <button
+              id="toggle-toc"
+              class="icon-button"
+              title="显示 / 隐藏目录"
+              aria-label="显示 / 隐藏目录"
+            >
+              <span data-icon="list"></span></button
+            ><button
+              id="add-bookmark"
+              class="icon-button"
+              title="添加 / 移除此处书签"
+              aria-label="添加 / 移除此处书签"
+            >
+              <span data-icon="bookmark"></span></button
+            ><button id="reader-settings" class="text-button">
+              <span data-icon="type"></span>阅读设置
+            </button>
+          </div>
+        </header>
+        <div class="reader-workspace">
+          <aside id="toc-panel" class="toc-panel">
+            <div class="toc-tabs">
+              <button data-tab="toc" class="active">目录</button
+              ><button data-tab="marks">书签</button
+              ><button data-tab="search">搜索</button>
+            </div>
+            <div id="toc-content"></div>
+            <div id="marks-content" hidden></div>
+            <div id="search-content" hidden>
+              <form id="book-search-form" class="book-search">
+                <input
+                  id="book-search-input"
+                  type="search"
+                  placeholder="搜索书内文字"
+                  aria-label="搜索书内文字"
+                /><button
+                  class="icon-button"
+                  type="submit"
+                  aria-label="开始搜索"
+                >
+                  <span data-icon="search"></span>
+                </button>
+              </form>
+              <div id="search-results" class="search-results">
+                <p class="panel-hint">由 C++ 在本地检索正文。</p>
+              </div>
+            </div>
+          </aside>
+          <section class="reading-area">
+            <div id="chapter-label" class="chapter-label"></div>
+            <div class="page-surface">
+              <iframe
+                id="book-frame"
+                title="电子书正文"
+                sandbox="allow-same-origin"
+              ></iframe>
+              <div id="reader-loading" class="reader-loading" hidden>
+                正在打开这一页…
+              </div>
+            </div>
+            <div class="reader-pagination">
+              <button id="prev-page" class="text-button">
+                <span data-icon="arrow-left"></span>上一页</button
+              ><span id="page-indicator"></span
+              ><button id="next-page" class="text-button">
+                下一页<span data-icon="arrow-right"></span>
+              </button>
+            </div>
+          </section>
+        </div>
+        <footer class="reader-footer">
+          <span id="reader-location"></span
+          ><input
+            id="reading-progress"
+            type="range"
+            min="0"
+            max="1000"
+            value="0"
+            aria-label="全书阅读进度"
+          /><span id="reader-percent">0%</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="settings-dialog" class="settings-dialog">
+      <div class="settings-header">
+        <div>
+          <span class="eyebrow">MAKE IT YOURS</span>
+          <h2>阅读，按你的习惯</h2>
+        </div>
+        <button id="close-settings" class="icon-button" aria-label="关闭设置">
+          <span data-icon="close"></span>
+        </button>
+      </div>
+      <div class="settings-body">
+        <section>
+          <h3>阅读主题</h3>
+          <div class="theme-options">
+            <button data-theme="light" class="theme-swatch light">
+              <span>Aa</span>明亮</button
+            ><button data-theme="sepia" class="theme-swatch sepia">
+              <span>Aa</span>纸张</button
+            ><button data-theme="dark" class="theme-swatch dark">
+              <span>Aa</span>夜间
+            </button>
+          </div>
+        </section>
+        <section>
+          <h3>文字与排版</h3>
+          <label class="setting-row"
+            >字体<select id="font-family">
+              <option value="serif">宋体 · 衬线</option>
+              <option value="sans-serif">黑体 · 无衬线</option>
+            </select></label
+          ><label class="setting-row"
+            >字号 <span><output id="font-size-value">20</output> px</span
+            ><input
+              id="font-size"
+              type="range"
+              min="14"
+              max="36"
+              step="1" /></label
+          ><label class="setting-row"
+            >行高 <output id="line-height-value">1.9</output
+            ><input
+              id="line-height"
+              type="range"
+              min="1.3"
+              max="2.5"
+              step="0.1" /></label
+          ><label class="setting-row"
+            >正文宽度
+            <span><output id="reading-width-value">760</output> px</span
+            ><input
+              id="reading-width"
+              type="range"
+              min="480"
+              max="1100"
+              step="20" /></label
+          ><label class="setting-row"
+            >阅读方式<select id="reading-mode">
+              <option value="scroll">上下滚动</option>
+              <option value="paged">左右翻页</option>
+            </select></label
+          >
+        </section>
+        <section>
+          <h3>原生窗口外壳</h3>
+          <label class="shell-option"
+            ><input type="radio" name="shell" value="mica" /><span
+              ><strong>系统云母标题栏</strong
+              ><small>Windows 原生按钮与窗口交互</small></span
+            ></label
+          ><label class="shell-option"
+            ><input type="radio" name="shell" value="direct2d" /><span
+              ><strong>Direct2D 自绘标题栏</strong
+              ><small>C++ 绘制，支持拖动、缩放与贴靠</small></span
+            ></label
+          >
+          <p class="setting-note">
+            云母材质由 Windows 提供；系统不支持时使用标准标题栏。
+          </p>
+        </section>
+        <section class="about">
+          <span class="brand-mark" data-icon="book"></span>
+          <div>
+            <strong>DR Reader</strong><small>0.1.0 · C++ / WebView2</small>
+          </div>
+        </section>
+        <p class="setting-note storage-note">
+          本地书库目录<br /><span id="data-path"></span>
+        </p>
+      </div>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="busy" class="busy" hidden>
+      <span class="spinner"></span><span id="busy-label">正在处理电子书…</span>
+    </div>
+  </body>
+</html>

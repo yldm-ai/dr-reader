@@ -1,9 +1,9 @@
 const COLORS = {
-  yellow: "rgba(239, 191, 78, .42)",
-  green: "rgba(112, 184, 125, .34)",
-  blue: "rgba(93, 160, 224, .34)",
-  pink: "rgba(226, 119, 157, .30)",
-  purple: "rgba(159, 127, 205, .30)",
+  yellow: "rgba(207, 162, 76, .42)",
+  green: "rgba(108, 155, 125, .34)",
+  blue: "rgba(107, 159, 197, .34)",
+  pink: "rgba(195, 125, 160, .30)",
+  purple: "rgba(161, 138, 194, .30)",
 };
 
 export class AnnotationLayer {

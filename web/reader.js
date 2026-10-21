@@ -7,6 +7,7 @@ import {
 import { AnnotationLayer } from "./annotations.js";
 import { ReaderMotion } from "./motion.js";
 import { fontStack } from "./fonts.ts";
+import { readingPalette } from "./reading-palette.ts";
 import { sameReading } from "./settings-state.ts";
 import { ChapterCache } from "./chapter-cache.ts";
 import { icon } from "./icons.ts";
@@ -524,12 +525,7 @@ export class Reader {
     if (!this.doc || !this.style) return;
     this.reflowing = true;
     const reading = this.settings;
-    const colors =
-      reading.theme === "dark"
-        ? ["#252923", "#dce1d5", "#abc296"]
-        : reading.theme === "sepia"
-          ? ["#fbf6e9", "#514737", "#776440"]
-          : ["#ffffff", "#2e352d", "#56704c"];
+    const colors = readingPalette(reading.theme);
     const paged = reading.mode === "paged";
     const spacing = reading.publisherStyles
       ? ""
@@ -540,7 +536,7 @@ export class Reader {
     const margin = paged
       ? `padding:0!important;column-count:auto!important;margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(var(--dr-page-width,100vw) - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(var(--dr-page-width,100vw) - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
       : `margin:0!important;padding:${reading.paddingY}px ${reading.paddingX}px 60px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
-    this.style.textContent = `html{background:${colors[0]}!important;color:${colors[1]}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors[0]}!important;color:${colors[1]}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors[2]}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:#8dac7855!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors[2]}55;border-radius:4px}`;
+    this.style.textContent = `html{background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:4px}`;
     this.reflow();
   }
 

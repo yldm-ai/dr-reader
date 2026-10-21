@@ -4,8 +4,8 @@ Add-Type -AssemblyName System.Drawing
 $assetDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../resources'))
 $svg = @'
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect x="8" y="8" width="240" height="240" rx="52" fill="#56704c"/>
-  <path d="M128 81C104 66 80 66 56 76V180C80 170 104 170 128 185C152 170 176 170 200 180V76C176 66 152 66 128 81ZM128 81V185" fill="none" stroke="#fafaf7" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#337ba6"/>
+  <path d="M128 81C104 66 80 66 56 76V180C80 170 104 170 128 185C152 170 176 170 200 180V76C176 66 152 66 128 81ZM128 81V185" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 '@
 [IO.File]::WriteAllText((Join-Path $assetDirectory 'dr-reader.svg'), $svg + "`n", [Text.UTF8Encoding]::new($false))
@@ -25,8 +25,8 @@ $book.AddBezier(200, 76, 176, 66, 152, 66, 128, 81)
 $book.CloseFigure()
 $book.StartFigure()
 $book.AddLine(128, 81, 128, 185)
-$brush = [Drawing.SolidBrush]::new([Drawing.ColorTranslator]::FromHtml('#56704c'))
-$pen = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#fafaf7'), 10)
+$brush = [Drawing.SolidBrush]::new([Drawing.ColorTranslator]::FromHtml('#337ba6'))
+$pen = [Drawing.Pen]::new([Drawing.ColorTranslator]::FromHtml('#ffffff'), 10)
 $pen.LineJoin = [Drawing.Drawing2D.LineJoin]::Round
 $pen.StartCap = $pen.EndCap = [Drawing.Drawing2D.LineCap]::Round
 $sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)

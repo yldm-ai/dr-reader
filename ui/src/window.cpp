@@ -100,9 +100,9 @@ void Window::set_theme(const std::string &theme)
     // Match the web application's --bg, --text and --hover in styles.css.
     const bool dark = theme == "dark";
     const bool sepia = theme == "sepia";
-    caption_background_ = dark ? 0x20231f : sepia ? 0xf6f0e3 : 0xfafaf7;
-    caption_text_ = dark ? 0xdce1d5 : sepia ? 0x514737 : 0x2e352d;
-    caption_hover_ = dark ? 0x30372a : sepia ? 0xf0e6d4 : 0xf0f2eb;
+    caption_background_ = dark ? 0x191919 : sepia ? 0xf5f1eb : 0xffffff;
+    caption_text_ = dark ? 0xe6e6e5 : sepia ? 0x4a4036 : 0x37352f;
+    caption_hover_ = dark ? 0x2c2c2c : sepia ? 0xeee7de : 0xf1f1ef;
     BOOL value = dark;
     DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
     InvalidateRect(hwnd_, nullptr, FALSE);

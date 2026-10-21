@@ -859,7 +859,7 @@ export class Reader {
         style,
       });
       this.doc.getSelection()?.removeAllRanges();
-      toast(style === "underline" ? "已添加下划线" : "已添加高亮");
+      if (style !== "underline") toast("已添加高亮");
     } catch (error) {
       toast(error.message);
     }
@@ -1044,7 +1044,7 @@ export class Reader {
       this.hideSelection();
       dialog.className = "dictionary-picker";
       dialog.setAttribute("aria-label", "选择查词网站");
-      dialog.innerHTML = `<div class="annotation-header"><div><span class="eyebrow">LOOK UP</span><h2>选择查词网站</h2></div><button type="button" class="icon-button" aria-label="关闭查词窗口" title="关闭">${icon("close")}</button></div><div class="dictionary-picker-list"></div>`;
+      dialog.innerHTML = `<div class="dictionary-picker-header"><h2>选择查词网站</h2><button type="button" class="icon-button" aria-label="关闭查词窗口" title="关闭">${icon("close")}</button></div><div class="dictionary-picker-list"></div>`;
       let settled = false;
       const finish = (id = "") => {
         if (settled) return;
@@ -1054,7 +1054,7 @@ export class Reader {
         dialog.remove();
         resolve(selected);
       };
-      dialog.querySelector(".annotation-header button").onclick = () => finish();
+      dialog.querySelector(".dictionary-picker-header button").onclick = () => finish();
       const outside = (event) => {
         const rect = dialog.getBoundingClientRect();
         return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right ||

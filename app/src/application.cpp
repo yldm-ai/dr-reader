@@ -56,7 +56,7 @@ void Application::apply_settings(const Json &s)
     auto app=s.at("application");
     window_.set_style(app.value("shell", std::string("mica")) == "direct2d" ? ShellStyle::Direct2D
                                                                           : ShellStyle::Mica);
-    window_.set_dark(app.value("theme", std::string("light")) == "dark");
+    window_.set_theme(app.value("theme", std::string("light")));
 }
 std::vector<fs::path> Application::pick_books()
 {
@@ -214,7 +214,7 @@ int Application::run(HINSTANCE instance)
                                       : ShellStyle::Mica, IDI_DR_READER))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
-    window_.set_dark(settings["application"].value("theme", std::string("light")) == "dark");
+    window_.set_theme(settings["application"].value("theme", std::string("light")));
     webview_.on_message = [this](auto &request) { receive(request); };
     webview_.on_error = [this](const auto &error)
     { MessageBoxW(window_.handle(), error.c_str(), L"DR Reader", MB_OK | MB_ICONERROR); };

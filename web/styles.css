@@ -683,7 +683,7 @@ body[data-animations="false"] .selection-menu {
   align-items: center;
   gap: 18px;
   padding: 0 24px;
-  background: var(--surface);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
 .text-button {
@@ -1415,17 +1415,37 @@ input[type="range"] {
   padding: 8px 4px;
 }
 .dictionary-picker {
-  padding: 22px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 12px;
+}
+.dictionary-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-left: 8px;
+}
+.dictionary-picker-header h2 {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: 500;
+}
+.dictionary-picker-header .icon-button {
+  width: 30px;
+  height: 30px;
+  padding: 6px;
+  flex-shrink: 0;
 }
 .dictionary-picker-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-top: 20px;
+  gap: 2px;
+  margin-top: 6px;
 }
 .dictionary-choice {
   text-align: left;
-  padding: 11px;
+  padding: 8px;
+  overflow-wrap: anywhere;
   border-radius: 5px;
   font-size: var(--text-body);
 }

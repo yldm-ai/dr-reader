@@ -1,6 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <title>Reader interaction regression</title>
+<link rel="stylesheet" href="../web/styles.css">
 <pre id="result">RUNNING</pre>
 <script type="module">
 const output = document.getElementById('result');
@@ -50,10 +51,23 @@ try {
   reader.showSelectionMenu(range);
   check(document.getElementById('selection-delete').hidden, 'unmarked text must not offer annotation deletion');
 
+  const toast = document.getElementById('toast');
+  toast.hidden = true;
+  const saveProbe = Object.create(reader);
+  let savedStyle;
+  saveProbe.selectionAnchor = () => ({ text: text.textContent });
+  saveProbe.saveAnnotation = async value => { savedStyle = value.style; };
+  await saveProbe.saveSelection('yellow', 'underline');
+  check(savedStyle === 'underline' && toast.hidden, 'saving an underline must not show a success toast');
+  await saveProbe.saveSelection('yellow', 'highlight');
+  check(savedStyle === 'highlight' && !toast.hidden, 'highlight feedback must remain available');
+
   const dictionaries = [{ id: 'one', name: '测试词典一' }, { id: 'two', name: '测试词典二' }];
   let pending = reader.chooseDictionary(dictionaries);
   let dialog = document.querySelector('.dictionary-picker');
   check(dialog.open, 'dictionary chooser did not open');
+  check(!dialog.textContent.includes('LOOK UP'), 'dictionary chooser must not show the English heading');
+  check(dialog.getBoundingClientRect().width <= 320, 'dictionary chooser must use the compact layout');
   dialog.querySelector('[aria-label="关闭查词窗口"]').click();
   check(await pending === null && !dialog.isConnected, 'close button must cancel and remove the chooser');
   pending = reader.chooseDictionary(dictionaries);
@@ -82,7 +96,7 @@ try {
   check(panel.dataset.scrolling === 'true', 'layout-only pointer events must not reenable hover');
   panel.dispatchEvent(new PointerEvent('pointermove', { movementY: 2 }));
   check(!panel.hasAttribute('data-scrolling'), 'real pointer movement must restore hover');
-  output.textContent = 'PASS: underline deletion, chooser close/backdrop/Escape/selection, scroll hover';
+  output.textContent = 'PASS: underline deletion and silent save, compact chooser close/backdrop/Escape/selection, scroll hover';
   document.documentElement.dataset.result = 'pass';
 } catch (error) {
   output.textContent = 'FAIL\n' + error.stack;

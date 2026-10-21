@@ -25,7 +25,7 @@ class Window
     }
     RECT content_bounds() const;
     void set_style(ShellStyle style);
-    void set_dark(bool dark);
+    void set_theme(const std::string &theme);
     void set_title(const std::wstring &title);
     void post(std::function<void()> action);
     std::function<void()> on_resize;
@@ -48,7 +48,10 @@ class Window
     int icon_resource_ = 0;
     HICON small_icon_ = nullptr, large_icon_ = nullptr;
     ShellStyle style_ = ShellStyle::Mica;
-    bool dark_ = false, mica_available_ = false;
+    bool mica_available_ = false;
+    UINT32 caption_background_ = 0xfafaf7;
+    UINT32 caption_text_ = 0x2e352d;
+    UINT32 caption_hover_ = 0xf0f2eb;
     int hot_ = HTNOWHERE, pressed_ = HTNOWHERE;
     std::wstring title_ = L"DR Reader";
     Microsoft::WRL::ComPtr<ID2D1Factory> factory_;

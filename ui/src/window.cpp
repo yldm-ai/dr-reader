@@ -95,9 +95,14 @@ void Window::set_style(ShellStyle style)
         on_resize();
     InvalidateRect(hwnd_, nullptr, TRUE);
 }
-void Window::set_dark(bool dark)
+void Window::set_theme(const std::string &theme)
 {
-    dark_ = dark;
+    // Match the web application's --bg, --text and --hover in styles.css.
+    const bool dark = theme == "dark";
+    const bool sepia = theme == "sepia";
+    caption_background_ = dark ? 0x20231f : sepia ? 0xf6f0e3 : 0xfafaf7;
+    caption_text_ = dark ? 0xdce1d5 : sepia ? 0x514737 : 0x2e352d;
+    caption_hover_ = dark ? 0x30372a : sepia ? 0xf0e6d4 : 0xf0f2eb;
     BOOL value = dark;
     DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -203,11 +208,11 @@ void Window::paint()
             const float height=caption_height()*96.0f/GetDpiForWindow(hwnd_);
             target_->BeginDraw();
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
-            target_->CreateSolidColorBrush(D2D1::ColorF(dark_ ? 0x20211f : 0xf4f3ef), &brush);
+            target_->CreateSolidColorBrush(D2D1::ColorF(caption_background_), &brush);
             if (brush)
             {
                 target_->FillRectangle(D2D1::RectF(0, 0, size.width, height), brush.Get());
-                brush->SetColor(D2D1::ColorF(dark_ ? 0xe3e3dd : 0x30372f));
+                brush->SetColor(D2D1::ColorF(caption_text_));
                 if (text_)
                     target_->DrawTextW(title_.c_str(), static_cast<UINT32>(title_.size()), text_.Get(),
                                        D2D1::RectF(10, 0, std::max(10.f, size.width - 150), height), brush.Get(),
@@ -218,14 +223,11 @@ void Window::paint()
                     float x = size.width - 46 * (3 - i);
                     if (hot_ == hit)
                     {
-                        brush->SetColor(D2D1::ColorF(hit == HTCLOSE ? 0xc42b1c
-                                                     : dark_        ? 0x363832
-                                                                    : 0xe5e5df));
+                        brush->SetColor(D2D1::ColorF(hit == HTCLOSE ? 0xc42b1c : caption_hover_));
                         target_->FillRectangle(D2D1::RectF(x, 0, x + 46, height), brush.Get());
                     }
-                    brush->SetColor(D2D1::ColorF(hot_ == HTCLOSE && hit == HTCLOSE ? 0xffffff
-                                                 : dark_                           ? 0xe3e3dd
-                                                                                   : 0x30372f));
+                    brush->SetColor(D2D1::ColorF(
+                        hot_ == HTCLOSE && hit == HTCLOSE ? 0xffffff : caption_text_));
                     // Segoe Fluent Icons: ChromeMinimize, ChromeMaximize/Restore, ChromeClose.
                     const wchar_t glyph = i == 0 ? L'\uE921'
                                           : i == 1 ? (IsZoomed(hwnd_) ? L'\uE923' : L'\uE922')

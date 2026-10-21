@@ -151,8 +151,12 @@ int main()
             require(reopened_annotations.list(id).empty(), "annotation delete");
         }
         auto defaults = dr::default_settings();
-        require(defaults["application"]["shell"] == "mica" && defaults["reading"]["mode"] == "scroll",
+        require(defaults["application"]["shell"] == "mica" && defaults["reading"]["mode"] == "paged",
                 "settings defaults");
+        auto scroll_preferences = dr::normalize_settings(
+            {{"version", 2}, {"reading", {{"mode", "scroll"}}}});
+        require(scroll_preferences["reading"]["mode"] == "scroll",
+                "preserve an explicitly saved scroll preference");
         auto customized = dr::patch_settings(
             defaults, {{"application", {{"theme", "dark"}, {"animations", false}}},
                        {"reading", {{"fontSize", 24}, {"lineHeight", 2.2}, {"animation", "turn"}}}});

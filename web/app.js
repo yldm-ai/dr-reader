@@ -207,8 +207,18 @@ $("back-library").onclick = returnLibrary;
 $("open-settings").onclick = () => settingsPanel.open("application");
 $("reader-app-settings").onclick = () => settingsPanel.open("application");
 $("reader-settings").onclick = () => settingsPanel.open("reading");
+for (const mode of ["paged", "scroll"])
+  $(`mode-${mode}`).onclick = () => settingsPanel.update("reading", { mode });
 
 document.addEventListener("keydown", (event) => {
+  if (settingsPanel.applicationOpen) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      settingsPanel.closeApplication();
+    }
+    return;
+  }
+  if (event.defaultPrevented) return;
   const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(
     event.target.tagName,
   );

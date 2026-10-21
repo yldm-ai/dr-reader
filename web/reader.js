@@ -20,6 +20,19 @@ export class Reader {
     this.motion = new ReaderMotion();
     this.selection = null;
     this.editingAnnotation = null;
+    document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
+    document.addEventListener("pointerdown", (event) => {
+      if (!event.target.closest("#selection-menu")) this.hideSelection();
+    }, true);
+    document.addEventListener("scroll", () => this.hideSelection(), true);
+    window.addEventListener("resize", () => this.hideSelection());
+    window.addEventListener("blur", () => this.hideSelection());
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.dismissSelection()) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
 
     $("prev-page").onclick = () => this.turn(-1);
     $("next-page").onclick = () => this.turn(1);
@@ -110,7 +123,7 @@ export class Reader {
     await this.load(position.chapter || 0, position.ratio || 0);
     if (!this.doc) {
       this.book = null;
-      throw new Error("章节没有完成载入");
+      throw new Error(this.loadError || "章节没有完成载入");
     }
     this.motion.open($("reader-view"));
     if (book.warnings?.length)
@@ -289,6 +302,7 @@ export class Reader {
     this.query = query;
     this.annotationFocus = annotationId;
     this.loading = true;
+    this.loadError = "";
     const item = this.book.chapters[this.chapter];
     $("chapter-label").textContent = item.title;
     $("reader-loading").hidden = false;
@@ -338,6 +352,7 @@ export class Reader {
     } catch (error) {
       if (generation !== this.generation) return;
       this.loading = false;
+      this.loadError = error.message;
       $("reader-loading").hidden = true;
       toast(error.message);
     }
@@ -391,14 +406,24 @@ export class Reader {
         toast("无法打开这个链接");
       }
     });
+    doc.addEventListener("pointerdown", () => this.hideSelection());
+    doc.addEventListener("wheel", () => this.hideSelection(), { passive: true });
+    doc.addEventListener("touchmove", () => this.hideSelection(), { passive: true });
+    doc.addEventListener("selectionchange", () => {
+      if (doc.getSelection()?.isCollapsed) this.hideSelection();
+    });
     doc.addEventListener("mouseup", (event) => {
       if (event.target.closest?.("a")) return;
-      setTimeout(() => this.readSelection(), 0);
+      this.selectionTimer = setTimeout(() => this.readSelection(), 0);
     });
     doc.addEventListener("keyup", (event) => {
       if (event.shiftKey || event.key === "Shift") this.readSelection();
     });
     doc.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.dismissSelection()) {
+        event.preventDefault();
+        return;
+      }
       if (
         event.key === "Escape" ||
         (event.ctrlKey && ["o", "k"].includes(event.key.toLowerCase()))
@@ -462,13 +487,20 @@ export class Reader {
       },
       dictionaries: [],
     };
+    this.hideSelection();
     this.settings = settings.reading || settings;
+    for (const mode of ["paged", "scroll"]) {
+      const selected = this.settings.mode === mode;
+      $(`mode-${mode}`).classList.toggle("selected", selected);
+      $(`mode-${mode}`).setAttribute("aria-pressed", String(selected));
+    }
     this.motion.setAllowed(this.appSettings.animations);
     document.documentElement.style.setProperty(
       "--reading-width",
       `${this.settings.width}px`,
     );
     if (!this.doc || !this.style) return;
+    this.reflowing = true;
     const reading = this.settings;
     const colors =
       reading.theme === "dark"
@@ -484,8 +516,8 @@ export class Reader {
       ? ""
       : `body p{text-indent:${reading.textIndent}em!important;text-align:${reading.alignment}!important}`;
     const margin = paged
-      ? `margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(100vw - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(100vw - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
-      : `margin:0!important;padding:${reading.paddingY}px ${reading.paddingX}px 60px!important;height:auto!important;width:auto!important;column-count:auto!important;`;
+      ? `padding:0!important;column-count:auto!important;margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(100vw - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(100vw - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
+      : `margin:0!important;padding:${reading.paddingY}px ${reading.paddingX}px 60px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
     this.style.textContent = `html{background:${colors[0]}!important;color:${colors[1]}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors[0]}!important;color:${colors[1]}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-size:inherit!important;line-height:inherit!important;color:inherit!important}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors[2]}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:#8dac7855!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors[2]}55;border-radius:4px}`;
     this.reflow();
   }
@@ -508,7 +540,7 @@ export class Reader {
     const view = doc.defaultView;
     const anchor = this.anchor && doc.getElementById(this.anchor);
     if (anchor) {
-      anchor.scrollIntoView();
+      this.revealRect(anchor.getBoundingClientRect());
       this.anchor = "";
     } else if (this.query) {
       const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
@@ -520,7 +552,7 @@ export class Reader {
           range.setStart(node, position);
           range.setEnd(node, position + this.query.length);
           const rect = range.getBoundingClientRect();
-          view.scrollTo(view.scrollX + rect.left, view.scrollY + rect.top - 40);
+          this.revealRect(rect);
           break;
         }
       }
@@ -528,7 +560,7 @@ export class Reader {
     } else if (this.annotationFocus) {
       const range = this.annotationLayer?.ranges.get(this.annotationFocus);
       const rect = range?.getBoundingClientRect();
-      if (rect) view.scrollTo(view.scrollX, view.scrollY + rect.top - 70);
+      if (rect) this.revealRect(rect);
       this.annotationFocus = "";
     } else if (this.settings.mode === "paged") {
       this.page = Math.round(this.ratio * (this.pages - 1));
@@ -541,20 +573,31 @@ export class Reader {
       );
   }
 
+  revealRect(rect) {
+    const view = this.doc.defaultView;
+    if (this.settings.mode === "paged") {
+      const page = Math.max(0, Math.min(this.pages - 1,
+        Math.floor((view.scrollX + rect.left - this.settings.paddingX + 1) / Math.max(1, view.innerWidth))));
+      view.scrollTo(page * view.innerWidth, 0);
+    } else view.scrollTo(0, view.scrollY + rect.top - 40);
+  }
+
   reflow() {
-    if (!this.doc) return;
+    if (!this.doc || $("app").hidden) return;
     clearTimeout(this.reflowTimer);
     this.reflowTimer = setTimeout(() => {
-      if (!this.doc) return;
+      if (!this.doc || $("app").hidden) return;
       this.measure();
       this.refreshAnnotations();
       this.restore();
+      this.reflowing = false;
       if (!this.loading) this.report();
     }, 100);
   }
 
   scrolled() {
-    if (this.loading) return;
+    this.hideSelection();
+    if (this.loading || this.reflowing) return;
     this.report();
   }
 
@@ -674,6 +717,13 @@ export class Reader {
     }
   }
 
+  dismissSelection() {
+    if ($("selection-menu").hidden) return false;
+    this.hideSelection();
+    this.doc?.getSelection()?.removeAllRanges();
+    return true;
+  }
+
   readSelection() {
     if (!this.doc) return;
     const selection = this.doc.getSelection();
@@ -720,6 +770,7 @@ export class Reader {
   }
 
   hideSelection() {
+    clearTimeout(this.selectionTimer);
     $("selection-menu").hidden = true;
     if (!$("annotation-dialog").open) this.selection = null;
   }

@@ -17,13 +17,20 @@ Windows 本地 EPUB 阅读器。C++20 + Win32 / Direct2D / DirectWrite + WebView
 
 ## 构建
 
-需要 Windows 10/11、Visual Studio 2022 或更新版的“使用 C++ 的桌面开发”工具链、Windows SDK、CMake 3.24+ 和 WebView2 Evergreen Runtime。依赖由 CMake 下载固定版本，首次配置需要联网，不需要 vcpkg。前端是原生 ES modules，无需 npm 构建。
+需要 Windows 10/11、Visual Studio 2022 或更新版的“使用 C++ 的桌面开发”工具链、Windows SDK、CMake 3.24+、Node.js 22.18+、pnpm 12 和 WebView2 Evergreen Runtime。C++ 依赖由 CMake 下载固定版本，前端依赖由 pnpm 锁文件固定；首次配置需要联网，不需要 vcpkg。
 
 ```powershell
+pnpm install --frozen-lockfile
 cmake -S . -B build -A x64
 cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
+pnpm test
+pnpm test:browser
 ```
+
+前端采用 Vite + TypeScript 渐进迁移，现有阅读器保留轻量 DOM 实现，新图标、字体选择、下拉组件、设置比较与章节缓存使用严格类型检查。CMake 在前端源码变化时自动运行 `pnpm build`，将 `dist/` 打包产物复制到程序的 `web/` 目录；安装与便携打包也使用该产物，运行时无需 Node.js。
+
+`pnpm dev` 用于样式开发与热更新；书库、SQLite 和系统字体枚举仍由桌面程序提供。`pnpm test:browser` 使用本机 Edge 的独立无界面进程测试源码和生产包，结果与截图保存到 `build/browser-tests/`，不会使用日常浏览器配置。可通过 `DR_EDGE_PATH` 指定 Chromium/Edge 路径。
 
 也可以运行 `./scripts/build.ps1`；`CMakePresets.json` 的预设对应本机 Visual Studio 2026，使用 VS 2022 时执行上面的通用命令或向脚本传 `-Generator 'Visual Studio 17 2022'`。
 
@@ -54,7 +61,8 @@ ctest --test-dir build -C Release --output-on-failure
 app/          应用组合、COM 生命周期、WebView2 宿主、消息桥、串行后台任务
 ui/           不依赖业务的 Win32 / Direct2D / DirectWrite 窗口外壳
 engine/       不依赖 WebView2 的 C++ EPUB、DOM 拆分、书库、检索、SQLite 标注与设置
-web/          书架和阅读器界面；浏览器承担 UI、正文排版、选区与分页测量
+web/          JS/TypeScript 书架和阅读器；Vite 入口与严格类型的通用组件
+dist/         Vite 生成的部署静态资源（不提交）
 resources/    可再分发的原创示例 EPUB
 tests/        C++ 集成测试，运行时生成 EPUB / 恶意 ZIP 测试夹具
 tools/        无界面 EPUB 导入检查工具 dr-epub

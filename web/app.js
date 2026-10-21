@@ -1,5 +1,5 @@
 import { call, bookUrl, $, escape, toast, busy } from "./bridge.js";
-import { icon, hydrate } from "./icons.js";
+import { icon, hydrate } from "./icons.ts";
 import { Reader } from "./reader.js";
 import { SettingsPanel } from "./settings.js";
 
@@ -79,7 +79,7 @@ function render() {
   $("library-total").textContent = `${books.length} 本图书`;
 
   const grid = $("book-grid");
-  grid.replaceChildren();
+  const cards = document.createDocumentFragment();
   grid.classList.toggle("list-mode", listMode);
   for (const book of visible) {
     const card = document.createElement("button");
@@ -87,8 +87,9 @@ function render() {
     card.setAttribute("aria-label", `阅读 ${book.title}`);
     card.innerHTML = `<div class="cover-wrap">${cover(book)}</div><h3>${escape(book.title)}</h3><div class="book-author">${escape(book.author)}</div><div class="book-status">${book.lastRead ? `<span class="progress-track"><i style="width:${Math.round(book.progress * 100)}%"></i></span><span>已读 ${Math.round(book.progress * 100)}%</span>` : '<span class="new-label">未读</span><span>EPUB</span>'}</div>`;
     card.onclick = () => openBook(book.id);
-    grid.append(card);
+    cards.append(card);
   }
+  grid.replaceChildren(cards);
 
   $("empty-state").hidden = visible.length > 0;
   if (!visible.length) {
@@ -112,18 +113,21 @@ function render() {
   }
 
   const authors = $("authors");
-  authors.replaceChildren();
-  for (const name of [...new Set(books.map((book) => book.author))].sort()) {
+  const authorCounts = new Map();
+  for (const book of books) authorCounts.set(book.author, (authorCounts.get(book.author) || 0) + 1);
+  const authorButtons = document.createDocumentFragment();
+  for (const name of [...authorCounts.keys()].sort()) {
     const button = document.createElement("button");
-    button.textContent = `${name} · ${books.filter((book) => book.author === name).length}`;
+    button.textContent = `${name} · ${authorCounts.get(name)}`;
     button.onclick = () => {
       author = name;
       filter = "all";
       setNavigation();
       render();
     };
-    authors.append(button);
+    authorButtons.append(button);
   }
+  authors.replaceChildren(authorButtons);
 }
 
 function setNavigation() {
@@ -189,7 +193,11 @@ $("library-nav").onclick = (event) => {
 $("authors-toggle").onclick = () => {
   $("authors").hidden = !$("authors").hidden;
 };
-$("library-search").oninput = render;
+let searchTimer;
+$("library-search").oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(render, 80);
+};
 $("sort").onchange = render;
 $("grid-view").onclick = () => {
   listMode = false;

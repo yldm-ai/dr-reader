@@ -2,11 +2,14 @@ import { call, bookUrl, $, escape, toast } from "./bridge.js";
 import {
   anchorFromRange,
   rangeForAnchor,
+  textIndex,
 } from "./anchors.js";
 import { AnnotationLayer } from "./annotations.js";
 import { ReaderMotion } from "./motion.js";
-import { fontStack } from "./settings.js";
-import { icon } from "./icons.js";
+import { fontStack } from "./fonts.ts";
+import { sameReading } from "./settings-state.ts";
+import { ChapterCache } from "./chapter-cache.ts";
+import { icon } from "./icons.ts";
 
 export class Reader {
   constructor(onUpdate) {
@@ -19,6 +22,7 @@ export class Reader {
     this.generation = 0;
     this.saveTimer = null;
     this.turnQueue = Promise.resolve();
+    this.chapterCache = new ChapterCache();
     this.motion = new ReaderMotion();
     this.selection = null;
     this.editingAnnotation = null;
@@ -322,9 +326,14 @@ export class Reader {
     $("reader-loading").hidden = false;
     this.activeToc();
     try {
-      const response = await fetch(bookUrl(this.book, item.href));
-      if (!response.ok) throw new Error("无法加载章节文件");
-      let html = await response.text();
+      const url = bookUrl(this.book, item.href);
+      let html = this.chapterCache.get(url);
+      if (html === undefined) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("无法加载章节文件");
+        html = await response.text();
+        this.chapterCache.put(url, html);
+      }
       if (generation !== this.generation) return;
       const base = bookUrl(this.book, item.href);
       html = html.replace(
@@ -483,8 +492,9 @@ export class Reader {
         annotation.chapter === chapter &&
         annotation.href === this.book.chapters[chapter].href,
     );
+    const index = current.length ? textIndex(this.doc) : null;
     this.annotationLayer.set(current, (annotation) =>
-      rangeForAnchor(this.doc, annotation),
+      rangeForAnchor(this.doc, annotation, index),
     );
   }
 
@@ -504,6 +514,9 @@ export class Reader {
     this.hideSelection();
     this.settings = settings.reading || settings;
     this.motion.setAllowed(this.appSettings.animations);
+    if (this.appliedDocument === this.doc && sameReading(this.appliedReading, this.settings)) return;
+    this.appliedDocument = this.doc;
+    this.appliedReading = { ...this.settings };
     document.documentElement.style.setProperty(
       "--reading-width",
       `${this.settings.width}px`,
@@ -611,7 +624,7 @@ export class Reader {
     this.reflowTimer = setTimeout(() => {
       if (!this.doc || $("app").hidden) return;
       this.measure();
-      this.refreshAnnotations();
+      // CSS Highlight ranges track layout automatically; keep their text anchors intact.
       this.restore();
       this.reflowing = false;
       if (!this.loading) this.report();
@@ -1091,6 +1104,10 @@ export class Reader {
     this.annotationLayer?.clear();
     this.annotationLayer = null;
     this.doc = null;
+    this.style = null;
+    this.pageTail = null;
+    this.appliedDocument = null;
+    this.appliedReading = null;
     this.book = null;
     this.annotations = [];
     $("book-frame").srcdoc = "";

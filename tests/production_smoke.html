@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled application smoke test</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, label) => { if (!value) throw Error(label); };
+const until = async predicate => {
+  for (let i = 0; i < 150; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  throw Error('Timed out waiting for bundled application');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js"><\/script>`);
+  frame.srcdoc = html;
+  document.body.append(frame);
+  await until(() => frame.contentDocument.querySelector('.book-card'));
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  check(doc.querySelectorAll('.fluent-icon').length > 20, 'bundled icons did not hydrate');
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  const content = doc.getElementById('book-frame').contentDocument;
+  check(content.body.textContent.includes('原创的阅读测试文字'), 'bundled reader failed to load chapter');
+  check(doc.getElementById('page-indicator').textContent.includes('/'), 'bundled pagination did not initialize');
+  doc.getElementById('reader-settings').click();
+  doc.getElementById('setting-fontFamily-trigger').click();
+  check(doc.querySelector('.select-popup:popover-open'), 'bundled font picker failed to open');
+  const input = doc.querySelector('.select-popup:popover-open input');
+  input.value = 'yahei'; input.dispatchEvent(new win.Event('input'));
+  input.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  await until(() => win.nativeProbe.data.settings.reading.fontFamily === 'Microsoft YaHei');
+  doc.getElementById('reading-settings').close();
+  doc.getElementById('back-library').click();
+  await until(() => doc.getElementById('reader-view').hidden);
+  check(doc.getElementById('book-frame').srcdoc === '', 'closing a book must release the chapter document');
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  check(win.chapterRequests === 1, 'reopening an immutable cached chapter must avoid another fetch');
+  doc.getElementById('reader-settings').click();
+  check(!win.runtimeErrors.length, `Runtime errors: ${win.runtimeErrors.join('; ')}`);
+  output.textContent = 'PASS: production bundle bootstrap, Fluent icons, book open/reopen/cache, pagination, font selection and persistence';
+  document.documentElement.dataset.result = 'pass';
+} catch (error) {
+  output.textContent = 'FAIL\n' + error.stack;
+  document.documentElement.dataset.result = 'fail';
+}
+</script>

@@ -1,0 +1,22 @@
+{
+  "name": "dr-reader",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "engines": { "node": ">=22.18.0", "pnpm": ">=12 <13" },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "build": "pnpm typecheck && vite build",
+    "test": "node --experimental-strip-types --test tests/*_tests.mjs",
+    "test:browser": "pnpm build && node scripts/test-browser.mjs",
+    "test:serve": "vite --config vite.tests.config.ts --host 127.0.0.1 --port 8765 --strictPort"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "playwright-core": "1.64.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

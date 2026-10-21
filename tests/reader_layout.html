@@ -5,6 +5,8 @@
 <pre id="result">RUNNING</pre>
 <script type="module">
 import { Reader } from '../web/reader.js';
+import { anchorFromRange } from '../web/anchors.js';
+import { AnnotationLayer } from '../web/annotations.js';
 
 const settings = {
   application: { animations: false },
@@ -59,6 +61,21 @@ try {
     }
     reader.measure();
     check(reader.pages === pages, `${width}: repeated reflow added a phantom page`);
+    const annotationRange = doc.createRange();
+    annotationRange.selectNodeContents(doc.body.querySelector('p').firstChild);
+    const anchor = anchorFromRange(doc, annotationRange);
+    reader.book = { chapters: [{ href: 'fixture.html' }] };
+    reader.chapter = 0;
+    reader.annotations = Array.from({ length: 12 }, (_, id) => ({ ...anchor, id: String(id), chapter: 0, href: 'fixture.html', color: 'yellow', style: 'underline' }));
+    reader.annotationLayer = new AnnotationLayer(doc);
+    let scans = 0;
+    const originalWalker = doc.createTreeWalker.bind(doc);
+    doc.createTreeWalker = (...args) => { scans++; return originalWalker(...args); };
+    reader.refreshAnnotations();
+    check(scans === 1 && reader.annotationLayer.ranges.size === 12, 'annotation refresh must use one shared text scan');
+    const existingRange = reader.annotationLayer.ranges.get('0');
+    reader.apply({ ...settings, application: { animations: true } });
+    check(reader.annotationLayer.ranges.get('0') === existingRange, 'application settings must preserve annotation ranges');
     check(getComputedStyle(doc.body.firstElementChild).fontFamily.includes('Microsoft YaHei'),
       'publisher wrapper must inherit the selected reading font');
     reader.apply({ ...settings, reading: { ...settings.reading, mode: 'scroll' } });

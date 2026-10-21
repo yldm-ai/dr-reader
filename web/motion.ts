@@ -18,6 +18,17 @@ export class ReaderMotion {
   private opening: Animation | null = null;
   private readonly strip = new PageStrip();
   private stripKey = '';
+  private revision = 0;
+  private speed = 1;
+
+  /** Wheel input keeps every page transition, speeding up when more turns are waiting. */
+  setSpeed(speed: number) {
+    this.speed = speed;
+    this.strip.setSpeed(speed);
+    for (const animation of this.active?.animations ?? []) animation.updatePlaybackRate(speed);
+  }
+
+  async finished() { await this.strip.finished(); }
 
   setAllowed(value: boolean) { this.allowed = value; if (!value) this.cancel(); }
   enabled(effect: string) { return this.allowed && effect !== 'none'; }
@@ -43,6 +54,7 @@ export class ReaderMotion {
     if (this.active === transaction) this.active = null;
   }
   cancel() {
+    this.revision++;
     this.opening?.cancel(); this.opening = null;
     this.strip.reset();
     if (this.active) {
@@ -288,7 +300,11 @@ export class ReaderMotion {
     if (!frame) { await update(); return; }
     // In-chapter slides and covers run on the resident strip: they start in the same frame and
     // a further turn retargets them instead of waiting for them to finish.
-    if ((effect === 'slide' || effect === 'cover') && animated && !retainPage && !spread && this.strip.ready(this.stripKey)) {
+    const revision = this.revision, key = this.stripKey;
+    const resident = (effect === 'slide' || effect === 'cover') && animated && !retainPage && !spread &&
+      await this.strip.readyForTurn(element, frame, key);
+    if (revision !== this.revision || key !== this.stripKey) return;
+    if (resident) {
       this.opening?.cancel(); this.opening = null;
       if (this.active) { this.active.controller.abort(); this.cleanup(this.active); }
       await this.strip.turn(frame, effect, direction, duration, update);
@@ -316,7 +332,9 @@ export class ReaderMotion {
       const sign = direction < 0 ? -1 : 1;
       const options: KeyframeAnimationOptions = { duration, fill: 'both', easing: PAGE_EASING };
       const animate = (node: HTMLElement, keyframes: Keyframe[]) => {
-        const animation = node.animate(keyframes, options); transaction.animations.push(animation); return animation;
+        const animation = node.animate(keyframes, options);
+        animation.updatePlaybackRate(this.speed);
+        transaction.animations.push(animation); return animation;
       };
       if (effect === 'slide') {
         animate(oldPage, [{ transform: 'translateX(0)' }, { transform: `translateX(${-sign * 100}%)` }]);
@@ -328,7 +346,7 @@ export class ReaderMotion {
         animate(top, sign > 0 ? [{ transform: 'translateX(0)' }, { transform: 'translateX(-100%)' }]
           : [{ transform: 'translateX(-100%)' }, { transform: 'translateX(0)' }]);
       } else if (effect.startsWith('turn')) {
-        await this.turnPage(transaction, oldPage, newPage, effect, duration, direction, corner, spread);
+        await this.turnPage(transaction, oldPage, newPage, effect, duration / this.speed, direction, corner, spread);
       } else {
         animate(newPage, [{ opacity: 0 }, { opacity: 1 }]);
       }

@@ -3,6 +3,8 @@
 <title>Reader motion regression</title>
 <link rel="stylesheet" href="../web/styles.css">
 <pre id="result">RUNNING</pre>
+<div id="app"></div>
+<div id="toast" hidden></div>
 <div id="page-surface" class="page-surface" style="width:600px;height:360px;--reading-paper:#fffaf3">
   <iframe id="book-frame" sandbox="allow-same-origin"></iframe>
 </div>
@@ -24,7 +26,7 @@ try {
   const range = source.createRange(); range.selectNodeContents(source.querySelector('p').firstChild);
   source.defaultView.CSS.highlights.set('test-mark', new source.defaultView.Highlight(range));
   let updates = 0;
-  let pending = motion.change(host, 'slide', 600, 1, () => { updates++; source.defaultView.scrollTo(600, 0); });
+  let pending = motion.change(host, 'slide', 600, 1, () => { updates++; source.defaultView.scrollTo(600, 0); }, true);
   await until(() => host.querySelector('.page-motion')?.getAnimations({ subtree: true }).length === 2);
   let overlay = host.querySelector('.page-motion');
   let animations = overlay.getAnimations({ subtree: true });
@@ -132,6 +134,62 @@ try {
     await until(() => !host.querySelector('.motion-strip.active'));
     check(frame.style.visibility === '' && frame.contentWindow.scrollX === 0, `${mode}: the settled turn must show the live page`);
   }
+  // A turn immediately after a new layout must not fall back to a blocking snapshot animation.
+  await load(original);
+  frame.contentWindow.scrollTo(0, 0);
+  motion.prepare(host, 'cover', 'cold-cover');
+  await motion.change(host, 'cover', 1200, 1, () => frame.contentWindow.scrollTo(600, 0));
+  check(host.querySelector('.motion-strip.active'), 'cold cover must use the interruptible strip');
+  check(!host.querySelector('.page-motion'), 'cold cover must not use a blocking snapshot');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const leaving = [...host.querySelectorAll('.motion-strip .motion-page.visible')]
+    .find(pane => pane.querySelector('iframe').contentWindow.scrollX === 0);
+  const beforeReverse = new DOMMatrixReadOnly(getComputedStyle(leaving).transform).m41;
+  await motion.change(host, 'cover', 1200, -1, () => frame.contentWindow.scrollTo(0, 0));
+  const afterReverse = new DOMMatrixReadOnly(getComputedStyle(leaving).transform).m41;
+  check(Math.abs(beforeReverse - afterReverse) < 40, 'cold cover must reverse from its current position');
+  motion.cancel();
+  motion.prepare(host, 'cover', 'cancel-cold-cover');
+  let cancelledUpdates = 0;
+  const cancelledCover = motion.change(host, 'cover', 1200, 1, () => { cancelledUpdates++; });
+  motion.cancel();
+  await cancelledCover;
+  check(cancelledUpdates === 0 && !host.querySelector('.motion-strip.active'),
+    'cancelling during preload must not commit a stale turn');
+  const burstHtml = `<style>html{overflow:hidden}body{margin:0;display:flex;width:6000px;height:360px}section{flex:0 0 600px}</style>${
+    Array.from({ length: 10 }, (_, i) => `<section>第 ${i + 1} 页</section>`).join('')}`;
+  await load(burstHtml);
+  motion.prepare(host, 'cover', 'burst-cover');
+  const { Reader } = await import('../web/reader.js');
+  const reader = Object.create(Reader.prototype);
+  Object.assign(reader, {
+    doc: frame.contentDocument, book: { id: 'burst', chapters: [{}] }, chapter: 0,
+    page: 0, pages: 10, navigationRevision: 0, turnQueue: Promise.resolve(), motion,
+    settings: { mode: 'paged', animation: 'cover', animationDuration: 600 },
+    hideSelection() {},
+    report() { this.page = Math.round(frame.contentWindow.scrollX / 600); },
+  });
+  const wheel = deltaY => reader.wheel({ deltaY, deltaX: 0, clientY: 100, preventDefault() {} });
+  const burst = Promise.all(Array.from({ length: 8 }, () => wheel(120)));
+  for (let page = 1; page <= 8; page++) {
+    await until(() => frame.contentWindow.scrollX === page * 600 &&
+      host.querySelector('.motion-strip')?.getAnimations({ subtree: true }).length);
+    const running = host.querySelector('.motion-strip').getAnimations({ subtree: true });
+    check(running.length === 1, 'each queued cover turn must animate a single departing page');
+    if (page === 1) {
+      await running[0].ready;
+      check(running[0].playbackRate > 1, 'queued wheel turns must accelerate the animation');
+      running[0].pause();
+      await new Promise(resolve => setTimeout(resolve, 40));
+      check(frame.contentWindow.scrollX === 600, 'queued turns must not commit before the visible animation finishes');
+    }
+    running.forEach(animation => animation.finish());
+  }
+  await burst;
+  check(frame.contentWindow.scrollX === 4800, 'a wheel burst must animate all eight pages in order');
+  await Promise.all([wheel(-120), wheel(-120), wheel(-120)]);
+  check(frame.contentWindow.scrollX === 3000 && frame.style.visibility === '',
+    'a reversed wheel burst must finish on its accumulated destination');
   // Two-page spreads turn as StPageFlip's own landscape book, soft or hard, in both directions.
   host.style.width = '980px';
   const spreadHtml = `<style>html{overflow:hidden}body{margin:0;display:flex;width:2940px;height:360px;background:#fffaf3}section{flex:0 0 490px;box-sizing:border-box;padding:30px;font:20px 'Microsoft YaHei'}</style>${

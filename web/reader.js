@@ -30,6 +30,7 @@ export class Reader {
     this.generation = 0;
     this.saveTimer = null;
     this.turnQueue = Promise.resolve();
+    this.navigationRevision = 0;
     this.chapterCache = new ChapterCache();
     this.motion = new ReaderMotion();
     this.selection = null;
@@ -436,6 +437,8 @@ export class Reader {
     corner = "top",
   ) {
     if (!this.book) return;
+    // Explicit navigation invalidates old input; a queued page turn across chapters does not.
+    if (!direction) this.navigationRevision = (this.navigationRevision ?? 0) + 1;
     clearTimeout(this.saveTimer);
     clearTimeout(this.tapTimer);
     await this.flush();
@@ -1025,10 +1028,10 @@ export class Reader {
     const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
     if (!delta) return;
     event.preventDefault();
-    if (this.loading || this.reflowing) return;
+    if (this.reflowing) return;
     // Each wheel event advances one page, independent of the OS scroll distance.
-    // Serializing turns also lets consecutive notches finish their animations.
-    return this.turn(delta > 0 ? 1 : -1, this.cornerAt(event));
+    // Keep notches received during a queued chapter load, too.
+    return this.turn(delta > 0 ? 1 : -1, this.cornerAt(event), true);
   }
 
   /** Book-page half under a pointer event, from the shell or from inside the book frame. */
@@ -1039,14 +1042,33 @@ export class Reader {
     return pageCorner(y - page.top, page.height);
   }
 
-  turn(direction, corner = "top") {
-    const doc = this.doc;
-    const generation = this.generation;
+  turn(direction, corner = "top", wheel = false) {
+    const revision = this.navigationRevision;
+    const bookId = this.book?.id;
     const mode = this.settings?.mode;
-    this.turnQueue = this.turnQueue.then(() => {
-      if (doc !== this.doc || generation !== this.generation || mode !== this.settings?.mode ||
-          $("app").hidden || document.querySelector("dialog[open]")) return;
-      return this.turnPage(direction, corner);
+    let backlog;
+    if (wheel) {
+      if (this.wheelBacklog?.revision !== revision)
+        this.wheelBacklog = { revision, count: 0 };
+      backlog = this.wheelBacklog;
+      backlog.count++;
+      this.motion?.setSpeed(Math.min(10, 1 + (backlog.count - 1) * .6));
+    }
+    this.turnQueue = this.turnQueue.then(async () => {
+      try {
+        if (revision !== this.navigationRevision || bookId !== this.book?.id || mode !== this.settings?.mode ||
+            $("app").hidden || document.querySelector("dialog[open]")) return;
+        await this.turnPage(direction, corner);
+        // Resident turns resolve as soon as they start. Wheel notches must wait for the
+        // visible turn to finish so every queued page gets its own animation.
+        if (wheel) await this.motion?.finished();
+      } finally {
+        if (backlog) {
+          backlog.count--;
+          if (this.wheelBacklog === backlog)
+            this.motion?.setSpeed(Math.min(10, 1 + Math.max(0, backlog.count - 1) * .6));
+        }
+      }
     }).catch((error) => toast(error.message));
     return this.turnQueue;
   }
@@ -1629,6 +1651,7 @@ export class Reader {
   }
 
   async close() {
+    this.navigationRevision = (this.navigationRevision ?? 0) + 1;
     await this.flush();
     ++this.generation;
     this.motion.cancel();

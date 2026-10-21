@@ -20,18 +20,38 @@ export class PageStrip {
   private key = '';
   private wanted = '';
   private loadTimer?: ReturnType<typeof setTimeout>;
+  private loading?: Promise<void>;
   private panes: Pane[] = [];
   private current = 0;
   private mode: StripMode = 'slide';
   private frame?: HTMLIFrameElement;
   private frameVisibility = '';
   private settleToken = 0;
+  private completion: Promise<void> = Promise.resolve();
+  private speed = 1;
+
+  finished(): Promise<void> { return this.completion; }
+
+  setSpeed(speed: number): void {
+    this.speed = speed;
+    for (const pane of this.panes) pane.animation?.updatePlaybackRate(speed);
+  }
 
   /** True while pages are moving or about to settle back onto the live document. */
   get active(): boolean { return this.panes.length > 0; }
 
   ready(key: string): boolean {
     return this.key === key && this.slots.length === SLOTS && this.slots.every(slot => slot.ready);
+  }
+
+  /** The first turn also uses resident pages, even before the idle preload has run. */
+  async readyForTurn(host: HTMLElement, live: HTMLIFrameElement, key: string): Promise<boolean> {
+    if (this.ready(key)) return true;
+    this.wanted = key;
+    clearTimeout(this.loadTimer);
+    if (this.key !== key || !this.loading) this.load(host, live, key);
+    await this.loading;
+    return this.wanted === key && this.ready(key);
   }
 
   /**
@@ -53,18 +73,22 @@ export class PageStrip {
     this.ensureLayer(host);
     this.key = key;
     const html = '<!doctype html>' + doc.documentElement.outerHTML;
-    for (const slot of this.slots) {
+    this.loading = Promise.all(this.slots.map(slot => new Promise<void>(resolve => {
       slot.ready = false;
+      const timer = setTimeout(resolve, 1500);
+      const done = () => { clearTimeout(timer); resolve(); };
+      slot.frame.onerror = done;
       slot.frame.onload = async () => {
         const target = slot.frame.contentDocument;
-        if (!target || this.key !== key) return;
+        if (!target || this.key !== key) { done(); return; }
         await target.fonts.ready;
-        if (this.key !== key) return;
+        if (this.key !== key) { done(); return; }
         copyHighlights(doc, target);
         slot.ready = true;
+        done();
       };
       slot.frame.srcdoc = html;
-    }
+    }))).then(() => {});
   }
 
   private ensureLayer(host: HTMLElement): void {
@@ -141,9 +165,10 @@ export class PageStrip {
       pane.animation = pane.slot.pane.animate(
         [{ transform: `translate(${from}px, 0)` }, { transform: `translate(${to}px, 0)` }],
         { duration, easing: PAGE_EASING });
+      pane.animation.updatePlaybackRate(this.speed);
       animations.push(pane.animation);
     }
-    Promise.all(animations.map(animation => animation.finished)).then(
+    this.completion = Promise.all(animations.map(animation => animation.finished)).then(
       () => { if (token === this.settleToken) this.settle(); }, () => { /* superseded */ });
   }
 
@@ -194,8 +219,11 @@ export class PageStrip {
 
   /** Forgets the loaded copies, e.g. when the chapter, typography or highlights change. */
   invalidate(): void {
+    clearTimeout(this.loadTimer);
+    this.wanted = '';
     this.reset();
     this.key = '';
+    this.loading = undefined;
     for (const slot of this.slots) slot.ready = false;
   }
 }

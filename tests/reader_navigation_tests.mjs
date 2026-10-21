@@ -14,7 +14,7 @@ function reader() {
   const value = Object.create(Reader.prototype);
   const view = { innerWidth: 700, scrollX: 0, scrollTo(x) { this.scrollX = x; } };
   Object.assign(value, {
-    doc: { defaultView: view }, generation: 1, settings: { mode: 'paged' },
+    doc: { defaultView: view }, generation: 1, navigationRevision: 0, settings: { mode: 'paged' },
     turnQueue: Promise.resolve(), page: 0, pages: 8, chapter: 0,
     book: { chapters: [{}, {}] }, loading: false, reflowing: false,
     hideSelection() {},
@@ -59,6 +59,29 @@ test('consecutive notches complete in order instead of cancelling animations', a
   assert.equal(value.page, 2);
 });
 
+test('wheel backlog speeds up motion but waits for each visible page to finish', async () => {
+  const value = reader();
+  const pages = [], speeds = [];
+  let finish;
+  value.animatePageChange = async (direction, update) => { update(); pages.push(value.doc.defaultView.scrollX / 700); };
+  value.motion = {
+    setSpeed(speed) { speeds.push(speed); },
+    finished() { return new Promise(resolve => { finish = resolve; }); },
+  };
+  const turns = [120, 120, 120, -120].map(delta => value.wheel(wheel(delta)));
+  for (const [index, page] of [1, 2, 3, 2].entries()) {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(value.page, page);
+    assert.equal(pages.length, index + 1, 'later pages must wait for the current animation');
+    finish();
+  }
+  await Promise.all(turns);
+  assert.deepEqual(pages, [1, 2, 3, 2]);
+  assert.ok(Math.max(...speeds) > 1);
+  assert.ok(Math.max(...speeds) <= 10);
+  assert.equal(speeds.at(-1), 1);
+});
+
 test('scroll mode, zoom gestures and zero deltas retain their default behavior', async () => {
   const value = reader();
   const zoom = wheel(120, { ctrlKey: true });
@@ -74,16 +97,43 @@ test('scroll mode, zoom gestures and zero deltas retain their default behavior',
   assert.equal(value.page, 0);
 });
 
-test('pending turns cannot affect a different chapter or reading mode', async () => {
+test('pending turns cannot affect an explicit navigation or a different reading mode', async () => {
   const value = reader();
   const queued = value.wheel(wheel(120));
-  value.generation++;
+  value.navigationRevision++;
   await queued;
   assert.equal(value.page, 0);
   const modeChange = value.wheel(wheel(120));
   value.settings.mode = 'scroll';
   await modeChange;
   assert.equal(value.page, 0);
+});
+
+test('wheel notches survive a chapter boundary, including input during loading', async () => {
+  const value = reader();
+  value.page = 7;
+  let finishLoad;
+  let started;
+  const loading = new Promise(resolve => { started = resolve; });
+  value.load = async function(chapter) {
+    this.loading = true;
+    this.generation++;
+    started();
+    await new Promise(resolve => { finishLoad = resolve; });
+    this.chapter = chapter;
+    this.doc = { defaultView: this.doc.defaultView };
+    this.doc.defaultView.scrollTo(0);
+    this.page = 0;
+    this.loading = false;
+  };
+  const turns = [value.wheel(wheel(120)), value.wheel(wheel(120))];
+  await loading;
+  turns.push(value.wheel(wheel(120)), value.wheel(wheel(120)), value.wheel(wheel(-120)));
+  finishLoad();
+  await Promise.all(turns);
+  assert.equal(value.chapter, 1);
+  assert.equal(value.page, 2);
+  assert.equal(value.corners.length, 4);
 });
 
 test('forward at chapter end and backward at chapter start navigate chapters', async () => {

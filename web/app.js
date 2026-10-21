@@ -39,7 +39,7 @@ window.chrome?.webview?.addEventListener("message", async ({ data }) => {
 function cover(book, className = "cover-image") {
   return book.cover
     ? `<img class="${className}" src="${escape(bookUrl(book, book.cover))}" alt="${escape(book.title)}封面" loading="lazy">`
-    : `<div class="cover-fallback">${escape(book.title)}<small>${escape(book.author)}</small></div>`;
+    : `<div class="cover-fallback ${className}">${escape(book.title)}<small>${escape(book.author)}</small></div>`;
 }
 
 function render() {

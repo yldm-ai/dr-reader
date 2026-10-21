@@ -85,9 +85,22 @@ try {
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
         await capture('library-light.png');
+        const coverHeight = await app.locator('.continue-cover').evaluate(el => el.getBoundingClientRect().height);
+        if (coverHeight > 80) throw Error('continue reading cover expanded beyond its compact card');
         // Exercise immersive mode through the shipped controls, then recover without a toolbar.
         await app.locator('.book-card').first().click();
         await app.locator('#reader-loading').waitFor({ state: 'hidden' });
+        const checkToolbar = () => app.evaluate(() => {
+          const back = document.querySelector('#back-library');
+          const arrow = back.querySelector('.fluent-icon').getBoundingClientRect();
+          const actions = document.querySelector('.reader-actions').getBoundingClientRect();
+          return arrow.left >= 0 && arrow.left <= 14 && actions.right <= innerWidth &&
+            back.getBoundingClientRect().right < actions.left;
+        });
+        if (!await checkToolbar()) throw Error('reader toolbar must align left without overlapping actions');
+        await app.locator('html').evaluate(el => el.style.width = '460px');
+        if (!await checkToolbar()) throw Error('narrow reader toolbar overlaps or loses left alignment');
+        await app.locator('html').evaluate(el => el.style.width = '');
         await app.locator('#reader-settings').click();
         await app.locator('#immersive-reading').click();
         await app.waitForFunction(() => document.getElementById('reader-view').dataset.toolbar === 'false');

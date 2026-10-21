@@ -12,6 +12,8 @@ void write_file(const fs::path &path, std::string_view data);
 void write_atomic(const fs::path &path, std::string_view data);
 std::string url_decode(std::string_view value);
 std::string url_encode(std::string_view value);
+// UTF-16 code units match DOM Range and Text offsets on WebView2.
+size_t utf16_length(std::string_view utf8);
 // Resolve archive URLs using URI separators, rejecting traversal outside the EPUB.
 std::string resolve_href(std::string_view base, std::string_view href);
 bool external_url(std::string_view value);

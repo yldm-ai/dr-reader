@@ -1,4 +1,5 @@
 #include "dr/library.h"
+#include "dr/settings.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -40,6 +41,7 @@ int64_t now()
 Library::Library(fs::path root) : root_(std::move(root))
 {
     fs::create_directories(root_ / "books");
+    annotations_=std::make_unique<AnnotationStore>(root_/"reader.sqlite3");
 }
 fs::path Library::book_path(const std::string &id) const
 {
@@ -49,11 +51,16 @@ fs::path Library::book_path(const std::string &id) const
 }
 Json Library::get(const std::string &id) const
 {
-    return Json::parse(read_file(book_path(id) / "book.json"));
+    auto book=Json::parse(read_file(book_path(id) / "book.json"));
+    annotations_->migrate_bookmarks(id,book.value("bookmarks",Json::array()));
+    book["bookmarks"]=annotations_->bookmarks(id);
+    return book;
 }
 void Library::store(const std::string &id, const Json &book) const
 {
-    write_atomic(book_path(id) / "book.json", book.dump(2));
+    auto metadata=book;
+    metadata.erase("bookmarks");
+    write_atomic(book_path(id) / "book.json", metadata.dump(2));
 }
 Json Library::list() const
 {
@@ -120,14 +127,7 @@ Json Library::toggle_bookmark(const std::string &id, const Json &mark)
     double r = mark.value("ratio", 0.0);
     if (c < 0 || static_cast<size_t>(c) >= book["chapters"].size() || !std::isfinite(r) || r < 0 || r > 1)
         throw std::runtime_error("无效书签");
-    auto &marks = book["bookmarks"];
-    auto it = std::find_if(marks.begin(), marks.end(), [&](auto &m)
-                           { return m["chapter"] == c && std::abs(m.value("ratio", 0.0) - r) < 0.02; });
-    if (it != marks.end())
-        marks.erase(it);
-    else
-        marks.push_back({{"chapter", c}, {"ratio", r}, {"title", mark.value("title", std::string())}});
-    store(id, book);
+    book["bookmarks"]=annotations_->toggle_bookmark(id,{{"chapter",c},{"ratio",r},{"title",mark.value("title",std::string())}});
     return book;
 }
 Json Library::search(const std::string &id, const std::string &query) const
@@ -162,37 +162,22 @@ Json Library::settings() const
     {
         try
         {
-            return Json::parse(read_file(p));
+            return normalize_settings(Json::parse(read_file(p)));
         }
         catch (const std::exception &)
         {
         }
     }
-    return {{"shell", "mica"},       {"theme", "light"}, {"fontSize", 20}, {"lineHeight", 1.9},
-            {"fontFamily", "serif"}, {"mode", "scroll"}, {"width", 760}};
+    return default_settings();
 }
 Json Library::save_settings(const Json &patch)
 {
-    auto s = settings();
-    for (auto it = patch.begin(); it != patch.end(); ++it)
-    {
-        if (it.key() == "shell" && (it.value() == "mica" || it.value() == "direct2d"))
-            s[it.key()] = it.value();
-        else if (it.key() == "theme" &&
-                 (it.value() == "light" || it.value() == "sepia" || it.value() == "dark"))
-            s[it.key()] = it.value();
-        else if (it.key() == "mode" && (it.value() == "scroll" || it.value() == "paged"))
-            s[it.key()] = it.value();
-        else if (it.key() == "fontFamily" && (it.value() == "serif" || it.value() == "sans-serif"))
-            s[it.key()] = it.value();
-        else if (it.key() == "fontSize" && it.value().is_number())
-            s[it.key()] = std::clamp(it.value().get<int>(), 14, 36);
-        else if (it.key() == "lineHeight" && it.value().is_number())
-            s[it.key()] = std::clamp(it.value().get<double>(), 1.3, 2.5);
-        else if (it.key() == "width" && it.value().is_number())
-            s[it.key()] = std::clamp(it.value().get<int>(), 480, 1100);
-    }
+    auto s = patch_settings(settings(),patch);
     write_atomic(root_ / "settings.json", s.dump(2));
     return s;
 }
+Json Library::annotations(const std::string& id) const {get(id);return annotations_->list(id);}
+Json Library::save_annotation(const std::string& id,const Json& annotation){auto book=get(id);int chapter=annotation.at("chapter");if(chapter<0||static_cast<size_t>(chapter)>=book["chapters"].size()||annotation.at("href")!=book["chapters"][chapter]["href"])throw std::runtime_error("标注章节不属于当前书籍");return annotations_->save(id,annotation);}
+void Library::remove_annotation(const std::string& id,const std::string& annotation_id){get(id);annotations_->remove(id,annotation_id);}
+std::string Library::lookup_url(const std::string& dictionary,const std::string& text)const{return dictionary_url(settings(),dictionary,text);}
 } // namespace dr

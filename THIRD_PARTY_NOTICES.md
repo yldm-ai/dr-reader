@@ -7,6 +7,7 @@ Dependencies are downloaded at configure time and are not copied from the local 
 | pugixml | 1.15 | MIT — https://github.com/zeux/pugixml |
 | nlohmann/json | 3.12.0 | MIT — https://github.com/nlohmann/json |
 | miniz | 3.0.2 | MIT — https://github.com/richgel999/miniz |
+| SQLite | 3.53.4 amalgamation | Public domain — https://www.sqlite.org/copyright.html |
 | Microsoft.Web.WebView2 SDK | 1.0.2903.40 | Microsoft SDK license — https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40 |
 
 Preserve their license texts when distributing compiled artifacts. The `scripts/package.ps1` script collects those texts into the portable output.

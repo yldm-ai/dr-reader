@@ -4,9 +4,23 @@
 
 `ui` 只负责 HWND、非客户区、DPI 和 Direct2D 绘制，不读取书库，也不依赖 WebView2。`app` 组合窗口、WebView2 和 `engine`。`engine` 负责 EPUB 的所有持久内容处理，不包含界面或浏览器代码。
 
-WebView2 主页面发 `{id, method, params}` JSON 请求，C++ 返回 `{id, result}` 或 `{id, error}`。命令包含 `bootstrap`、`list`、`import`、`open`、`position`、`bookmark`、`search`、`settings`、`close`。文件选择器在 COM STA/UI 线程运行；导入、XML、拆分、检索和存储统一由后台串行队列处理，结果通过窗口消息回到 UI 线程。原生 WebView2 对象不跨线程调用。
+WebView2 主页面发 `{id, method, params}` JSON 请求，C++ 返回 `{id, result}` 或 `{id, error}`。命令包含 `bootstrap`、`list`、`import`、`open`、`position`、`bookmark`、`search`、`settings`、`annotations`、`annotation.save`、`annotation.delete`、`lookup`、`copy`、`close`。文件选择器在 COM STA/UI 线程运行；导入、XML、拆分、检索和存储统一由后台串行队列处理，结果通过窗口消息回到 UI 线程。原生 WebView2 对象不跨线程调用。
+
+```mermaid
+flowchart LR
+  A["WebView2<br/>书架、正文、选区"] -->|"JSON message"| B["Application<br/>消息校验与调度"]
+  B --> C["Library / AnnotationStore<br/>串行工作线程"]
+  C --> D["EPUB 缓存"]
+  C --> E["reader.sqlite3"]
+  C --> F["settings.json"]
+  B --> G["Win32 Shell<br/>Mica / Direct2D"]
+```
 
 关闭窗口时前端提交最终位置，再请求关闭；原生设置超时兜底。已进入后台队列的存储操作在应用对象退出时完成。
+
+设置采用版本 2 的两组模型：`application` 包含界面主题、Mica/Direct2D 外壳、动画、选词菜单与查词网站；`reading` 只包含正文排版、分页与翻页动画。旧的扁平设置文件在读取时迁移。C++ 负责枚举本机字体、验证取值、规范化 URL 模板、保存设置，并把外壳变化投递回窗口线程。
+
+标注表位于 `<data-root>/reader.sqlite3`。`annotations` 保存章节与 href、UTF-16 文本偏移、原文、前后 32 个 UTF-16 单元的上下文、笔记、颜色和样式；`bookmarks` 保存章节与相对位置；`migrations` 防止同一本书的旧 JSON 书签重复导入。SQLite 启用 WAL 与完整同步。SQLite 连接与书库对象一样只由串行工作线程访问。
 
 ## 导入管线
 
@@ -34,8 +48,11 @@ WebView2 主页面发 `{id, method, params}` JSON 请求，C++ 返回 `{id, resu
 - `https://app.dr-reader.local` 仅映射发布的 `web/` 静态资源。
 - `https://books.dr-reader.local` 仅映射书库目录，用于本地取回缓存 XHTML、封面和资源。
 - 应用获取 C++ 已处理的 XHTML，插入确定的本地 base，再放到 `sandbox="allow-same-origin"` 的 srcdoc iframe；不开放 `allow-scripts`。应用仅通过 DOM 注入阅读样式、处理点击和测量浏览器排版后的尺寸。
+- 选区和正文标注都发生在 WebView2 中。前端用 CSS Custom Highlight API 绘制五色高亮与下划线，不修改 EPUB 的 XHTML；C++ 只负责数据库校验与持久化。标注恢复时先尝试保存的偏移，再以原文和上下文唯一匹配，重排后偏移变化仍可定位。
+- 打开书籍、跨章节翻页与页内翻页使用 Web Animations API。动画受应用设置和 `prefers-reduced-motion` 双重控制，关闭后立即更新页面。
 - 书籍 HTML 的 script、事件属性、嵌套 frame、object 等被 C++ 清理；额外 CSP 禁用脚本、网络连接和表单。
 - native bridge 只接受来源完全等于应用 `index.html` 的消息；不暴露 host objects、不允许任意文件路径导入、不允许网页导航替换应用或打开新窗口。
+- 复制文字、打开外部查词网站由 C++ 原生接口执行；正文脚本始终禁用，原生消息队列限制请求体大小。
 - 封面和正文资源仍需浏览器进行字体、图像及 CSS 解码，这属于排版职责。C++ 不尝试复制浏览器布局引擎。
 
 WebView2 本地资源映射参考 [Microsoft 文档](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/working-with-local-content)。云母背景采用 [DWM_SYSTEMBACKDROP_TYPE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)，Windows 11 22H2 以下回退标准标题栏。

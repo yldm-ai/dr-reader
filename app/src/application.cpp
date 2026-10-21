@@ -1,8 +1,19 @@
 #include "application.h"
+#include "dr/settings.h"
 #include <shobjidl.h>
 #include <stdexcept>
+#include <set>
+#include <shellapi.h>
 namespace dr
 {
+namespace {
+Json installed_fonts(){Microsoft::WRL::ComPtr<IDWriteFactory> factory;Json result=Json::array();if(FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),reinterpret_cast<IUnknown**>(factory.GetAddressOf()))))return result;
+ Microsoft::WRL::ComPtr<IDWriteFontCollection> collection;if(FAILED(factory->GetSystemFontCollection(&collection)))return result;std::set<std::string> names;
+ for(UINT32 i=0;i<collection->GetFontFamilyCount();++i){Microsoft::WRL::ComPtr<IDWriteFontFamily> family;Microsoft::WRL::ComPtr<IDWriteLocalizedStrings> localized;if(FAILED(collection->GetFontFamily(i,&family))||FAILED(family->GetFamilyNames(&localized)))continue;UINT32 index=0;BOOL exists=FALSE;localized->FindLocaleName(L"zh-cn",&index,&exists);if(!exists)localized->FindLocaleName(L"en-us",&index,&exists);if(!exists)index=0;UINT32 length=0;localized->GetStringLength(index,&length);std::wstring name(length+1,L'\0');if(SUCCEEDED(localized->GetString(index,name.data(),length+1))){name.resize(length);names.insert(narrow(name));}}
+ for(auto& name:names)result.push_back(name);return result;}
+void copy_text(HWND owner,const std::string& text){if(text.size()>65536)throw std::runtime_error("复制内容过长");auto wide=widen(text);auto bytes=(wide.size()+1)*sizeof(wchar_t);HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE,bytes);if(!memory)throw std::runtime_error("无法分配剪贴板内存");auto data=GlobalLock(memory);if(!data){GlobalFree(memory);throw std::runtime_error("无法锁定剪贴板内存");}memcpy(data,wide.c_str(),bytes);GlobalUnlock(memory);
+ if(!OpenClipboard(owner)){GlobalFree(memory);throw std::runtime_error("剪贴板正被其他程序使用");}EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,memory)){CloseClipboard();GlobalFree(memory);throw std::runtime_error("无法写入剪贴板");}CloseClipboard();}
+}
 Application::Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell)
     : library_(std::move(root)), assets_(std::move(assets)), initial_files_(std::move(files)),
       shell_override_(std::move(shell)), thread_([this](std::stop_token stop) { worker(stop); })
@@ -41,9 +52,10 @@ void Application::enqueue(std::function<void()> work)
 }
 void Application::apply_settings(const Json &s)
 {
-    window_.set_style(s.value("shell", std::string("mica")) == "direct2d" ? ShellStyle::Direct2D
+    auto app=s.at("application");
+    window_.set_style(app.value("shell", std::string("mica")) == "direct2d" ? ShellStyle::Direct2D
                                                                           : ShellStyle::Mica);
-    window_.set_dark(s.value("theme", std::string("light")) == "dark");
+    window_.set_dark(app.value("theme", std::string("light")) == "dark");
 }
 std::vector<fs::path> Application::pick_books()
 {
@@ -87,6 +99,7 @@ void Application::receive(const Json &request)
     auto id = request["id"];
     auto method = request["method"].get<std::string>();
     auto params = request.value("params", Json::object());
+    if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;
     if (method == "import")
     {
@@ -127,9 +140,11 @@ void Application::receive(const Json &request)
                     result = {{"books", library_.list()},
                               {"settings", library_.settings()},
                               {"dataPath", utf8(library_.root())},
+                              {"fonts",installed_fonts()},
+                              {"defaults",default_settings()},
                               {"importErrors", errors}};
                     if (!shell_override_.empty())
-                        result["settings"]["shell"] = shell_override_;
+                        result["settings"]["application"]["shell"] = shell_override_;
                 }
                 else if (method == "list")
                     result = library_.list();
@@ -167,6 +182,10 @@ void Application::receive(const Json &request)
                     result = library_.toggle_bookmark(params.at("id"), params.at("mark"));
                 else if (method == "search")
                     result = library_.search(params.at("id"), params.at("query"));
+                else if(method=="annotations")result=library_.annotations(params.at("id"));
+                else if(method=="annotation.save")result=library_.save_annotation(params.at("id"),params.at("annotation"));
+                else if(method=="annotation.delete"){library_.remove_annotation(params.at("id"),params.at("annotationId"));result=true;}
+                else if(method=="lookup"){auto url=library_.lookup_url(params.at("dictionaryId"),params.at("text"));window_.post([this,id,url]{auto result=ShellExecuteW(window_.handle(),L"open",widen(url).c_str(),nullptr,nullptr,SW_SHOWNORMAL);if(reinterpret_cast<INT_PTR>(result)>32)webview_.send({{"id",id},{"result",true}});else webview_.send({{"id",id},{"error","无法打开浏览器"}});});return;}
                 else if (method == "settings")
                 {
                     result = library_.save_settings(params);
@@ -188,13 +207,13 @@ int Application::run(HINSTANCE instance)
 {
     auto settings = library_.settings();
     if (!shell_override_.empty())
-        settings["shell"] = shell_override_;
-    if (!window_.create(instance, settings.value("shell", std::string("mica")) == "direct2d"
+        settings["application"]["shell"] = shell_override_;
+    if (!window_.create(instance, settings["application"].value("shell", std::string("mica")) == "direct2d"
                                       ? ShellStyle::Direct2D
                                       : ShellStyle::Mica))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
-    window_.set_dark(settings.value("theme", std::string("light")) == "dark");
+    window_.set_dark(settings["application"].value("theme", std::string("light")) == "dark");
     webview_.on_message = [this](auto &request) { receive(request); };
     webview_.on_error = [this](const auto &error)
     { MessageBoxW(window_.handle(), error.c_str(), L"DR Reader", MB_OK | MB_ICONERROR); };

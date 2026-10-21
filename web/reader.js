@@ -1,4 +1,12 @@
 import { call, bookUrl, $, escape, toast } from "./bridge.js";
+import {
+  anchorFromRange,
+  rangeForAnchor,
+} from "./anchors.js";
+import { AnnotationLayer } from "./annotations.js";
+import { ReaderMotion } from "./motion.js";
+import { fontStack } from "./settings.js";
+
 export class Reader {
   constructor(onUpdate) {
     this.onUpdate = onUpdate;
@@ -9,6 +17,10 @@ export class Reader {
     this.pages = 1;
     this.generation = 0;
     this.saveTimer = null;
+    this.motion = new ReaderMotion();
+    this.selection = null;
+    this.editingAnnotation = null;
+
     $("prev-page").onclick = () => this.turn(-1);
     $("next-page").onclick = () => this.turn(1);
     $("toggle-toc").onclick = () => {
@@ -32,17 +44,51 @@ export class Reader {
       .forEach(
         (button) => (button.onclick = () => this.tab(button.dataset.tab)),
       );
-    $("book-search-form").onsubmit = (e) => {
-      e.preventDefault();
+    $("book-search-form").onsubmit = (event) => {
+      event.preventDefault();
       this.search();
     };
+    $("selection-menu").addEventListener("pointerdown", (event) => {
+      if (event.target.closest("button")) event.preventDefault();
+    });
+    document
+      .querySelectorAll("[data-color]")
+      .forEach(
+        (button) => (button.onclick = () => this.chooseHighlightColor(button.dataset.color)),
+      );
+    $("selection-underline").onclick = () => {
+      const existing = this.annotations.find(
+        (annotation) => annotation.id === this.selection?.annotationId,
+      );
+      this.saveSelection(existing?.color || "yellow", "underline");
+    };
+    $("selection-note").onclick = () => this.openAnnotationDialog();
+    $("selection-copy").onclick = () => this.copySelection();
+    $("selection-search").onclick = () => this.searchSelection();
+    $("selection-dictionary").onclick = () => this.lookupSelection();
+    document
+      .querySelectorAll("[data-annotation-color]")
+      .forEach(
+        (button) =>
+          (button.onclick = () => {
+            this.dialogColor = button.dataset.annotationColor;
+            this.syncDialogColors();
+          }),
+      );
+    $("annotation-form").addEventListener("submit", (event) => {
+      if (event.submitter?.id !== "annotation-save") return;
+      event.preventDefault();
+      this.saveFromDialog();
+    });
+    $("annotation-delete").onclick = () => this.deleteFromDialog();
     this.observer = new ResizeObserver(() => this.reflow());
     this.observer.observe($("book-frame"));
   }
+
   async open(book, settings) {
     await this.flush();
     this.book = book;
-    this.settings = settings;
+    this.motion.setAllowed(settings.application?.animations ?? true);
     this.chapter = 0;
     this.ratio = 0;
     $("reader-book-title").textContent = book.title;
@@ -52,27 +98,39 @@ export class Reader {
     this.marks();
     $("book-search-input").value = "";
     $("search-results").replaceChildren();
-    const p = book.position || {};
-    await this.load(p.chapter || 0, p.ratio || 0);
+    try {
+      this.annotations = await call("annotations", { id: book.id });
+    } catch (error) {
+      this.annotations = [];
+      toast(error.message);
+    }
+    this.notes();
+    this.apply(settings);
+    const position = book.position || {};
+    await this.load(position.chapter || 0, position.ratio || 0);
+    if (!this.doc) {
+      this.book = null;
+      throw new Error("章节没有完成载入");
+    }
+    this.motion.open($("reader-view"));
     if (book.warnings?.length)
       toast(
         `这本书有 ${book.warnings.length} 条兼容性提示，可查看本地 book.json。`,
       );
   }
+
   tab(name) {
     document
       .querySelectorAll("[data-tab]")
-      .forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
-    for (const key of ["toc", "marks", "search"])
-      $(
-        key === "toc"
-          ? "toc-content"
-          : key === "marks"
-            ? "marks-content"
-            : "search-content",
-      ).hidden = key !== name;
+      .forEach((button) =>
+        button.classList.toggle("active", button.dataset.tab === name),
+      );
+    for (const key of ["toc", "marks", "notes", "search"])
+      $(`${key}-content`).hidden = key !== name;
+    if (name === "notes") this.notes();
     if (name === "search") $("book-search-input").focus();
   }
+
   toc() {
     const root = $("toc-content");
     root.replaceChildren();
@@ -87,6 +145,7 @@ export class Reader {
     }
     this.activeToc();
   }
+
   activeToc() {
     if (!this.book) return;
     const href = this.book.chapters[this.chapter].href;
@@ -100,6 +159,7 @@ export class Reader {
     }
     active?.scrollIntoView({ block: "nearest" });
   }
+
   marks() {
     const root = $("marks-content");
     root.replaceChildren();
@@ -116,14 +176,40 @@ export class Reader {
         '<p class="panel-hint">把喜欢的地方留下来。<br>点击右上角书签按钮即可保存。</p>';
     this.updateMark();
   }
+
+  notes() {
+    if (!this.book) return;
+    const root = $("notes-content");
+    root.replaceChildren();
+    const ordered = [...(this.annotations || [])].sort(
+      (a, b) =>
+        a.chapter - b.chapter ||
+        a.start - b.start ||
+        b.updatedAt - a.updatedAt,
+    );
+    for (const annotation of ordered) {
+      const card = document.createElement("button");
+      card.className = "note-entry";
+      card.innerHTML = `<span class="note-color ${escape(annotation.color)}"></span><span class="note-copy"><strong>${escape(annotation.quote)}</strong>${annotation.note ? `<small>${escape(annotation.note)}</small>` : ""}<em>${escape(this.book.chapters[annotation.chapter]?.title || "")}</em></span>`;
+      card.onclick = () =>
+        this.load(annotation.chapter, 0, "", "", annotation.id);
+      root.append(card);
+    }
+    if (!ordered.length)
+      root.innerHTML =
+        '<p class="panel-hint">选中正文后，可以高亮或写下笔记。<br>所有标注保存在本地 SQLite 数据库。</p>';
+  }
+
   updateMark() {
     if (!this.book) return;
     const exists = this.book.bookmarks.some(
-      (m) =>
-        m.chapter === this.chapter && Math.abs(m.ratio - this.ratio) < 0.02,
+      (mark) =>
+        mark.chapter === this.chapter &&
+        Math.abs(mark.ratio - this.ratio) < 0.02,
     );
     $("add-bookmark").classList.toggle("selected", exists);
   }
+
   async bookmark() {
     if (!this.book) return;
     try {
@@ -138,10 +224,11 @@ export class Reader {
       this.marks();
       this.onUpdate(this.book);
       toast("书签已更新");
-    } catch (e) {
-      toast(e.message);
+    } catch (error) {
+      toast(error.message);
     }
   }
+
   async search() {
     const query = $("book-search-input").value.trim();
     if (!query) return;
@@ -149,6 +236,7 @@ export class Reader {
     root.textContent = "正在检索…";
     const id = this.book.id;
     try {
+      this.hideSelection();
       const results = await call("search", { id, query });
       if (this.book.id !== id) return;
       root.replaceChildren();
@@ -161,23 +249,36 @@ export class Reader {
       }
       if (!results.length)
         root.innerHTML = '<p class="panel-hint">没有找到相关文字。</p>';
-    } catch (e) {
-      root.textContent = e.message;
+    } catch (error) {
+      this.hideSelection();
+      root.textContent = error.message;
     }
   }
+
   async navigate(href) {
     if (!this.book) return;
-    const hash = href.indexOf("#"),
-      path = hash < 0 ? href : href.slice(0, hash);
+    const hash = href.indexOf("#");
+    const path = hash < 0 ? href : href.slice(0, hash);
     const anchor = hash < 0 ? "" : decodeURIComponent(href.slice(hash + 1));
-    const index = this.book.chapters.findIndex((c) => c.href === path);
+    const index = this.book.chapters.findIndex(
+      (chapter) => chapter.href === path,
+    );
     if (index >= 0) await this.load(index, 0, anchor);
     else toast("此链接指向附属文档，初版暂不支持打开。");
   }
-  async load(chapter, ratio = 0, anchor = "", query = "") {
+
+  async load(
+    chapter,
+    ratio = 0,
+    anchor = "",
+    query = "",
+    annotationId = "",
+    direction = 0,
+  ) {
     if (!this.book) return;
     clearTimeout(this.saveTimer);
     await this.flush();
+    this.hideSelection();
     const generation = ++this.generation;
     this.chapter = Math.max(
       0,
@@ -186,7 +287,7 @@ export class Reader {
     this.ratio = ratio;
     this.anchor = anchor;
     this.query = query;
-    this.doc = null;
+    this.annotationFocus = annotationId;
     this.loading = true;
     const item = this.book.chapters[this.chapter];
     $("chapter-label").textContent = item.title;
@@ -203,19 +304,45 @@ export class Reader {
         (match) => `${match}<base href="${escape(base)}">`,
       );
       const frame = $("book-frame");
-      frame.onload = () => {
-        if (generation !== this.generation) return;
-        this.doc = frame.contentDocument;
-        this.attach();
-      };
-      frame.srcdoc = html;
-    } catch (e) {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error("章节载入超时")), 8000);
+        frame.onload = () => {
+          clearTimeout(timeout);
+          if (generation !== this.generation) {
+            resolve();
+            return;
+          }
+          this.doc = frame.contentDocument;
+          this.attach();
+          resolve();
+        };
+        frame.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("章节载入失败"));
+        };
+        const update = () => {
+          frame.srcdoc = html;
+        };
+        if (direction)
+          this.motion
+            .change(
+              $("page-surface"),
+              this.settings.animation,
+              this.settings.animationDuration,
+              direction,
+              update,
+            )
+            .then(resolve, reject);
+        else update();
+      });
+    } catch (error) {
       if (generation !== this.generation) return;
       this.loading = false;
       $("reader-loading").hidden = true;
-      toast(e.message);
+      toast(error.message);
     }
   }
+
   attach() {
     const doc = this.doc;
     if (!doc?.body) {
@@ -232,16 +359,24 @@ export class Reader {
     }
     this.style = style;
     if (doc.querySelector('meta[name="calibre:cover"][content="true"]')) {
-      for (const svg of doc.querySelectorAll("svg[viewBox]")) {
+      for (const svg of doc.querySelectorAll("svg[viewBox]"))
         svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-      }
     }
-    doc.addEventListener("click", (e) => {
-      const a = e.target.closest?.("a[href]");
-      if (!a) return;
-      e.preventDefault();
+    doc.addEventListener("click", (event) => {
+      this.lastClick = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      };
+      const annotation = this.annotationLayer?.rangeAtPoint(event);
+      if (annotation) {
+        this.showSelectionMenu(annotation.range, annotation.id);
+        return;
+      }
+      const link = event.target.closest?.("a[href]");
+      if (!link) return;
+      event.preventDefault();
       try {
-        const target = new URL(a.getAttribute("href"), doc.baseURI);
+        const target = new URL(link.getAttribute("href"), doc.baseURI);
         const prefix = `/${this.book.id}/content/`;
         if (
           target.origin === "https://books.dr-reader.local" &&
@@ -251,31 +386,40 @@ export class Reader {
             decodeURIComponent(target.pathname.slice(prefix.length)) +
               target.hash,
           );
-        else toast("初版阅读器仅打开书内链接。");
+        else toast("阅读器仅打开书内链接。");
       } catch {
         toast("无法打开这个链接");
       }
     });
-    doc.addEventListener("keydown", (e) => {
+    doc.addEventListener("mouseup", (event) => {
+      if (event.target.closest?.("a")) return;
+      setTimeout(() => this.readSelection(), 0);
+    });
+    doc.addEventListener("keyup", (event) => {
+      if (event.shiftKey || event.key === "Shift") this.readSelection();
+    });
+    doc.addEventListener("keydown", (event) => {
       if (
-        e.key === "Escape" ||
-        (e.ctrlKey && ["o", "k"].includes(e.key.toLowerCase()))
+        event.key === "Escape" ||
+        (event.ctrlKey && ["o", "k"].includes(event.key.toLowerCase()))
       ) {
-        e.preventDefault();
+        event.preventDefault();
         document.dispatchEvent(
           new KeyboardEvent("keydown", {
-            key: e.key,
-            ctrlKey: e.ctrlKey,
+            key: event.key,
+            ctrlKey: event.ctrlKey,
             bubbles: true,
           }),
         );
-      } else this.key(e);
+      } else this.key(event);
     });
     doc.defaultView.addEventListener("scroll", () => this.scrolled(), {
       passive: true,
     });
     for (const image of doc.images)
       image.addEventListener("load", () => this.reflow(), { once: true });
+    this.annotationLayer = new AnnotationLayer(doc);
+    this.refreshAnnotations();
     this.apply(this.settings);
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
@@ -291,41 +435,77 @@ export class Reader {
       if (doc === this.doc) this.reflow();
     });
   }
+
+  refreshAnnotations() {
+    if (!this.doc || !this.annotationLayer) return;
+    const chapter = this.chapter;
+    const current = (this.annotations || []).filter(
+      (annotation) =>
+        annotation.chapter === chapter &&
+        annotation.href === this.book.chapters[chapter].href,
+    );
+    this.annotationLayer.set(current, (annotation) =>
+      rangeForAnchor(this.doc, annotation),
+    );
+  }
+
   apply(settings) {
-    this.settings = settings;
+    this.appSettings = settings.application || this.appSettings || {
+      animations: true,
+      selectionActions: {
+        highlight: true,
+        underline: true,
+        note: true,
+        copy: true,
+        search: true,
+        dictionary: true,
+      },
+      dictionaries: [],
+    };
+    this.settings = settings.reading || settings;
+    this.motion.setAllowed(this.appSettings.animations);
     document.documentElement.style.setProperty(
       "--reading-width",
-      `${settings.width}px`,
+      `${this.settings.width}px`,
     );
     if (!this.doc || !this.style) return;
+    const reading = this.settings;
     const colors =
-      settings.theme === "dark"
+      reading.theme === "dark"
         ? ["#252923", "#dce1d5", "#abc296"]
-        : settings.theme === "sepia"
+        : reading.theme === "sepia"
           ? ["#fbf6e9", "#514737", "#776440"]
           : ["#ffffff", "#2e352d", "#56704c"];
-    const paged = settings.mode === "paged";
-    const family =
-      settings.fontFamily === "sans-serif"
-        ? "'Microsoft YaHei','Segoe UI',sans-serif"
-        : "'Noto Serif CJK SC','SimSun','Georgia',serif";
-    this.style.textContent = `html{background:${colors[0]}!important;color:${colors[1]}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${family}!important;font-size:${settings.fontSize}px!important;line-height:${settings.lineHeight}!important;background:${colors[0]}!important;color:${colors[1]}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${paged ? "margin:38px 44px!important;padding:0!important;width:calc(100vw - 88px)!important;height:calc(100vh - 76px)!important;column-width:calc(100vw - 88px)!important;column-gap:88px!important;column-fill:auto!important;overflow:visible!important;" : "margin:0!important;padding:38px 44px 50px!important;height:auto!important;width:auto!important;column-count:auto!important;"}}body p,body li,body div{font-size:inherit!important;line-height:inherit!important;color:inherit!important}p{orphans:2;widows:2}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors[2]}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors[2]}55;border-radius:4px}`;
+    const paged = reading.mode === "paged";
+    const spacing = reading.publisherStyles
+      ? ""
+      : `body p,body div,body li{margin-top:0!important;margin-bottom:${reading.paragraphSpacing}em!important}`;
+    const paragraph = reading.publisherStyles
+      ? ""
+      : `body p{text-indent:${reading.textIndent}em!important;text-align:${reading.alignment}!important}`;
+    const margin = paged
+      ? `margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(100vw - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(100vw - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
+      : `margin:0!important;padding:${reading.paddingY}px ${reading.paddingX}px 60px!important;height:auto!important;width:auto!important;column-count:auto!important;`;
+    this.style.textContent = `html{background:${colors[0]}!important;color:${colors[1]}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors[0]}!important;color:${colors[1]}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-size:inherit!important;line-height:inherit!important;color:inherit!important}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors[2]}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:#8dac7855!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors[2]}55;border-radius:4px}`;
     this.reflow();
   }
+
   measure() {
     if (!this.doc) return;
-    const w = this.doc.defaultView;
+    const view = this.doc.defaultView;
     this.pages = Math.max(
       1,
       Math.ceil(
-        (this.doc.documentElement.scrollWidth - 2) / Math.max(1, w.innerWidth),
+        (this.doc.documentElement.scrollWidth - 2) /
+          Math.max(1, view.innerWidth),
       ),
     );
   }
+
   restore() {
     if (!this.doc) return;
-    const doc = this.doc,
-      w = doc.defaultView;
+    const doc = this.doc;
+    const view = doc.defaultView;
     const anchor = this.anchor && doc.getElementById(this.anchor);
     if (anchor) {
       anchor.scrollIntoView();
@@ -334,55 +514,65 @@ export class Reader {
       const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
       let node;
       while ((node = walker.nextNode())) {
-        const pos = node.textContent.indexOf(this.query);
-        if (pos >= 0) {
+        const position = node.textContent.indexOf(this.query);
+        if (position >= 0) {
           const range = doc.createRange();
-          range.setStart(node, pos);
-          range.setEnd(node, pos + this.query.length);
+          range.setStart(node, position);
+          range.setEnd(node, position + this.query.length);
           const rect = range.getBoundingClientRect();
-          w.scrollTo(w.scrollX + rect.left, w.scrollY + rect.top - 40);
+          view.scrollTo(view.scrollX + rect.left, view.scrollY + rect.top - 40);
           break;
         }
       }
       this.query = "";
+    } else if (this.annotationFocus) {
+      const range = this.annotationLayer?.ranges.get(this.annotationFocus);
+      const rect = range?.getBoundingClientRect();
+      if (rect) view.scrollTo(view.scrollX, view.scrollY + rect.top - 70);
+      this.annotationFocus = "";
     } else if (this.settings.mode === "paged") {
       this.page = Math.round(this.ratio * (this.pages - 1));
-      w.scrollTo(this.page * w.innerWidth, 0);
+      view.scrollTo(this.page * view.innerWidth, 0);
     } else
-      w.scrollTo(
+      view.scrollTo(
         0,
         this.ratio *
-          Math.max(0, doc.documentElement.scrollHeight - w.innerHeight),
+          Math.max(0, doc.documentElement.scrollHeight - view.innerHeight),
       );
   }
+
   reflow() {
     if (!this.doc) return;
     clearTimeout(this.reflowTimer);
     this.reflowTimer = setTimeout(() => {
       if (!this.doc) return;
       this.measure();
+      this.refreshAnnotations();
       this.restore();
       if (!this.loading) this.report();
     }, 100);
   }
+
   scrolled() {
     if (this.loading) return;
     this.report();
   }
+
   report() {
     if (!this.doc || !this.book) return;
-    const doc = this.doc,
-      w = doc.defaultView;
+    const doc = this.doc;
+    const view = doc.defaultView;
     if (this.settings.mode === "paged") {
-      this.page = Math.round(w.scrollX / Math.max(1, w.innerWidth));
+      this.page = Math.round(view.scrollX / Math.max(1, view.innerWidth));
       this.ratio = this.pages <= 1 ? 0 : this.page / (this.pages - 1);
     } else
       this.ratio = Math.min(
         1,
-        w.scrollY /
-          Math.max(1, doc.documentElement.scrollHeight - w.innerHeight),
+        view.scrollY /
+          Math.max(1, doc.documentElement.scrollHeight - view.innerHeight),
       );
-    const progress = (this.chapter + this.ratio) / this.book.chapters.length;
+    const progress =
+      (this.chapter + this.ratio) / this.book.chapters.length;
     $("page-indicator").textContent =
       this.settings.mode === "paged"
         ? `${this.page + 1} / ${this.pages}`
@@ -398,67 +588,370 @@ export class Reader {
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), 450);
   }
+
   async flush() {
     clearTimeout(this.saveTimer);
     if (!this.book || !this.doc || this.loading) return;
-    const id = this.book.id,
-      position = { chapter: this.chapter, ratio: this.ratio };
+    const id = this.book.id;
+    const position = { chapter: this.chapter, ratio: this.ratio };
     try {
       const book = await call("position", { id, position });
       if (this.book?.id === id) this.book = book;
       this.onUpdate(book);
-    } catch (e) {
-      toast(e.message);
+    } catch (error) {
+      toast(error.message);
     }
   }
-  turn(direction) {
+
+  async turn(direction) {
     if (!this.doc || this.loading) return;
-    const w = this.doc.defaultView;
+    this.hideSelection();
+    const view = this.doc.defaultView;
     if (this.settings.mode === "paged") {
       if (direction > 0 && this.page < this.pages - 1) {
-        w.scrollTo((this.page + 1) * w.innerWidth, 0);
+        await this.animatePageChange(direction, () =>
+          view.scrollTo((this.page + 1) * view.innerWidth, 0),
+        );
         this.report();
         return;
       }
       if (direction < 0 && this.page > 0) {
-        w.scrollTo((this.page - 1) * w.innerWidth, 0);
+        await this.animatePageChange(direction, () =>
+          view.scrollTo((this.page - 1) * view.innerWidth, 0),
+        );
         this.report();
         return;
       }
     } else {
-      const max = this.doc.documentElement.scrollHeight - w.innerHeight;
+      const maximum =
+        this.doc.documentElement.scrollHeight - view.innerHeight;
       if (
-        (direction > 0 && w.scrollY < max - 2) ||
-        (direction < 0 && w.scrollY > 2)
+        (direction > 0 && view.scrollY < maximum - 2) ||
+        (direction < 0 && view.scrollY > 2)
       ) {
-        w.scrollBy(0, direction * w.innerHeight * 0.85);
+        await this.animatePageChange(direction, () =>
+          view.scrollBy(0, direction * view.innerHeight * 0.85),
+        );
         return;
       }
     }
     const next = this.chapter + direction;
     if (next >= 0 && next < this.book.chapters.length)
-      this.load(next, direction > 0 ? 0 : 1);
+      this.load(next, direction > 0 ? 0 : 1, "", "", "", direction);
   }
-  key(e) {
-    if (e.ctrlKey && e.key.toLowerCase() === "f") {
-      e.preventDefault();
+
+  async animatePageChange(direction, update) {
+    if (!this.settings.animation || this.settings.animation === "none") {
+      update();
+      return;
+    }
+    await this.motion.change(
+      $("page-surface"),
+      this.settings.animation,
+      this.settings.animationDuration,
+      direction,
+      update,
+    );
+  }
+
+  key(event) {
+    if (event.ctrlKey && event.key.toLowerCase() === "f") {
+      event.preventDefault();
       this.tab("search");
       $("toc-panel").hidden = false;
       return;
     }
-    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
-      e.preventDefault();
+    if (
+      event.key === "ArrowRight" ||
+      event.key === "PageDown" ||
+      event.key === " "
+    ) {
+      event.preventDefault();
       this.turn(1);
-    } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
-      e.preventDefault();
+    } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
+      event.preventDefault();
       this.turn(-1);
     }
   }
+
+  readSelection() {
+    if (!this.doc) return;
+    const selection = this.doc.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (range.toString().trim()) this.showSelectionMenu(range);
+  }
+
+  showSelectionMenu(range, annotationId = "") {
+    const rect =
+      this.annotationLayer?.rect(range) || range.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) return;
+    const text = range.toString().trim();
+    if (!text) return;
+    this.selection = {
+      range: range.cloneRange(),
+      text,
+      annotationId,
+    };
+    const actions = this.appSettings.selectionActions;
+    $("selection-highlight").hidden =
+      !actions.highlight && !actions.underline;
+    $("selection-underline").hidden = !actions.underline;
+    $("selection-note").hidden = !actions.note;
+    $("selection-copy").hidden = !actions.copy;
+    $("selection-search").hidden = !actions.search;
+    const dictionaries =
+      this.appSettings.dictionaries?.filter(
+        (dictionary) => dictionary.enabled,
+      ) || [];
+    $("selection-dictionary").hidden =
+      !actions.dictionary || !dictionaries.length;
+    $("selection-preview").textContent =
+      text.length > 48 ? `${text.slice(0, 48)}…` : text;
+    const menu = $("selection-menu");
+    menu.hidden = false;
+    const width = menu.offsetWidth;
+    const height = menu.offsetHeight;
+    const left = Math.max(12, Math.min(rect.left, innerWidth - width - 12));
+    let top = rect.top - height - 10;
+    if (top < 8) top = Math.min(innerHeight - height - 12, rect.bottom + 10);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
+  hideSelection() {
+    $("selection-menu").hidden = true;
+    if (!$("annotation-dialog").open) this.selection = null;
+  }
+
+  selectionAnchor() {
+    if (!this.selection) return null;
+    return anchorFromRange(this.doc, this.selection.range);
+  }
+
+  async saveSelection(color = "yellow", style = "highlight") {
+    if (!this.selection || !this.book) return;
+    const existing = this.annotations.find(
+      (annotation) => annotation.id === this.selection.annotationId,
+    );
+    const anchor = this.selectionAnchor();
+    if (!anchor) {
+      toast("这段文字无法稳定定位，请缩小选择范围。");
+      return;
+    }
+    try {
+      await this.saveAnnotation({
+        ...anchor,
+        id: existing?.id || "",
+        note: existing?.note || "",
+        color,
+        style,
+      });
+      this.doc.getSelection()?.removeAllRanges();
+      toast(style === "underline" ? "已添加下划线" : "已添加高亮");
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  chooseHighlightColor(color) {
+    const hit = this.annotationLayer?.colorAtPoint(this.lastClick);
+    this.saveSelection(color, hit?.kind || "highlight");
+  }
+
+  async saveAnnotation(values) {
+    const annotation = {
+      id: values.id || "",
+      chapter: this.chapter,
+      href: this.book.chapters[this.chapter].href,
+      start: values.start,
+      end: values.end,
+      quote: values.quote,
+      prefix: values.prefix || "",
+      suffix: values.suffix || "",
+      note: values.note || "",
+      color: values.color || "yellow",
+      style: values.style || "highlight",
+    };
+    const saved = await call("annotation.save", {
+      id: this.book.id,
+      annotation,
+    });
+    const index = this.annotations.findIndex((item) => item.id === saved.id);
+    if (index >= 0) this.annotations[index] = saved;
+    else this.annotations.push(saved);
+    this.hideSelection();
+    this.refreshAnnotations();
+    this.notes();
+    this.selection = null;
+    return saved;
+  }
+
+  openAnnotationDialog() {
+    if (!this.selection) return;
+    this.editingAnnotation =
+      this.annotations.find(
+        (annotation) => annotation.id === this.selection.annotationId,
+      ) || null;
+    this.dialogColor = this.editingAnnotation?.color || "yellow";
+    $("annotation-quote").textContent =
+      this.editingAnnotation?.quote || this.selection.text;
+    $("annotation-note").value = this.editingAnnotation?.note || "";
+    $("annotation-style").value =
+      this.editingAnnotation?.style || "highlight";
+    $("annotation-delete").hidden = !this.editingAnnotation;
+    $("annotation-title").textContent = this.editingAnnotation
+      ? "编辑标注"
+      : "记笔记";
+    this.syncDialogColors();
+    $("selection-menu").hidden = true;
+    $("annotation-dialog").showModal();
+    setTimeout(() => $("annotation-note").focus(), 0);
+  }
+
+  syncDialogColors() {
+    document
+      .querySelectorAll("[data-annotation-color]")
+      .forEach((button) =>
+        button.classList.toggle(
+          "selected",
+          button.dataset.annotationColor === this.dialogColor,
+        ),
+      );
+  }
+
+  async saveFromDialog() {
+    const existing = this.editingAnnotation;
+    const anchor = existing
+      ? {
+          id: existing.id,
+          start: existing.start,
+          end: existing.end,
+          quote: existing.quote,
+          prefix: existing.prefix,
+          suffix: existing.suffix,
+        }
+      : this.selectionAnchor();
+    if (!anchor) {
+      toast("这段文字无法稳定定位，请重新选择。");
+      return;
+    }
+    try {
+      await this.saveAnnotation({
+        ...anchor,
+        note: $("annotation-note").value.trim(),
+        color: this.dialogColor,
+        style: $("annotation-style").value,
+      });
+      this.doc.getSelection()?.removeAllRanges();
+      this.selection = null;
+      $("annotation-dialog").close();
+      toast("笔记已保存");
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  async deleteFromDialog() {
+    if (!this.editingAnnotation) return;
+    try {
+      await call("annotation.delete", {
+        id: this.book.id,
+        annotationId: this.editingAnnotation.id,
+      });
+      this.annotations = this.annotations.filter(
+        (annotation) => annotation.id !== this.editingAnnotation.id,
+      );
+      this.editingAnnotation = null;
+      $("annotation-dialog").close("cancel");
+      this.refreshAnnotations();
+      this.notes();
+      toast("标注已删除");
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  async copySelection() {
+    if (!this.selection) return;
+    try {
+      await call("copy", { text: this.selection.text });
+      this.hideSelection();
+      this.doc.getSelection()?.removeAllRanges();
+      toast("已复制选中文字");
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  searchSelection() {
+    if (!this.selection) return;
+    const query = this.selection.text.replace(/\s+/g, " ").slice(0, 256);
+    this.hideSelection();
+    $("toc-panel").hidden = false;
+    this.tab("search");
+    $("book-search-input").value = query;
+    this.search();
+  }
+
+  async lookupSelection() {
+    if (!this.selection) return;
+    const dictionaries =
+      this.appSettings.dictionaries?.filter(
+        (dictionary) => dictionary.enabled,
+      ) || [];
+    if (!dictionaries.length) return;
+    const text = this.selection.text.slice(0, 8192);
+    const dictionary =
+      dictionaries.length === 1
+        ? dictionaries[0]
+        : await this.chooseDictionary(dictionaries);
+    if (!dictionary) return;
+    try {
+      await call("lookup", { dictionaryId: dictionary.id, text });
+      this.hideSelection();
+    } catch (error) {
+      toast(error.message);
+    }
+  }
+
+  chooseDictionary(dictionaries) {
+    return new Promise((resolve) => {
+      const dialog = document.createElement("dialog");
+      dialog.className = "dictionary-picker";
+      dialog.innerHTML = `<div class="annotation-header"><div><span class="eyebrow">LOOK UP</span><h2>选择查词网站</h2></div></div><div class="dictionary-picker-list"></div>`;
+      const root = dialog.querySelector(".dictionary-picker-list");
+      for (const dictionary of dictionaries) {
+        const button = document.createElement("button");
+        button.className = "dictionary-choice";
+        button.textContent = dictionary.name;
+        button.onclick = () => dialog.close(dictionary.id);
+        root.append(button);
+      }
+      dialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        dialog.close();
+      });
+      dialog.addEventListener("close", () => {
+        const selected =
+          dictionaries.find((item) => item.id === dialog.returnValue) || null;
+        dialog.remove();
+        resolve(selected);
+      });
+      document.body.append(dialog);
+      dialog.showModal();
+    });
+  }
+
   async close() {
     await this.flush();
     ++this.generation;
+    this.hideSelection();
+    this.annotationLayer?.clear();
+    this.annotationLayer = null;
     this.doc = null;
     this.book = null;
+    this.annotations = [];
     $("book-frame").srcdoc = "";
   }
 }

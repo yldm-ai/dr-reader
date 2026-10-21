@@ -1,4 +1,6 @@
 #include "dr/library.h"
+#include "dr/annotations.h"
+#include "dr/settings.h"
 #include "dr/splitter.h"
 #include <chrono>
 #include <iostream>
@@ -94,34 +96,103 @@ int main()
              {"OPS/text.xhtml", source},
              {"OPS/nav.xhtml",
               R"(<html xmlns:epub="urn:epub"><body><nav epub:type="toc"><ol><li><a href="text.xhtml#start">第一节</a></li><li><a href="text.xhtml#end">第二节</a></li></ol></nav></body></html>)"}});
+        std::string id;
+        std::string annotation_href;
+        {
         dr::Library library(root / "library");
         auto book = library.import_book(epub);
-        auto id = book["id"].get<std::string>();
+        id = book["id"].get<std::string>();
         require(book["title"] == "测试书", "metadata");
         require(book["chapters"].size() == 2, "spine split");
         require(book["toc"][1]["href"].get<std::string>().find(".dr-1.xhtml#end") != std::string::npos,
                 "TOC remap");
+        annotation_href = book["chapters"][1]["href"].get<std::string>();
         auto html = dr::read_file(root / "library" / "books" / id / "content" / "OPS" / "text.dr-0.xhtml");
         require(html.find("text.dr-1.xhtml#end") != std::string::npos, "cross-flow link remap");
         require(library.import_book(epub)["id"] == id && library.list().size() == 1, "duplicate import");
         library.save_position(id, {{"chapter", 1}, {"ratio", 0.4}});
-        dr::Library reopened(root / "library");
-        require(reopened.get(id)["position"]["chapter"] == 1, "progress survives restart");
-        require(reopened.search(id, "结尾").size() == 1, "C++ search");
-        require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].size() == 1,
-                "bookmark add");
-        require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].empty(),
-                "bookmark remove");
-        rejects([&] { reopened.save_position(id, {{"chapter", -1}}); }, "invalid progress");
+        {
+            dr::Library reopened(root / "library");
+            require(reopened.get(id)["position"]["chapter"] == 1, "progress survives restart");
+            require(reopened.search(id, "结尾").size() == 1, "C++ search");
+            require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].size() == 1,
+                    "bookmark add");
+            require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].empty(),
+                    "bookmark remove");
+        }
+        std::string annotation_id;
+        {
+            dr::AnnotationStore annotations(root / "annotations.sqlite3");
+            auto annotation = annotations.save(
+                id, {{"chapter", 1}, {"href", annotation_href}, {"start", 0}, {"end", 4},
+                     {"quote", "结尾文字"}, {"prefix", "前文"}, {"suffix", "后文"}, {"note", "重要"},
+                     {"color", "green"}, {"style", "highlight"}});
+            annotation_id = annotation["id"].get<std::string>();
+            require(!annotation_id.empty(), "annotation insert");
+            require(annotations.list(id).size() == 1, "annotation list");
+            auto emoji_json = dr::Json::parse(
+                std::string(R"({"chapter":1,"href":")") + annotation_href +
+                R"(","start":20,"end":22,"quote":"\uD83D\uDE00","prefix":"","suffix":"","note":"emoji","color":"yellow","style":"highlight"})");
+            auto emoji = annotations.save(id, emoji_json);
+            require(!emoji["id"].get<std::string>().empty(), "UTF-16 annotation offsets");
+            annotations.remove(id, emoji["id"]);
+            annotation["note"] = "修订后的笔记";
+            annotation["color"] = "blue";
+            auto revised = annotations.save(id, annotation);
+            require(revised["note"] == "修订后的笔记" && revised["color"] == "blue",
+                    "annotation update");
+        }
+        {
+            dr::AnnotationStore reopened_annotations(root / "annotations.sqlite3");
+            require(reopened_annotations.list(id).size() == 1 &&
+                        reopened_annotations.list(id)[0]["note"] == "修订后的笔记",
+                    "annotation persistence");
+            reopened_annotations.remove(id, annotation_id);
+            require(reopened_annotations.list(id).empty(), "annotation delete");
+        }
+        auto defaults = dr::default_settings();
+        require(defaults["application"]["shell"] == "mica" && defaults["reading"]["mode"] == "scroll",
+                "settings defaults");
+        auto customized = dr::patch_settings(
+            defaults, {{"application", {{"theme", "dark"}, {"animations", false}}},
+                       {"reading", {{"fontSize", 24}, {"lineHeight", 2.2}, {"animation", "turn"}}}});
+        require(customized["application"]["theme"] == "dark" &&
+                    customized["reading"]["fontSize"] == 24 &&
+                    customized["reading"]["animation"] == "turn",
+                "settings patch");
+        auto legacy = dr::normalize_settings(
+            {{"shell", "direct2d"}, {"theme", "sepia"}, {"fontSize", 22}, {"mode", "paged"}});
+        require(legacy["application"]["shell"] == "direct2d" &&
+                    legacy["application"]["theme"] == "sepia" &&
+                    legacy["reading"]["fontSize"] == 22 && legacy["reading"]["mode"] == "paged",
+                "legacy settings migration");
+        rejects([&] { dr::patch_settings(defaults, {{"reading", {{"mode", "invalid"}}}}); },
+                "invalid reading mode");
+        auto dictionary = dr::patch_settings(
+            defaults,
+            {{"application",
+              {{"dictionaries",
+                {{{"id", "custom"}, {"name", "测试"}, {"url", "https://example.com/?q={text}"},
+                  {"enabled", true}}}}}}});
+        auto lookup = dr::dictionary_url(dictionary, "custom", "阅读 & 笔记/测试");
+        require(lookup.find("example.com") != std::string::npos &&
+                    lookup.find("&amp;") == std::string::npos &&
+                    lookup.find("%2F") != std::string::npos,
+                "dictionary URL encoding");
+        rejects([&] { library.save_position(id, {{"chapter", -1}}); }, "invalid progress");
+        }
         auto bad = root / "bad.epub";
         zip(bad, {{"../outside.txt", "escape"}});
-        rejects([&] { library.import_book(bad); }, "zip traversal");
+        {
+            dr::Library invalid_archive_library(root / "invalid-archive");
+            rejects([&] { invalid_archive_library.import_book(bad); }, "zip traversal");
+        }
         require(!dr::fs::exists(root / "outside.txt"), "no extraction escape");
         auto huge = root / "huge.epub";
         zip(huge, {{"huge.txt", std::string(5000, 'z')}});
         rejects([&] { dr::import_epub(huge, root / "limited", {1024, 2048, 100}); }, "expansion limit");
         dr::fs::remove_all(root);
-        std::cout << "All EPUB, DOM split, URI, link, persistence, search and archive checks passed.\n";
+        std::cout << "All EPUB, DOM split, URI, link, persistence, annotations, settings and archive checks passed.\n";
         return 0;
     }
     catch (const std::exception &e)

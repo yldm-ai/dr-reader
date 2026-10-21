@@ -84,6 +84,40 @@ std::string url_encode(std::string_view s)
     }
     return r;
 }
+size_t utf16_length(std::string_view text)
+{
+    size_t length = 0;
+    for (size_t i = 0; i < text.size();)
+    {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead < 0x80)
+        {
+            ++length;
+            ++i;
+        }
+        else if ((lead & 0xe0) == 0xc0 && i + 1 < text.size())
+        {
+            ++length;
+            i += 2;
+        }
+        else if ((lead & 0xf0) == 0xe0 && i + 2 < text.size())
+        {
+            ++length;
+            i += 3;
+        }
+        else if ((lead & 0xf8) == 0xf0 && i + 3 < text.size())
+        {
+            length += 2;
+            i += 4;
+        }
+        else
+        {
+            ++length;
+            ++i;
+        }
+    }
+    return length;
+}
 bool external_url(std::string_view s)
 {
     return s.starts_with("//") || s.find(':') != std::string_view::npos;

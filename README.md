@@ -1,6 +1,6 @@
 # DR Reader
 
-Windows 本地 EPUB 阅读器初版。C++20 + Win32 / Direct2D / DirectWrite + WebView2，不使用 Electron、Node.js 运行时或 Python 解析 EPUB。
+Windows 本地 EPUB 阅读器。C++20 + Win32 / Direct2D / DirectWrite + WebView2，不使用 Electron、Node.js 运行时或 Python 解析 EPUB。
 
 ## 运行
 
@@ -33,12 +33,16 @@ ctest --test-dir build -C Release --output-on-failure
 ./scripts/package.ps1
 ```
 
-## 初版功能
+## 当前功能
 
 - 书架网格/列表、封面、书名/作者搜索、排序、作者筛选、最近阅读、未读/已读筛选。
 - C++ 后台导入：ZIP 解包、OPF 元数据、spine 阅读顺序、EPUB 3 nav / EPUB 2 NCX、封面与章节缓存。
 - C++ XHTML 拆分：保持 DOM 祖先和 head，分页标记、256 KiB 内容预算、锚点归属、跨章节链接与目录重映射。
-- WebView2 正文排版：目录、上下滚动/左右翻页、章节内锚点、字号、字体、行高、宽度、明亮/纸张/夜间主题。
+- WebView2 正文排版：目录、上下滚动/左右翻页、章节内锚点，以及字体、字号、字重、行距、段距、字距、首行缩进、对齐、正文宽度、页面留白、原书样式开关和明亮/纸张/夜间主题。
+- 应用设置与阅读排版分开：应用设置控制界面主题、标题栏外壳、动画、选词菜单和自定义查词网站；阅读排版只影响正文。
+- SQLite 笔记与高亮：五色高亮、下划线、笔记编辑/删除、标注列表，以及重排后用文本锚点恢复位置。旧 JSON 书签会迁移到 `reader.sqlite3`。
+- 选中文字菜单：高亮、下划线、记笔记、复制、书内搜索和默认浏览器查词。复制和查词由 C++ 原生接口完成。
+- 开书入场、平移/淡入淡出/书页转动动画，并遵循应用动画开关与系统“减少动态效果”偏好。
 - 本地进度恢复、继续阅读、书签、C++ 书内搜索（每章返回第一处匹配，最多 100 章）。
 - 系统云母 / Direct2D 自绘两种原生标题栏，支持 DPI 缩放。
 
@@ -49,8 +53,8 @@ ctest --test-dir build -C Release --output-on-failure
 ```text
 app/          应用组合、COM 生命周期、WebView2 宿主、消息桥、串行后台任务
 ui/           不依赖业务的 Win32 / Direct2D / DirectWrite 窗口外壳
-engine/       不依赖 WebView2 的 C++ EPUB、DOM 拆分、书库、检索、存储
-web/          书架和阅读器界面；浏览器只承担 UI、排版和分页测量
+engine/       不依赖 WebView2 的 C++ EPUB、DOM 拆分、书库、检索、SQLite 标注与设置
+web/          书架和阅读器界面；浏览器承担 UI、正文排版、选区与分页测量
 resources/    可再分发的原创示例 EPUB
 tests/        C++ 集成测试，运行时生成 EPUB / 恶意 ZIP 测试夹具
 tools/        无界面 EPUB 导入检查工具 dr-epub
@@ -65,18 +69,19 @@ docs/         架构、拆分策略与验证记录
 默认在 `%LOCALAPPDATA%/DRReader`，可用 `--data-dir` 指定独立目录。从带包标识的应用启动时，Windows 可能重定向到该包的 LocalCache；设置底部会显示实际书库路径。
 
 ```text
-settings.json                  主题、原生外壳、阅读排版
-books/<content-id>/book.json   元数据、目录、进度、书签
+settings.json                  版本化应用设置与阅读排版
+reader.sqlite3                 SQLite 标注、笔记与书签
+books/<content-id>/book.json   元数据、目录与阅读进度
 books/<content-id>/content/    解包资源、拆分后的 XHTML
 books/<content-id>/search/     C++ 提取的每节纯文本
 webview-profile/              WebView2 用户数据
 ```
 
-原始 EPUB 不会被修改。导入先写 staging，成功后整体发布；失败清理临时内容。进度与设置通过临时文件替换保存。初版使用 JSON 文件管理书库，后续可以迁移 SQLite。
+原始 EPUB 不会被修改。导入先写 staging，成功后整体发布；失败清理临时内容。书库元数据和进度使用 JSON 文件，设置使用版本化 JSON；标注、笔记和书签使用 WAL 模式的 SQLite。旧版书签会在首次读取书籍时自动迁移。
 
 ## 当前边界
 
-初版针对无 DRM、可重排 EPUB。尚未实现 PDF、漫画/固定版式、竖排/RTL 分页、批注、云同步、书库删除与自定义分类。分页位置采用“章节 + 相对位置”，改变字号后恢复到附近位置，不是 EPUB CFI。
+当前针对无 DRM、可重排 EPUB。尚未实现 PDF、漫画/固定版式、竖排/RTL 分页、云同步、书库删除与自定义分类。分页位置采用“章节 + 相对位置”，改变字号后恢复到附近位置，不是 EPUB CFI。标注使用 UTF-16 文本偏移和前后文重定位，适合正常重排；跨多个不同结构节点的复杂选区仍可能无法稳定恢复。
 
 拆分参考 calibre 的处理思路，独立用 C++ 实现，**不是 calibre 转换管线的等价移植**。支持内联分页声明、嵌入/直接链接 CSS 中的标签、类、ID 和后代选择器；尚无完整 CSS cascade、复杂选择器、`@import`、预处理清洗和损坏 HTML 修复。巨型段落、表格、SVG、pre 等保持完整并产生提示；256 KiB 是内容预算，不是含 head 的最终文档硬上限。字体混淆暂不解码；解析到明确 DRM 时拒绝导入。
 

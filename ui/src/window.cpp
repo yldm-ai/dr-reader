@@ -12,6 +12,14 @@ int Window::scale(int x) const
 {
     return MulDiv(x, GetDpiForWindow(hwnd_), 96);
 }
+int Window::caption_height() const
+{
+    const auto dpi=GetDpiForWindow(hwnd_);
+    RECT frame{};
+    AdjustWindowRectExForDpi(&frame,WS_OVERLAPPEDWINDOW,FALSE,0,dpi);
+    const int resize=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
+    return -frame.top-(IsZoomed(hwnd_)?resize:0);
+}
 bool Window::create(HINSTANCE instance, ShellStyle style)
 {
     style_ = style;
@@ -43,7 +51,7 @@ RECT Window::content_bounds() const
     RECT r{};
     GetClientRect(hwnd_, &r);
     if (style_ == ShellStyle::Direct2D)
-        r.top = scale(40);
+        r.top = caption_height();
     return r;
 }
 void Window::set_title(const std::wstring &title)
@@ -54,6 +62,7 @@ void Window::set_title(const std::wstring &title)
 }
 void Window::set_style(ShellStyle style)
 {
+    if(style_==style)return;
     style_ = style;
     target_.Reset();
     apply_frame();
@@ -91,7 +100,7 @@ int Window::caption_hit(POINT p) const
 {
     RECT r{};
     GetClientRect(hwnd_, &r);
-    if (p.y < 0 || p.y >= scale(40))
+    if (p.y < 0 || p.y >= caption_height())
         return HTCLIENT;
     int w = scale(46);
     if (p.x >= r.right - w)
@@ -131,16 +140,17 @@ void Window::paint()
         {
             target_->SetDpi(float(GetDpiForWindow(hwnd_)), float(GetDpiForWindow(hwnd_)));
             auto size = target_->GetSize();
+            const float height=caption_height()*96.0f/GetDpiForWindow(hwnd_);
             target_->BeginDraw();
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
             target_->CreateSolidColorBrush(D2D1::ColorF(dark_ ? 0x20211f : 0xf4f3ef), &brush);
             if (brush)
             {
-                target_->FillRectangle(D2D1::RectF(0, 0, size.width, 40), brush.Get());
+                target_->FillRectangle(D2D1::RectF(0, 0, size.width, height), brush.Get());
                 brush->SetColor(D2D1::ColorF(dark_ ? 0xe3e3dd : 0x30372f));
                 if (text_)
                     target_->DrawTextW(title_.c_str(), static_cast<UINT32>(title_.size()), text_.Get(),
-                                       D2D1::RectF(18, 0, std::max(18.f, size.width - 150), 40), brush.Get(),
+                                       D2D1::RectF(18, 0, std::max(18.f, size.width - 150), height), brush.Get(),
                                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 for (int i = 0; i < 3; ++i)
                 {
@@ -151,12 +161,12 @@ void Window::paint()
                         brush->SetColor(D2D1::ColorF(hit == HTCLOSE ? 0xc42b1c
                                                      : dark_        ? 0x363832
                                                                     : 0xe5e5df));
-                        target_->FillRectangle(D2D1::RectF(x, 0, x + 46, 40), brush.Get());
+                        target_->FillRectangle(D2D1::RectF(x, 0, x + 46, height), brush.Get());
                     }
                     brush->SetColor(D2D1::ColorF(hot_ == HTCLOSE && hit == HTCLOSE ? 0xffffff
                                                  : dark_                           ? 0xe3e3dd
                                                                                    : 0x30372f));
-                    float cx = x + 23, cy = 20;
+                    float cx = x + 23, cy = height/2;
                     if (i == 0)
                         target_->DrawLine({cx - 5, cy}, {cx + 5, cy}, brush.Get());
                     else if (i == 1)

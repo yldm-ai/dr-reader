@@ -42,6 +42,7 @@ class Window
     int caption_hit(POINT point) const;
     void apply_frame();
     int scale(int dip) const;
+    int caption_height() const;
     HWND hwnd_ = nullptr;
     ShellStyle style_ = ShellStyle::Mica;
     bool dark_ = false, mica_available_ = false;

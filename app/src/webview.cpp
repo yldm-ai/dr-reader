@@ -111,7 +111,7 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                                 CoTaskMemFree(source);
                                                 CoTaskMemFree(raw);
                                                 if (origin != L"https://app.dr-reader.local/index.html" ||
-                                                    text.size() > 64 * 1024)
+                                                text.size() > 256 * 1024)
                                                     return S_OK;
                                                 try
                                                 {

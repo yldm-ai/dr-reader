@@ -1,5 +1,7 @@
 #pragma once
 #include "dr/epub.h"
+#include "dr/annotations.h"
+#include <memory>
 namespace dr
 {
 class Library
@@ -14,6 +16,10 @@ class Library
     Json search(const std::string &id, const std::string &query) const;
     Json settings() const;
     Json save_settings(const Json &settings);
+    Json annotations(const std::string& id) const;
+    Json save_annotation(const std::string& id,const Json& annotation);
+    void remove_annotation(const std::string& id,const std::string& annotation_id);
+    std::string lookup_url(const std::string& dictionary,const std::string& text) const;
     const fs::path &root() const
     {
         return root_;
@@ -21,6 +27,7 @@ class Library
 
   private:
     fs::path root_;
+    std::unique_ptr<AnnotationStore> annotations_;
     fs::path book_path(const std::string &id) const;
     void store(const std::string &id, const Json &book) const;
 };

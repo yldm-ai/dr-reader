@@ -1,10 +1,7 @@
-const COLORS = {
-  yellow: "rgba(207, 162, 76, .42)",
-  green: "rgba(108, 155, 125, .34)",
-  blue: "rgba(107, 159, 197, .34)",
-  pink: "rgba(195, 125, 160, .30)",
-  purple: "rgba(161, 138, 194, .30)",
-};
+import { paint } from "./highlight-colors.ts";
+import { materialPaths } from "./material-icons.ts";
+
+const TIP_PATH = materialPaths["lightbulb-fill"];
 
 export class AnnotationLayer {
   constructor(doc, callbacks = {}) {
@@ -18,24 +15,88 @@ export class AnnotationLayer {
     this.colorStyles = new Map();
   }
 
-  set(annotations, locate) {
+  /** `paper` is the reading palette: highlight fills and underline inks depend on it. */
+  set(annotations, locate, paper = { paper: "#ffffff", dark: false }) {
     this.clear();
     if (!this.doc.defaultView.CSS?.highlights) return;
     this.highlightRanges = [];
     this.underlineRanges = [];
+    this.notes = [];
     for (const annotation of annotations) {
       const range = locate(annotation);
       if (!range) continue;
       this.ranges.set(annotation.id, range);
-      (annotation.style === "underline"
-        ? this.underlineRanges
-        : this.highlightRanges
-      ).push({
+      const colors = paint(annotation.color, paper.paper, paper.dark);
+      if (annotation.note)
+        this.notes.push({ id: annotation.id, range, note: annotation.note, ink: colors.ink });
+      // Note-only annotations have no mark; their tip alone shows where the note is.
+      if (annotation.style === "note") continue;
+      const underline = annotation.style === "underline";
+      (underline ? this.underlineRanges : this.highlightRanges).push({
         range,
-        color: COLORS[annotation.color] || COLORS.yellow,
+        color: underline ? colors.ink : colors.fill,
       });
     }
     this.installColorLayers();
+    this.placeTips();
+  }
+
+  /**
+   * Puts a small tip icon at the top-right corner of the end of every passage with a note. The
+   * icons live outside <body> (like the page tail), carry no text so anchors and search are
+   * unaffected, and are in document coordinates so they move with the page and its snapshots.
+   */
+  placeTips() {
+    this.tipLayer?.remove();
+    this.tipLayer = null;
+    if (!this.notes?.length) return;
+    const doc = this.doc;
+    const view = doc.defaultView;
+    if (!doc.getElementById("dr-note-tip-style")) {
+      const style = doc.createElement("style");
+      style.id = "dr-note-tip-style";
+      style.textContent = `.dr-note-tips{position:absolute!important;left:0!important;top:0!important;width:0!important;height:0!important;margin:0!important;padding:0!important;border:0!important}
+.dr-note-tip{position:absolute!important;display:block!important;width:14px!important;height:14px!important;margin:0!important;padding:0!important;color:var(--dr-tip,#dfab01)!important;cursor:pointer!important;user-select:none!important;-webkit-user-select:none!important;opacity:.92}
+.dr-note-tip:hover{opacity:1}.dr-note-tip svg{display:block!important;width:14px!important;height:14px!important;fill:currentColor!important}`;
+      doc.head.append(style);
+    }
+    const layer = doc.createElement("div");
+    layer.className = "dr-note-tips";
+    layer.setAttribute("aria-hidden", "true");
+    for (const note of this.notes) {
+      const rects = [...note.range.getClientRects()].filter((rect) => rect.width && rect.height);
+      const end = rects.at(-1);
+      if (!end) continue;
+      const tip = doc.createElement("span");
+      tip.className = "dr-note-tip";
+      tip.dataset.id = note.id;
+      tip.style.setProperty("--dr-tip", note.ink);
+      tip.style.left = `${end.right + view.scrollX - 3}px`;
+      tip.style.top = `${end.top + view.scrollY - 9}px`;
+      tip.innerHTML = `<svg viewBox="0 -960 960 960"><path d="${TIP_PATH}"/></svg>`;
+      layer.append(tip);
+    }
+    doc.documentElement.append(layer);
+    this.tipLayer = layer;
+  }
+
+  /** Takes the tips out of the layout while pages are measured; `placeTips` brings them back. */
+  hideTips() {
+    this.tipLayer?.remove();
+    this.tipLayer = null;
+  }
+
+  /** The note under the pointer: on its tip, or anywhere on the noted passage. */
+  noteAtPoint(event) {
+    const tip = event.target?.closest?.(".dr-note-tip");
+    for (const note of this.notes || []) {
+      if (tip?.dataset.id === note.id) return note;
+      for (const rect of note.range.getClientRects())
+        if (event.clientX >= rect.left && event.clientX <= rect.right &&
+            event.clientY >= rect.top && event.clientY <= rect.bottom)
+          return note;
+    }
+    return null;
   }
 
   installColorLayers() {
@@ -72,28 +133,13 @@ export class AnnotationLayer {
 
   clear() {
     this.ranges.clear();
+    this.notes = [];
+    this.hideTips();
     for (const style of this.colorStyles?.values() || []) style.remove();
     this.colorStyles?.clear();
     for (const name of this.layerNames || [])
       this.doc.defaultView.CSS?.highlights?.delete(name);
     this.layerNames = [];
-  }
-
-  colorAtPoint(event) {
-    for (const [kind, values] of [
-      ["highlight", this.highlightRanges],
-      ["underline", this.underlineRanges],
-    ])
-      for (const value of values || [])
-        for (const rect of value.range.getClientRects())
-          if (
-            event.clientX >= rect.left &&
-            event.clientX <= rect.right &&
-            event.clientY >= rect.top &&
-            event.clientY <= rect.bottom
-          )
-            return { kind, color: value.color };
-    return null;
   }
 
   rect(range) {

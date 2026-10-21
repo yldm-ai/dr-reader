@@ -170,6 +170,34 @@ Json Library::search(const std::string &id, const std::string &query) const
     }
     return results;
 }
+Json Library::chapter_lengths(const std::string &id) const
+{
+    auto book = get(id);
+    Json lengths = Json::array();
+    for (size_t i = 0; i < book["chapters"].size(); ++i)
+    {
+        const auto text = read_file(book_path(id) / "search" / (std::to_string(i) + ".txt"));
+        size_t count = 0;
+        for (size_t at = 0; at < text.size();)
+        {
+            // Decode one UTF-8 code point; malformed bytes count as one unit and move on.
+            const auto lead = static_cast<unsigned char>(text[at]);
+            const size_t size = lead < 0x80 ? 1 : lead >> 5 == 6 ? 2 : lead >> 4 == 14 ? 3 : lead >> 3 == 30 ? 4 : 1;
+            char32_t cp = size == 1 ? lead : lead & (0x7f >> size);
+            for (size_t k = 1; k < size && at + k < text.size(); ++k)
+                cp = (cp << 6) | (static_cast<unsigned char>(text[at + k]) & 0x3f);
+            at += size;
+            // Matches the reader's \s: ASCII and Unicode spaces, line separators and the BOM.
+            const bool space = cp == ' ' || (cp >= 0x09 && cp <= 0x0d) || cp == 0xa0 || cp == 0x1680 ||
+                               (cp >= 0x2000 && cp <= 0x200a) || cp == 0x2028 || cp == 0x2029 || cp == 0x202f ||
+                               cp == 0x205f || cp == 0x3000 || cp == 0xfeff;
+            if (!space)
+                count += cp > 0xffff ? 2 : 1;
+        }
+        lengths.push_back(count);
+    }
+    return lengths;
+}
 Json Library::settings() const
 {
     auto p = root_ / "settings.json";

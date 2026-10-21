@@ -14,6 +14,8 @@ Json installed_fonts(){Microsoft::WRL::ComPtr<IDWriteFactory> factory;Json resul
  for(auto& name:names)result.push_back(name);return result;}
 void copy_text(HWND owner,const std::string& text){if(text.size()>65536)throw std::runtime_error("复制内容过长");auto wide=widen(text);auto bytes=(wide.size()+1)*sizeof(wchar_t);HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE,bytes);if(!memory)throw std::runtime_error("无法分配剪贴板内存");auto data=GlobalLock(memory);if(!data){GlobalFree(memory);throw std::runtime_error("无法锁定剪贴板内存");}memcpy(data,wide.c_str(),bytes);GlobalUnlock(memory);
  if(!OpenClipboard(owner)){GlobalFree(memory);throw std::runtime_error("剪贴板正被其他程序使用");}EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,memory)){CloseClipboard();GlobalFree(memory);throw std::runtime_error("无法写入剪贴板");}CloseClipboard();}
+// Matches the toolbar: titles past 20 characters (code points, not UTF-16 units) end in an ellipsis.
+std::wstring short_title(const std::wstring& title,size_t max=20){size_t count=0;for(size_t i=0;i<title.size();++i){if(IS_LOW_SURROGATE(title[i]))continue;if(count++==max)return title.substr(0,i)+L"…";}return title;}
 }
 Application::Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell)
     : library_(std::move(root)), assets_(std::move(assets)), initial_files_(std::move(files)),
@@ -108,6 +110,14 @@ void Application::receive(const Json &request)
         webview_.send({{"id", id}, {"result", enabled}});
         return;
     }
+    if (method == "titlebar")
+    {
+        const bool hidden = params.value("hidden", !window_.borderless());
+        window_.set_borderless(hidden);
+        webview_.send({{"event", "titlebar"}, {"hidden", hidden}});
+        webview_.send({{"id", id}, {"result", hidden}});
+        return;
+    }
     if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;
     if (method == "import")
@@ -193,7 +203,7 @@ void Application::receive(const Json &request)
                     auto book = library_.get(params.at("id"));
                     result = book;
                     window_.post([this, title = book.at("title").get<std::string>()]
-                                 { window_.set_title(widen(title) + L" — DR Reader"); });
+                                 { window_.set_title(short_title(widen(title)) + L" — DR Reader"); });
                 }
                 else if (method == "position")
                     result = library_.save_position(params.at("id"), params.at("position"));
@@ -201,6 +211,8 @@ void Application::receive(const Json &request)
                     result = library_.toggle_bookmark(params.at("id"), params.at("mark"));
                 else if (method == "search")
                     result = library_.search(params.at("id"), params.at("query"));
+                else if (method == "book.stats")
+                    result = {{"chars", library_.chapter_lengths(params.at("id"))}};
                 else if(method=="annotations")result=library_.annotations(params.at("id"));
                 else if(method=="annotation.save")result=library_.save_annotation(params.at("id"),params.at("annotation"));
                 else if(method=="annotation.delete"){library_.remove_annotation(params.at("id"),params.at("annotationId"));result=true;}
@@ -232,14 +244,22 @@ int Application::run(HINSTANCE instance)
                                       : ShellStyle::Mica, IDI_DR_READER))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
-    window_.on_toggle_fullscreen = [this] {
+    // Alt+Enter hides or restores the title bar; fullscreen stays on F11 and the toolbar.
+    window_.on_toggle_borderless = [this] {
         // Dispatch out of the synchronous WebView2 accelerator callback before resizing it.
         window_.post([this] {
-            window_.set_fullscreen(!window_.fullscreen());
-            webview_.send({{"event", "fullscreen"}, {"enabled", window_.fullscreen()}});
+            window_.set_borderless(!window_.borderless());
+            webview_.send({{"event", "titlebar"}, {"hidden", window_.borderless()}});
         });
     };
-    webview_.on_toggle_fullscreen = window_.on_toggle_fullscreen;
+    webview_.on_toggle_borderless = window_.on_toggle_borderless;
+    // The page draws the Direct2D caption buttons' tips with its own tooltip, directly below
+    // the caption; positions are converted from client pixels to CSS pixels.
+    window_.on_caption_tooltip = [this](const std::wstring &text, RECT button) {
+        const double scale = 96.0 / GetDpiForWindow(window_.handle());
+        webview_.send({{"event", "caption-tooltip"}, {"text", narrow(text)},
+                       {"left", button.left * scale}, {"width", (button.right - button.left) * scale}});
+    };
     window_.set_theme(settings["application"].value("theme", std::string("light")));
     webview_.on_message = [this](auto &request) { receive(request); };
     webview_.on_error = [this](const auto &error)

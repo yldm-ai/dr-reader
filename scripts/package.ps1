@@ -13,6 +13,7 @@ $dependencyLicenses = @{
  'webview2.txt' = 'build/_deps/webview2-src/LICENSE.txt'
  'webview2-notice.txt' = 'build/_deps/webview2-src/NOTICE.txt'
  'stpageflip.txt' = 'node_modules/page-flip/LICENSE'
+ 'material-symbols.txt' = 'node_modules/@material-symbols/svg-400/LICENSE'
 }
 foreach ($entry in $dependencyLicenses.GetEnumerator()) {
  $sourceLicense = Join-Path $projectRoot $entry.Value

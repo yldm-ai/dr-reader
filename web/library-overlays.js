@@ -16,7 +16,7 @@ export function createLibraryOverlays(onRemove) {
   remove.id = "book-menu-delete";
   remove.className = "danger-button";
   remove.setAttribute("role", "menuitem");
-  remove.innerHTML = `${icon("delete")}<span>删除图书</span>`;
+  remove.innerHTML = `${icon("delete", "fluent")}<span>删除图书</span>`;
   menu.append(remove);
   document.body.append(tooltip, menu);
 

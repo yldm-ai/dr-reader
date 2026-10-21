@@ -38,7 +38,7 @@ try {
     const reader = Object.create(Reader.prototype);
     Object.assign(reader, {
       doc, style: doc.head.appendChild(doc.createElement('style')),
-      motion: { setAllowed() {} }, hideSelection() {}, reflow() {},
+      motion: { setAllowed() {}, prepare() {} }, hideSelection() {}, reflow() {},
     });
     reader.apply(settings);
     await doc.fonts.ready;

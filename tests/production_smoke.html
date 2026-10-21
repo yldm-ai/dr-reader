@@ -22,7 +22,7 @@ try {
   await until(() => frame.contentDocument.querySelector('.book-card'));
   const doc = frame.contentDocument;
   const win = frame.contentWindow;
-  check(doc.querySelectorAll('.fluent-icon').length > 20, 'bundled icons did not hydrate');
+  check(doc.querySelectorAll('.material-icon svg path').length > 20 && doc.querySelectorAll('.fluent-icon').length >= 2, 'bundled icons did not hydrate');
   doc.querySelector('.book-card').click();
   await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
   const content = doc.getElementById('book-frame').contentDocument;

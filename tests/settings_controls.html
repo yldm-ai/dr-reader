@@ -40,12 +40,18 @@ try {
   key(font.search, 'Escape');
   check(!font.isOpen && document.getElementById('reading-settings').open, 'Escape must close the font menu before the settings drawer');
   font.open();
-  document.getElementById('setting-mode-trigger').click();
+  document.getElementById('setting-fontWeight-trigger').click();
   check(!font.isOpen, 'opening another selector must light-dismiss the old menu');
-  const mode = panel.selectControls.get('mode');
-  key(mode.button, 'ArrowDown'); key(mode.button, 'Enter');
+  const weight = panel.selectControls.get('fontWeight');
+  weight.close();
+  key(weight.button, 'ArrowDown'); key(weight.button, 'ArrowDown'); key(weight.button, 'Enter');
   await frame();
-  check(panel.value.reading.mode === 'scroll', 'keyboard selection must change reading mode');
+  check(panel.value.reading.fontWeight === 500, 'keyboard selection must change the font weight');
+  // Two-choice settings are segmented radio buttons instead of dropdowns.
+  document.getElementById('setting-mode-scroll').click();
+  await frame();
+  check(panel.value.reading.mode === 'scroll' && document.getElementById('setting-mode-scroll').checked,
+    'segmented control must change reading mode');
   const dictionaryRow = document.querySelector('.dictionary-row');
   const before = changes;
   for (let i = 21; i <= 30; i++) panel.update('reading', { fontSize: i });
@@ -54,7 +60,8 @@ try {
   check(document.querySelector('.dictionary-row') === dictionaryRow, 'reading changes must not recreate dictionary rows');
   document.getElementById('reset-reading').click();
   await panel.flush();
-  check(font.button.textContent.includes('默认衬线字体') && mode.button.textContent.includes('左右翻页'), 'reset must sync displayed labels and saved values');
+  check(font.button.textContent.includes('默认衬线字体') && document.getElementById('setting-mode-paged').checked &&
+    weight.button.textContent.includes('常规'), 'reset must sync displayed labels and saved values');
   panel.configure({ ...data, settings: structuredClone(native.data.settings) });
   check(font.button.textContent.includes('默认衬线字体'), 'reloaded settings must restore font labels');
   // The lower selectors must open above the trigger and stay within the viewport.

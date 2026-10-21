@@ -56,7 +56,28 @@ try {
           if (ratio(expand(colors[a]), expand(colors[b])) < 4.5) throw Error(`${a}/${b} text contrast is too low`);
         }
         await capture('application-settings-dark.png');
-        await app.locator('#application-settings-back').click();
+        // Application settings are an in-app modal over the page; only its content scrolls.
+        if (!await app.evaluate(async () => {
+          const dialog = document.getElementById('application-settings'), scroll = document.getElementById('application-settings-scroll');
+          const head = () => document.getElementById('application-settings-title').getBoundingClientRect().top;
+          if (!document.getElementById('application-settings-title').closest('.app-settings-nav')) return false;
+          const before = head();
+          scroll.scrollTop = scroll.scrollHeight;
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          const ok = dialog.matches(':modal') && !document.getElementById('app').hidden && head() === before &&
+            document.querySelector('.app-settings-nav a[aria-current]')?.dataset.section === 'about' &&
+            document.querySelectorAll('.app-settings-nav a').length === 3;
+          scroll.scrollTop = 0;
+          return ok;
+        })) throw Error('application settings must be a fixed modal whose title stays put while its groups scroll');
+        if (!await app.evaluate(() => {
+          const close = document.getElementById('application-settings-close').getBoundingClientRect();
+          const scroll = document.getElementById('application-settings-scroll').getBoundingClientRect();
+          const track = document.querySelector('.app-settings-main .overlay-scrollbar')?.getBoundingClientRect();
+          return close.bottom <= scroll.top && (!track || close.bottom <= track.top);
+        })) throw Error('the close button must not cover the scrolling groups or their scrollbar');
+        await app.locator('#application-settings-close').click();
+        if (await app.evaluate(() => document.getElementById('application-settings').open)) throw Error('close button must dismiss application settings');
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
         await capture('library-dark.png');
@@ -67,11 +88,65 @@ try {
         await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
         const preview = await app.locator('#type-preview').evaluate(el => getComputedStyle(el).backgroundColor);
         if (preview !== 'rgb(25, 25, 25)') throw Error('reading preview must use the same dark paper as the EPUB');
-        await app.locator('#setting-mode-trigger').click();
+        await app.locator('#setting-fontWeight-trigger').click();
         await capture('reading-settings-dark.png');
-        await app.locator('#setting-mode-trigger').press('Escape');
+        await app.locator('#setting-fontWeight-trigger').press('Escape');
         await app.locator('[data-close="reading-settings"]').click();
         await capture('reader-dark.png');
+        // Notes: a saved note leaves a tip at the top-right of the passage's end and peeks on hover;
+        // the menu shows the passage's mark pressed, and pressing it again removes the mark.
+        const frameBox = await app.locator('#book-frame').boundingBox();
+        const passage = () => app.evaluate(() => {
+          const doc = document.getElementById('book-frame').contentDocument, view = doc.defaultView;
+          const p = [...doc.querySelectorAll('p')].find(el => {
+            const rect = el.getBoundingClientRect();
+            return rect.left >= 0 && rect.right <= view.innerWidth && rect.top >= 0 && rect.bottom <= view.innerHeight;
+          });
+          const range = doc.createRange();
+          range.setStart(p.firstChild, 2); range.setEnd(p.firstChild, 10);
+          return { range: range.getBoundingClientRect().toJSON(), rects: [...range.getClientRects()].map(r => r.toJSON()), index: [...doc.querySelectorAll('p')].indexOf(p) };
+        });
+        const marked = await passage();
+        await app.evaluate(index => {
+          const doc = document.getElementById('book-frame').contentDocument;
+          const text = doc.querySelectorAll('p')[index].firstChild, range = doc.createRange();
+          range.setStart(text, 2); range.setEnd(text, 10);
+          doc.getSelection().removeAllRanges(); doc.getSelection().addRange(range);
+          doc.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        }, marked.index);
+        await app.locator('#selection-menu').waitFor({ state: 'visible' });
+        if (await app.locator('#selection-delete').count()) throw Error('the selection menu must not offer a separate mark deletion');
+        await app.locator('#highlight-color').click();
+        await app.locator('#mark-palette').waitFor({ state: 'visible' });
+        await capture('selection-menu.png');
+        await app.locator('#highlight-color').click();
+        await app.locator('#selection-note').click();
+        await app.locator('#annotation-note').fill('这是一条原创的测试笔记。');
+        await app.locator('#annotation-save').click();
+        const tip = await app.waitForFunction(() => document.getElementById('book-frame').contentDocument
+          .querySelector('.dr-note-tip')?.getBoundingClientRect().toJSON());
+        const tipRect = await tip.jsonValue(), end = marked.rects.at(-1);
+        if (Math.abs(tipRect.left - end.right) > 6 || tipRect.bottom > end.top + 8 || tipRect.top < end.top - 16)
+          throw Error(`note tip must sit at the passage's top-right: ${JSON.stringify({ tipRect, end })}`);
+        await page.mouse.move(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
+        await app.locator('#note-peek').waitFor({ state: 'visible' });
+        if (await app.locator('#note-peek-text').textContent() !== '这是一条原创的测试笔记。') throw Error('hovering a noted passage must show its note');
+        await capture('note-peek.png');
+        await page.mouse.click(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
+        await app.locator('#selection-menu').waitFor({ state: 'visible' });
+        if (await app.locator('#selection-highlight').getAttribute('aria-pressed') !== 'true' ||
+            await app.locator('#selection-note-delete').isHidden())
+          throw Error('a highlighted note must press the highlight button and offer note deletion');
+        await capture('selection-menu-marked.png');
+        await app.locator('#selection-highlight').click();
+        await app.waitForFunction(() => window.nativeProbe.data.annotations[0]?.style === 'note');
+        if (!await app.evaluate(() => document.getElementById('book-frame').contentDocument.querySelector('.dr-note-tip')))
+          throw Error('removing the highlight must keep the note and its tip');
+        await page.mouse.click(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
+        await app.locator('#selection-note-delete').click();
+        await app.waitForFunction(() => !window.nativeProbe.data.annotations.length &&
+          !document.getElementById('book-frame').contentDocument.querySelector('.dr-note-tip'));
+        await app.evaluate(() => { document.getElementById('toast').hidden = true; });
         await app.evaluate(() => {
           window.chapterGate = new Promise(resolve => { window.releaseChapter = resolve; });
           const frame = document.getElementById('book-frame');
@@ -156,7 +231,7 @@ try {
         await app.locator('#reader-app-settings').click();
         await app.locator('[data-setting-theme="application"][data-value="light"]').click();
         await app.waitForFunction(() => document.body.dataset.theme === 'light');
-        await app.locator('#application-settings-back').click();
+        await app.locator('#application-settings-close').click();
         const paper = await app.locator('#book-frame').evaluate(el => getComputedStyle(el.contentDocument.body).backgroundColor);
         if (paper !== 'rgb(25, 25, 25)') throw Error('application theme must not override the independent reading theme');
         await app.locator('#reader-settings').click();
@@ -166,6 +241,27 @@ try {
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
         await capture('library-light.png');
+        // Home-page labels are chrome: a select-all drag must not pick them up, while search stays editable.
+        if (!await app.evaluate(() => {
+          getSelection().selectAllChildren(document.getElementById('library-view'));
+          const selected = getSelection().toString().trim();
+          getSelection().removeAllRanges();
+          const search = document.getElementById('library-search');
+          search.value = '可编辑'; search.select();
+          const editable = search.selectionEnd - search.selectionStart === 3;
+          search.value = '';
+          return !selected.includes('全部图书') && getComputedStyle(document.querySelector('.nav-item')).userSelect === 'none' && editable;
+        })) throw Error('library home text must not be selectable while the search field stays editable');
+        if (!await app.evaluate(() => {
+          const field = document.querySelector('.search-field'), icon = field.querySelector('.ui-icon').getBoundingClientRect();
+          const box = field.getBoundingClientRect();
+          return Math.abs(icon.top + icon.height / 2 - (box.top + box.height / 2)) < 1;
+        })) throw Error('library search icon must be vertically centred in its field');
+        await app.locator('#library-search').focus();
+        if (await app.locator('#library-search').evaluate(el => getComputedStyle(el).outlineStyle) !== 'none')
+          throw Error('focused library search must not draw a square outline inside its rounded field');
+        await capture('library-search-focus.png');
+        await app.locator('#library-search').blur();
         const coverHeight = await app.locator('.continue-cover').evaluate(el => el.getBoundingClientRect().height);
         if (coverHeight > 80) throw Error('continue reading cover expanded beyond its compact card');
         // Exercise immersive mode through the shipped controls, then recover without a toolbar.
@@ -173,15 +269,69 @@ try {
         await app.locator('#reader-loading').waitFor({ state: 'hidden' });
         const checkToolbar = () => app.evaluate(() => {
           const back = document.querySelector('#back-library');
-          const arrow = back.querySelector('.fluent-icon').getBoundingClientRect();
+          const arrow = back.querySelector('.ui-icon').getBoundingClientRect();
           const actions = document.querySelector('.reader-actions').getBoundingClientRect();
           return arrow.left >= 0 && arrow.left <= 14 && actions.right <= innerWidth &&
             back.getBoundingClientRect().right < actions.left;
         });
         if (!await checkToolbar()) throw Error('reader toolbar must align left without overlapping actions');
-        await app.locator('html').evaluate(el => el.style.width = '460px');
+        // Quick typesetting sits centred between navigation and actions and drives the real settings.
+        if (!await app.evaluate(() => {
+          const quick = document.querySelector('.toolbar-quick').getBoundingClientRect();
+          const start = document.querySelector('.toolbar-start').getBoundingClientRect();
+          const actions = document.querySelector('.reader-actions').getBoundingClientRect();
+          return quick.width > 0 && quick.left >= start.right && quick.right <= actions.left &&
+            Math.abs(quick.left + quick.width / 2 - innerWidth / 2) < 4;
+        })) throw Error('quick toolbar controls must be centred without overlapping either side');
+        if (!await app.evaluate(() => {
+          const toc = document.getElementById('toggle-toc'), title = document.getElementById('reader-book-title');
+          return toc.closest('.toolbar-start') && toc.getBoundingClientRect().right <= title.getBoundingClientRect().left &&
+            toc.querySelector('.material-icon') && /^《.+》$/.test(title.textContent) &&
+            !document.querySelector(':is(.sidebar, #library-view, #book-context-menu) .material-icon') &&
+            document.querySelectorAll(':is(.sidebar, #library-view) .fluent-icon').length > 8;
+        })) throw Error('sidebar toggle must sit before the 《title》 and the library home must keep Fluent icons');
+        // Hover tips are self-drawn: no native title survives, and hovering shows the custom tip.
+        if (await app.locator('[title]:not(iframe)').count()) throw Error('native title tooltips must be replaced by self-drawn tips');
+        await app.locator('#reader-search').hover();
+        await app.waitForFunction(() => {
+          const tip = document.querySelector('.ui-tooltip');
+          return tip.matches(':popover-open') && tip.classList.contains('visible') && tip.textContent.startsWith('书内搜索');
+        });
+        await page.mouse.move(5, 400);
+        await app.waitForFunction(() => !document.querySelector('.ui-tooltip').matches(':popover-open'));
+        // The far-right button collapses the toolbar into a single expand button and persists it.
+        await app.locator('#collapse-toolbar').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.showToolbar === false);
+        if (await app.locator('.reader-toolbar').isVisible()) throw Error('collapsed toolbar must hide the toolbar');
+        const shell = await page.locator('iframe').boundingBox();
+        await page.mouse.move(shell.x + shell.width / 2, shell.y + shell.height / 2);
+        await app.locator('#expand-toolbar').waitFor({ state: 'hidden' });
+        await page.mouse.move(shell.x + shell.width - 30, shell.y + 20);
+        await app.locator('#expand-toolbar').waitFor({ state: 'visible' });
+        await app.locator('#expand-toolbar').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.showToolbar === true);
+        await app.locator('#expand-toolbar').waitFor({ state: 'hidden' });
+        await app.locator('.reader-toolbar').waitFor({ state: 'visible' });
+        const fontSize = await app.evaluate(() => window.nativeProbe.data.settings.reading.fontSize);
+        await app.locator('#font-larger').click();
+        await app.waitForFunction(size => window.nativeProbe.data.settings.reading.fontSize === size + 1 &&
+          document.getElementById('quick-font-size').textContent === String(size + 1), fontSize);
+        await app.locator('#font-smaller').click();
+        await app.waitForFunction(size => window.nativeProbe.data.settings.reading.fontSize === size, fontSize);
+        await app.locator('[data-quick-theme="dark"]').click();
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)' &&
+          document.querySelector('[data-quick-theme="dark"]').getAttribute('aria-checked') === 'true');
+        await capture('reader-toolbar-dark-page.png');
+        await app.locator('[data-quick-theme="light"]').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'light');
+        // The reader is laid out against the window, so narrow the application frame itself.
+        const appFrame = page.locator('iframe');
+        await appFrame.evaluate(el => el.style.width = '460px');
+        await app.waitForFunction(() => innerWidth === 460);
+        if (await app.locator('.toolbar-quick').isVisible()) throw Error('quick controls must yield to actions on narrow windows');
         if (!await checkToolbar()) throw Error('narrow reader toolbar overlaps or loses left alignment');
-        await app.locator('html').evaluate(el => el.style.width = '');
+        await appFrame.evaluate(el => el.style.width = '1200px');
+        await app.waitForFunction(() => innerWidth === 1200);
         await app.locator('#reader-settings').click();
         await app.locator('#immersive-reading').click();
         await app.waitForFunction(() => document.getElementById('reader-view').dataset.toolbar === 'false');
@@ -221,16 +371,34 @@ try {
         await page.keyboard.press('F8');
         await app.locator('#reading-settings').waitFor({ state: 'visible' });
         await app.locator('[data-close="reading-settings"]').click();
+        // Alt+Enter only hides the title bar; fullscreen is a separate F11 toggle.
         await page.keyboard.press('Alt+Enter');
+        await app.waitForFunction(() => document.body.dataset.titlebar === 'hidden');
+        if (await app.evaluate(() => window.nativeProbe.data.fullscreen)) throw Error('Alt+Enter must not enter fullscreen');
+        await book.locator('html').press('Alt+Enter');
+        await app.waitForFunction(() => document.body.dataset.titlebar === 'shown');
+        await page.keyboard.press('F11');
         await app.waitForFunction(() => document.body.dataset.fullscreen === 'true');
         await page.keyboard.press('Escape');
         await app.waitForFunction(() => document.body.dataset.fullscreen === 'false');
         if (await app.locator('#reader-view').evaluate(el => el.hidden)) throw Error('Escape should exit fullscreen before leaving the book');
+        // A collapsed toolbar leaves nothing on screen; each top corner reveals only its own button.
+        const corner = () => app.evaluate(() => ['corner-library', 'expand-toolbar']
+          .map(id => getComputedStyle(document.getElementById(id)).visibility).join());
+        const at = (x, y) => page.mouse.move(shell.x + x, shell.y + y);
+        await at(size.width * .5, size.height * .5);
+        await page.waitForTimeout(700);
+        if (await corner() !== 'hidden,hidden') throw Error('collapsed toolbar must not leave buttons on screen');
+        await at(size.width - 30, 20);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('expand-toolbar')).visibility === 'visible');
+        if (await corner() !== 'hidden,visible') throw Error('top-right corner must reveal only the expand button');
+        await at(40, 20);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('corner-library')).visibility === 'visible');
+        await at(size.width * .5, size.height * .5);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('corner-library')).visibility === 'hidden');
         await book.locator('html').click({ position: { x: size.width * .5, y: size.height * .5 } });
-        await app.locator('#quick-settings').waitFor({ state: 'visible' });
-        await app.locator('#quick-settings').click();
-        await app.locator('#restore-reader-chrome').click();
-        await app.locator('[data-close="reading-settings"]').click();
+        await app.waitForFunction(() => document.getElementById('reader-view').dataset.corner === 'both');
+        await app.locator('#expand-toolbar').click();
         await app.locator('.reader-toolbar').waitFor({ state: 'visible' });
         console.log('PASS immersive controls, margins, side taps, selection guard, F8 and fullscreen protocol');
         await app.locator('#back-library').click();

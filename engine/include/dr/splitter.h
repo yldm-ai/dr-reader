@@ -9,6 +9,9 @@ std::string local_name(pugi::xml_node node);
 pugi::xml_node child_named(pugi::xml_node node, const char *name);
 std::string node_text(pugi::xml_node node);
 std::string xml_string(pugi::xml_node node);
+// Chapters are parsed as HTML by the reader, where a self-closing non-void element such as
+// <title/> only opens it and swallows the rest of the document. Expands those to <x></x>.
+std::string html_compatible(const std::string &xhtml);
 struct Flow
 {
     std::string path, html, title, text;

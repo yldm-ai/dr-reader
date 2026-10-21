@@ -7,6 +7,7 @@ namespace dr
 namespace
 {
 constexpr UINT dispatch = WM_APP + 1;
+constexpr UINT_PTR caption_tip_timer = 43;
 }
 int Window::scale(int x) const
 {
@@ -37,7 +38,8 @@ bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource)
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     auto dpi = GetDpiForSystem();
     int width = std::min<int>(MulDiv(1280, dpi, 96), work.right - work.left - MulDiv(48, dpi, 96));
-    int height = std::min<int>(MulDiv(880, dpi, 96), work.bottom - work.top - MulDiv(48, dpi, 96));
+    // 1027 DIP is the former 880 DIP default plus one sixth; still bounded by the work area.
+    int height = std::min<int>(MulDiv(1027, dpi, 96), work.bottom - work.top - MulDiv(48, dpi, 96));
     hwnd_ = CreateWindowExW(0, wc.lpszClassName, title_.c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                             work.left + (work.right - work.left - width) / 2,
                             work.top + (work.bottom - work.top - height) / 2, width, height, nullptr, nullptr,
@@ -75,8 +77,14 @@ RECT Window::content_bounds() const
 {
     RECT r{};
     GetClientRect(hwnd_, &r);
-    if (style_ == ShellStyle::Direct2D && !fullscreen_)
+    if (draws_caption())
         r.top = caption_height();
+    return r;
+}
+RECT Window::screen_content() const
+{
+    RECT r = content_bounds();
+    MapWindowPoints(hwnd_, nullptr, reinterpret_cast<POINT *>(&r), 2);
     return r;
 }
 void Window::set_title(const std::wstring &title)
@@ -88,6 +96,7 @@ void Window::set_title(const std::wstring &title)
 void Window::set_style(ShellStyle style)
 {
     if(style_==style)return;
+    caption_tip(HTNOWHERE);
     style_ = style;
     target_.Reset();
     apply_frame();
@@ -110,6 +119,7 @@ void Window::set_theme(const std::string &theme)
 void Window::set_fullscreen(bool enabled)
 {
     if (fullscreen_ == enabled) return;
+    caption_tip(HTNOWHERE);
     if (enabled)
     {
         windowed_placement_.length = sizeof(WINDOWPLACEMENT);
@@ -138,6 +148,36 @@ void Window::set_fullscreen(bool enabled)
     if (on_resize) on_resize();
     InvalidateRect(hwnd_, nullptr, TRUE);
 }
+void Window::set_borderless(bool enabled)
+{
+    if (borderless_ == enabled) return;
+    caption_tip(HTNOWHERE);
+    // The page stays in place; the title bar is added or removed around it.
+    const RECT before = screen_content();
+    RECT window{};
+    GetWindowRect(hwnd_, &window);
+    borderless_ = enabled;
+    target_.Reset();
+    apply_frame();
+    // Maximized and fullscreen windows keep filling their monitor.
+    if (!fullscreen_ && !IsZoomed(hwnd_))
+    {
+        const RECT after = screen_content();
+        window.left += before.left - after.left;
+        window.top += before.top - after.top;
+        window.right += before.right - after.right;
+        window.bottom += before.bottom - after.bottom;
+        // Keep a returning title bar on screen.
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (!enabled && GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor) &&
+            window.top < monitor.rcWork.top)
+            OffsetRect(&window, 0, monitor.rcWork.top - window.top);
+        SetWindowPos(hwnd_, nullptr, window.left, window.top, window.right - window.left,
+                     window.bottom - window.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    if (on_resize) on_resize();
+    InvalidateRect(hwnd_, nullptr, TRUE);
+}
 void Window::apply_frame()
 {
     DWORD backdrop = style_ == ShellStyle::Mica && !fullscreen_ ? 2 : 1;
@@ -145,7 +185,7 @@ void Window::apply_frame()
                       style_ == ShellStyle::Mica && !fullscreen_;
     DWORD corners = fullscreen_ ? 1 : 2;
     DwmSetWindowAttribute(hwnd_, 33, &corners, sizeof(corners));
-    MARGINS margins{0, 0, style_ == ShellStyle::Mica && !fullscreen_ ? 1 : 0, 0};
+    MARGINS margins{0, 0, style_ == ShellStyle::Mica && !fullscreen_ && !borderless_ ? 1 : 0, 0};
     DwmExtendFrameIntoClientArea(hwnd_, &margins);
     SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 }
@@ -172,13 +212,34 @@ int Window::caption_hit(POINT p) const
         return HTMINBUTTON;
     return HTCAPTION;
 }
+RECT Window::caption_button(int hit) const
+{
+    RECT r{};
+    GetClientRect(hwnd_, &r);
+    const int w = scale(46), slot = hit == HTCLOSE ? 1 : hit == HTMAXBUTTON ? 2 : 3;
+    return {r.right - w * slot, 0, r.right - w * (slot - 1), caption_height()};
+}
+// As in the MSIME settings window, a caption button's tip waits 500 ms under a still pointer
+// and goes away as soon as the pointer moves to another part of the caption or presses.
+void Window::caption_tip(int hit)
+{
+    const int button = hit == HTMINBUTTON || hit == HTMAXBUTTON || hit == HTCLOSE ? hit : HTNOWHERE;
+    if (button == tip_)
+        return;
+    tip_ = button;
+    KillTimer(hwnd_, caption_tip_timer);
+    if (on_caption_tooltip)
+        on_caption_tooltip(L"", RECT{});
+    if (button != HTNOWHERE)
+        SetTimer(hwnd_, caption_tip_timer, 500, nullptr);
+}
 void Window::paint()
 {
     PAINTSTRUCT ps{};
     BeginPaint(hwnd_, &ps);
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    if (style_ == ShellStyle::Direct2D && !fullscreen_ && rc.right > 0 && rc.bottom > 0)
+    if (draws_caption() && rc.right > 0 && rc.bottom > 0)
     {
         if (!factory_)
             D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.GetAddressOf());
@@ -207,7 +268,17 @@ void Window::paint()
                                      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12, L"zh-CN",
                                      &text_);
             if (text_)
+            {
                 text_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                // Long book titles end in an ellipsis before the caption buttons instead of being cut.
+                text_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                Microsoft::WRL::ComPtr<IDWriteInlineObject> ellipsis;
+                if (SUCCEEDED(write_->CreateEllipsisTrimmingSign(text_.Get(), &ellipsis)))
+                {
+                    const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+                    text_->SetTrimming(&trimming, ellipsis.Get());
+                }
+            }
         }
         if (write_ && !caption_icons_)
         {
@@ -304,12 +375,26 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     case WM_SYSKEYDOWN:
         if (w == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
         {
-            if (!(l & (1LL << 30)) && on_toggle_fullscreen) on_toggle_fullscreen();
+            if (!(l & (1LL << 30)) && on_toggle_borderless) on_toggle_borderless();
             return 0;
         }
         break;
     case WM_NCCALCSIZE:
         if (fullscreen_) return 0;
+        // The Direct2D caption and a hidden title bar both keep the invisible side and bottom
+        // resize borders while the caption height becomes client area.
+        if (w && (style_ == ShellStyle::Direct2D || borderless_))
+        {
+            auto p = reinterpret_cast<NCCALCSIZE_PARAMS *>(l);
+            auto top = p->rgrc[0].top;
+            auto result = DefWindowProcW(hwnd_, m, w, l);
+            p->rgrc[0].top =
+                top + (IsZoomed(hwnd_)
+                           ? GetSystemMetricsForDpi(SM_CYFRAME, GetDpiForWindow(hwnd_)) +
+                                 GetSystemMetricsForDpi(SM_CXPADDEDBORDER, GetDpiForWindow(hwnd_))
+                           : 0);
+            return result;
+        }
         break;
     case WM_NCHITTEST:
         if (fullscreen_) return HTCLIENT;
@@ -331,6 +416,17 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         if (w == 42)
         {
             DestroyWindow(hwnd_);
+            return 0;
+        }
+        if (w == caption_tip_timer)
+        {
+            KillTimer(hwnd_, caption_tip_timer);
+            if (tip_ != HTNOWHERE && pressed_ == HTNOWHERE && draws_caption() && on_caption_tooltip)
+                on_caption_tooltip(tip_ == HTMINBUTTON   ? L"最小化"
+                                   : tip_ == HTCLOSE     ? L"关闭"
+                                   : IsZoomed(hwnd_)     ? L"向下还原"
+                                                         : L"最大化",
+                                   caption_button(tip_));
             return 0;
         }
         break;
@@ -370,24 +466,10 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         PostQuitMessage(0);
         return 0;
     }
-    if (style_ == ShellStyle::Direct2D && !fullscreen_)
+    if (draws_caption())
     {
         switch (m)
         {
-        case WM_NCCALCSIZE:
-            if (w)
-            {
-                auto p = reinterpret_cast<NCCALCSIZE_PARAMS *>(l);
-                auto top = p->rgrc[0].top;
-                auto result = DefWindowProcW(hwnd_, m, w, l);
-                p->rgrc[0].top =
-                    top + (IsZoomed(hwnd_)
-                               ? GetSystemMetricsForDpi(SM_CYFRAME, GetDpiForWindow(hwnd_)) +
-                                     GetSystemMetricsForDpi(SM_CXPADDEDBORDER, GetDpiForWindow(hwnd_))
-                               : 0);
-                return result;
-            }
-            break;
         case WM_NCHITTEST:
         {
             auto result = DefWindowProcW(hwnd_, m, w, l);
@@ -402,6 +484,8 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         case WM_NCMOUSEMOVE:
         {
             hot_ = static_cast<int>(w);
+            if (pressed_ == HTNOWHERE)
+                caption_tip(hot_);
             TRACKMOUSEEVENT t{sizeof(t), TME_NONCLIENT | TME_LEAVE, hwnd_, 0};
             TrackMouseEvent(&t);
             InvalidateRect(hwnd_, nullptr, FALSE);
@@ -411,11 +495,13 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         }
         case WM_NCMOUSELEAVE:
             hot_ = HTNOWHERE;
+            caption_tip(HTNOWHERE);
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         case WM_NCLBUTTONDOWN:
             if (w == HTMINBUTTON || w == HTMAXBUTTON || w == HTCLOSE)
             {
+                caption_tip(HTNOWHERE);
                 pressed_ = static_cast<int>(w);
                 SetCapture(hwnd_);
                 return 0;

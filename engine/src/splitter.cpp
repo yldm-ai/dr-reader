@@ -1,6 +1,7 @@
 #include "dr/splitter.h"
 #include "dr/paths.h"
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <regex>
 #include <sstream>
@@ -26,6 +27,47 @@ std::string xml_string(pugi::xml_node n)
     std::ostringstream s;
     n.print(s, "", pugi::format_raw, pugi::encoding_utf8);
     return s.str();
+}
+std::string html_compatible(const std::string &xhtml)
+{
+    static const std::unordered_set<std::string> void_elements{"area", "base", "br", "col", "embed", "hr", "img",
+                                                     "input", "link", "meta", "param", "source", "track", "wbr"};
+    std::string out;
+    out.reserve(xhtml.size() + 64);
+    size_t copied = 0;
+    for (size_t at = xhtml.find('<'); at != std::string::npos; at = xhtml.find('<', at + 1))
+    {
+        size_t name_end = at + 1;
+        while (name_end < xhtml.size() && (std::isalnum(static_cast<unsigned char>(xhtml[name_end])) ||
+                                           xhtml[name_end] == ':' || xhtml[name_end] == '-' || xhtml[name_end] == '_'))
+            ++name_end;
+        if (name_end == at + 1)
+            continue; // comment, closing tag, processing instruction or text
+        // Find the tag's end outside quoted attribute values.
+        size_t close = name_end;
+        char quote = 0;
+        for (; close < xhtml.size(); ++close)
+        {
+            const char c = xhtml[close];
+            if (quote) { if (c == quote) quote = 0; }
+            else if (c == '"' || c == '\'') quote = c;
+            else if (c == '>') break;
+        }
+        if (close >= xhtml.size())
+            break;
+        auto name = xhtml.substr(at + 1, name_end - at - 1);
+        auto local = name.substr(name.find(':') == std::string::npos ? 0 : name.find(':') + 1);
+        std::transform(local.begin(), local.end(), local.begin(), [](unsigned char c) { return std::tolower(c); });
+        if (xhtml[close - 1] == '/' && !void_elements.count(local))
+        {
+            out.append(xhtml, copied, close - 1 - copied);
+            out += "></" + name + ">";
+            copied = close + 1;
+        }
+        at = close;
+    }
+    out.append(xhtml, copied, std::string::npos);
+    return out;
 }
 std::string node_text(pugi::xml_node n)
 {

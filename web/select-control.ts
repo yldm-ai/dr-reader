@@ -1,4 +1,5 @@
 import { icon } from './icons.ts';
+import { OverlayScrollbar } from './scrollbar.ts';
 import type { Choice } from './fonts.ts';
 
 /** Native select holds the saved value; the popover owns navigation and transient search. */
@@ -77,6 +78,7 @@ export class SelectControl {
     this.list.setAttribute('aria-labelledby', `${select.id}-label`);
     this.popup.append(this.list);
     wrapper.append(this.popup);
+    new OverlayScrollbar(this.list, this.popup, { top: 4, bottom: 4 });
     this.button.addEventListener('keydown', event => this.key(event));
     this.popup.addEventListener('keydown', event => this.key(event));
     this.list.addEventListener('pointermove', event => {

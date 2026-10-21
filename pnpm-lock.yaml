@@ -173,6 +173,9 @@ importers:
         specifier: 2.0.7
         version: 2.0.7(patch_hash=f1d59e3c5d939b47288e78c9b0b453bb145868993db978cafb3e64c709bad353)
     devDependencies:
+      '@material-symbols/svg-400':
+        specifier: 0.48.0
+        version: 0.48.0
       '@types/node':
         specifier: 26.6.5
         version: 26.6.5
@@ -187,6 +190,9 @@ importers:
         version: 8.3.4(@types/node@26.6.5)
 
 packages:
+
+  '@material-symbols/svg-400@0.48.0':
+    resolution: {integrity: sha512-W20MjbiDbLJQ5yi4CPz2y6lCZ9bk3pJ1d5Ra+uErvtj/guVrCNfcYyMZn3KqHpDyyKVfBGkuGHVcdi5h+5+EqA==}
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
@@ -594,6 +600,8 @@ packages:
         optional: true
 
 snapshots:
+
+  '@material-symbols/svg-400@0.48.0': {}
 
   '@oxc-project/types@0.154.0': {}
 

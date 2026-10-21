@@ -5,6 +5,7 @@
 #include <chrono>
 #include <iostream>
 #include <miniz.h>
+#include <sqlite3.h>
 #include <stdexcept>
 namespace
 {
@@ -115,6 +116,14 @@ int main()
             dr::Library reopened(root / "library");
             require(reopened.get(id)["position"]["chapter"] == 1, "progress survives restart");
             require(reopened.search(id, "结尾").size() == 1, "C++ search");
+            // Chapters are parsed as HTML: <title/> would swallow the document as title text.
+            require(dr::html_compatible(R"(<head><title/><link href="a.css"/></head><p a="x/>" b='y'/><svg:path d="M0"/><br/>)") ==
+                        R"(<head><title></title><link href="a.css"/></head><p a="x/>" b='y'></p><svg:path d="M0"></svg:path><br/>)",
+                    "self-closing non-void elements are written HTML-safe");
+            // The fixture's second chapter reads "二结尾文字": five visible characters.
+            auto lengths = reopened.chapter_lengths(id);
+            require(lengths.size() == reopened.get(id)["chapters"].size() && lengths[1] == 5,
+                    "chapter lengths count visible characters without whitespace");
             require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].size() == 1,
                     "bookmark add");
             require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].empty(),
@@ -150,6 +159,49 @@ int main()
             reopened_annotations.remove(id, annotation_id);
             require(reopened_annotations.list(id).empty(), "annotation delete");
         }
+        {
+            // A version 1 database only allowed five colour names; opening it must rebuild the
+            // table without losing rows, after which custom #rrggbb colours save.
+            const auto legacy_path = root / "legacy.sqlite3";
+            sqlite3 *legacy = nullptr;
+            require(sqlite3_open(legacy_path.string().c_str(), &legacy) == SQLITE_OK, "legacy database");
+            const char *v1 = R"(CREATE TABLE annotations(
+              id TEXT PRIMARY KEY, book_id TEXT NOT NULL, chapter INTEGER NOT NULL CHECK(chapter>=0), href TEXT NOT NULL,
+              start_offset INTEGER NOT NULL CHECK(start_offset>=0), end_offset INTEGER NOT NULL CHECK(end_offset>start_offset),
+              quote TEXT NOT NULL CHECK(length(quote)>0), prefix TEXT NOT NULL DEFAULT '', suffix TEXT NOT NULL DEFAULT '',
+              note TEXT NOT NULL DEFAULT '', color TEXT NOT NULL CHECK(color IN ('yellow','green','blue','pink','purple')),
+              style TEXT NOT NULL CHECK(style IN ('highlight','underline')),
+              created_at INTEGER NOT NULL DEFAULT(unixepoch()), updated_at INTEGER NOT NULL DEFAULT(unixepoch()));
+              INSERT INTO annotations(id,book_id,chapter,href,start_offset,end_offset,quote,note,color,style)
+                VALUES('old','book',0,'c.html',0,2,'旧注','保留','pink','underline');
+              PRAGMA user_version=1;)";
+            require(sqlite3_exec(legacy, v1, nullptr, nullptr, nullptr) == SQLITE_OK, "legacy schema");
+            sqlite3_close(legacy);
+            dr::AnnotationStore migrated(legacy_path);
+            auto kept = migrated.list("book");
+            require(kept.size() == 1 && kept[0]["id"] == "old" && kept[0]["note"] == "保留" &&
+                        kept[0]["color"] == "pink" && kept[0]["style"] == "underline",
+                    "schema 2 migration keeps every annotation");
+            auto custom = migrated.save("book", {{"chapter", 0}, {"href", "c.html"}, {"start", 4}, {"end", 6},
+                                                 {"quote", "新色"}, {"color", "#a1b2c3"}, {"style", "highlight"}});
+            require(custom["color"] == "#a1b2c3", "custom highlight colour");
+            // Removing the mark from an annotation with a note keeps the note (schema 3).
+            auto note_only = migrated.save("book", {{"id", "old"}, {"chapter", 0}, {"href", "c.html"}, {"start", 0},
+                                                    {"end", 2}, {"quote", "旧注"}, {"note", "保留"}, {"color", "pink"},
+                                                    {"style", "note"}});
+            require(note_only["style"] == "note" && note_only["note"] == "保留", "note-only annotations save");
+            rejects([&] { migrated.save("book", {{"chapter", 0}, {"href", "c.html"}, {"start", 8}, {"end", 9},
+                                                 {"quote", "错"}, {"color", "pink"}, {"style", "strike"}}); },
+                    "unknown annotation styles are rejected");
+            rejects([&] { migrated.save("book", {{"chapter", 0}, {"href", "c.html"}, {"start", 8}, {"end", 9},
+                                                 {"quote", "错"}, {"color", "#ABC"}, {"style", "highlight"}}); },
+                    "malformed highlight colours are rejected");
+        }
+        {
+            // Reopening a migrated database is a no-op.
+            dr::AnnotationStore again(root / "legacy.sqlite3");
+            require(again.list("book").size() == 2, "migrated database reopens");
+        }
         auto defaults = dr::default_settings();
         require(defaults["application"]["shell"] == "mica" && defaults["reading"]["mode"] == "paged",
                 "settings defaults");
@@ -178,6 +230,21 @@ int main()
                     dr::patch_settings(defaults, {{"reading", {{"turnDuration", 5000}}}})["reading"]["turnDuration"] == 2000 &&
                     dr::patch_settings(defaults, {{"reading", {{"turnDuration", 1234}}}})["reading"]["turnDuration"] == 1234,
                 "page turns default to 800 ms and keep a custom duration within 300-2000 ms");
+        require(defaults["application"]["highlightColors"].size() == 5 &&
+                    dr::patch_settings(defaults, {{"application", {{"highlightColors", {"#ABCDEF", "#fbf3db"}}}}})
+                            ["application"]["highlightColors"][0] == "#abcdef" &&
+                    defaults["reading"]["showBookPages"] == true &&
+                    dr::patch_settings(defaults, {{"reading", {{"theme", "night"}, {"animation", "cover"}}}})
+                            ["reading"]["animation"] == "cover",
+                "highlight palette, whole-book pages, new themes and the cover animation");
+        rejects([&] { dr::patch_settings(defaults, {{"application", {{"highlightColors", {"yellow"}}}}}); },
+                "highlight palette entries must be #rrggbb");
+        require(defaults["application"]["underlineColor"] == "#ddebf1" &&
+                    dr::patch_settings(defaults, {{"application", {{"underlineColor", "#A1B2C3"}}}})
+                            ["application"]["underlineColor"] == "#a1b2c3",
+                "the underline colour is remembered separately");
+        rejects([&] { dr::patch_settings(defaults, {{"application", {{"underlineColor", "blue"}}}}); },
+                "underline colours must be #rrggbb");
         auto immersive = dr::patch_settings(defaults, {{"reading", {
             {"showToolbar", false}, {"showToc", false}, {"showChapterTitle", false},
             {"showPagination", false}, {"showProgress", false}, {"fullBackground", true}, {"fullWidth", true},

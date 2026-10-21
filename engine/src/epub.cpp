@@ -280,7 +280,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
                               }
                           }
                   });
-            write_file(content / path8(flow.path), xml_string(doc));
+            write_file(content / path8(flow.path), html_compatible(xml_string(doc)));
             auto index = book["chapters"].size();
             std::string title = trim(flow.title);
             if (title.empty())
@@ -354,7 +354,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
             {
                 auto doc = parse(content / path8(item.path));
                 sanitize_document(doc);
-                write_file(content / path8(item.path), xml_string(doc));
+                write_file(content / path8(item.path), html_compatible(xml_string(doc)));
             }
             catch (const std::exception &)
             {

@@ -1,3 +1,6 @@
+import { copyHighlights } from './highlight-copy.ts';
+import { PAGE_EASING, PageStrip } from './page-strip.ts';
+
 type Transition = {
   controller: AbortController;
   overlay: HTMLDivElement;
@@ -8,52 +11,28 @@ type Transition = {
   disposeFlip?: () => void;
 };
 
-function pathTo(node: Node, root: Node): number[] | null {
-  const path: number[] = [];
-  while (node !== root) {
-    const parent = node.parentNode;
-    if (!parent) return null;
-    path.unshift(Array.prototype.indexOf.call(parent.childNodes, node));
-    node = parent;
-  }
-  return path;
-}
-function nodeAt(root: Node, path: number[]): Node | undefined {
-  let node: Node | undefined = root;
-  for (const index of path) node = node?.childNodes[index];
-  return node;
-}
-function copyHighlights(source: Document, target: Document) {
-  const from = source.defaultView?.CSS.highlights;
-  const to = target.defaultView?.CSS.highlights;
-  const HighlightClass = target.defaultView?.Highlight;
-  if (!from || !to || !HighlightClass) return;
-  for (const [name, highlight] of from) {
-    const ranges: Range[] = [];
-    for (const range of highlight) {
-      const startPath = pathTo(range.startContainer, source.documentElement);
-      const endPath = pathTo(range.endContainer, source.documentElement);
-      if (!startPath || !endPath) continue;
-      const start = nodeAt(target.documentElement, startPath), end = nodeAt(target.documentElement, endPath);
-      if (!start || !end) continue;
-      try {
-        const clone = target.createRange();
-        clone.setStart(start, range.startOffset); clone.setEnd(end, range.endOffset);
-        ranges.push(clone);
-      } catch { /* An EPUB parser repair may change a node path; keep the page usable. */ }
-    }
-    to.set(name, new HighlightClass(...ranges));
-  }
-}
-
 /** Two read-only EPUB snapshots; the live document commits exactly once underneath. */
 export class ReaderMotion {
   private allowed = true;
   private active: Transition | null = null;
   private opening: Animation | null = null;
+  private readonly strip = new PageStrip();
+  private stripKey = '';
 
   setAllowed(value: boolean) { this.allowed = value; if (!value) this.cancel(); }
   enabled(effect: string) { return this.allowed && effect !== 'none'; }
+
+  /**
+   * Called once the live chapter's layout has settled. Slides and covers keep loaded copies of
+   * it so in-chapter turns start immediately; `key` changes with chapter, layout or highlights.
+   */
+  prepare(element: HTMLElement, effect: string, key: string) {
+    const frame = element.querySelector<HTMLIFrameElement>('#book-frame');
+    if (!frame || !this.allowed || (effect !== 'slide' && effect !== 'cover')) { this.strip.invalidate(); return; }
+    if (key !== this.stripKey && !this.strip.active) this.strip.invalidate();
+    this.stripKey = key;
+    this.strip.prepare(element, frame, key);
+  }
   private cleanup(transaction: Transition) {
     if (transaction.cleaned) return;
     transaction.cleaned = true;
@@ -65,6 +44,7 @@ export class ReaderMotion {
   }
   cancel() {
     this.opening?.cancel(); this.opening = null;
+    this.strip.reset();
     if (this.active) {
       this.active.controller.abort();
       this.cleanup(this.active);
@@ -117,7 +97,7 @@ export class ReaderMotion {
   }
 
   private async turnPage(transaction: Transition, oldPage: HTMLDivElement, newPage: HTMLDivElement,
-    effect: string, duration: number, direction: number, corner: 'top' | 'bottom') {
+    effect: string, duration: number, direction: number, corner: 'top' | 'bottom', spread = false) {
     // The new snapshot is only a source for StPageFlip's pages. Left visible it
     // covers the old page for the whole setup and flashes the destination.
     newPage.style.visibility = 'hidden';
@@ -135,24 +115,28 @@ export class ReaderMotion {
     // In single-page mode StPageFlip turns back by sliding a flat sheet in from the
     // hidden left half. A real previous page instead uncurls from the edge, which
     // is a forward curl played backwards: previous page -> current page, reversed.
-    const unturn = !forward && density === 'soft';
+    // A two-page spread uses StPageFlip's own landscape book, which already turns both ways.
+    const unturn = !spread && !forward && density === 'soft';
     const ahead = forward || unturn;
+    const width = overlay.clientWidth, pageWidth = spread ? width / 2 : width;
+    host.dataset.layout = spread ? 'double' : 'single';
     host.dataset.density = density;
     host.dataset.corner = corner;
     host.dataset.direction = forward ? 'forward' : 'backward';
-    // Only a soft curl needs a separate copy of the curling page for its folded flap.
-    const copied = density === 'soft';
-    const pages = Array.from({ length: copied ? 3 : 2 }, () => {
+    // Only a single-page soft curl needs a separate copy of the curling page for its flap.
+    const copied = !spread && density === 'soft';
+    const pages = Array.from({ length: spread ? 4 : copied ? 3 : 2 }, () => {
       const page = document.createElement('div');
       page.className = 'stpageflip-page';
       page.dataset.density = density;
-      page.style.width = `${overlay.clientWidth}px`;
+      page.style.width = `${pageWidth}px`;
       page.style.height = `${overlay.clientHeight}px`;
       return page;
     });
+    // Spreads: [left, right] of the spread turned from, then of the one turned to (in book order).
     const flip = new PageFlip(host, {
-      width: overlay.clientWidth, height: overlay.clientHeight, size: 'fixed',
-      usePortrait: true, autoSize: false, startPage: ahead ? 0 : 1,
+      width: pageWidth, height: overlay.clientHeight, size: 'fixed',
+      usePortrait: !spread, autoSize: false, startPage: spread ? (forward ? 0 : 2) : ahead ? 0 : 1,
       drawShadow: true, maxShadowOpacity: .32, flippingTime: duration,
       showCover: false, useMouseEvents: false, showPageCorners: false,
       mobileScrollSupport: false, clickEventForward: false,
@@ -168,14 +152,22 @@ export class ReaderMotion {
     });
     if (signal.aborted) throw aborted();
     host.dataset.orientation = flip.getOrientation();
-    // In portrait mode the library lays out one full-width page, even in a wide window.
-    if (flip.getOrientation() !== 'portrait') throw new Error('无法初始化单页翻页');
-    // [resting page, page revealed under the curl, copy of the resting page for the flap].
-    const sources = (forward ? [oldPage, newPage, oldPage] : [newPage, oldPage, newPage]).slice(0, pages.length);
+    // Portrait lays out one full-width page even in a wide window; a spread needs two.
+    if (flip.getOrientation() !== (spread ? 'landscape' : 'portrait')) throw new Error('无法初始化翻页');
+    // Single: [resting page, page revealed under the curl, copy of the resting page for the flap].
+    // Spread: book order, so a backward turn starts on the second spread and flips back.
+    const sources = spread ? (forward ? [oldPage, oldPage, newPage, newPage] : [newPage, newPage, oldPage, oldPage])
+      : (forward ? [oldPage, newPage, oldPage] : [newPage, oldPage, newPage]).slice(0, pages.length);
     // Load snapshots after StPageFlip has reparented the shells: moving an iframe resets its document.
-    await Promise.all(pages.map((page, index) =>
+    const panes = await Promise.all(pages.map((page, index) =>
       this.snapshot(sources[index].querySelector('iframe')!, page, signal)));
     if (signal.aborted) throw aborted();
+    // Each half of a spread shows the whole spread snapshot, cropped by its half-width shell.
+    if (spread) panes.forEach((pane, index) => {
+      pane.style.right = 'auto';
+      pane.style.width = `${width}px`;
+      pane.style.left = index % 2 ? `${-pageWidth}px` : '0';
+    });
     for (let index = 0; index < pages.length; index++) {
       const page = flip.getPage(index);
       page.setDensity(density);
@@ -289,11 +281,19 @@ export class ReaderMotion {
   }
 
   async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false,
-    corner: 'top' | 'bottom' = 'top') {
+    corner: 'top' | 'bottom' = 'top', spread = false) {
     const animated = this.enabled(effect);
     if (!animated && !retainPage) { await update(); return; }
     const frame = element.querySelector<HTMLIFrameElement>('#book-frame');
     if (!frame) { await update(); return; }
+    // In-chapter slides and covers run on the resident strip: they start in the same frame and
+    // a further turn retargets them instead of waiting for them to finish.
+    if ((effect === 'slide' || effect === 'cover') && animated && !retainPage && !spread && this.strip.ready(this.stripKey)) {
+      this.opening?.cancel(); this.opening = null;
+      if (this.active) { this.active.controller.abort(); this.cleanup(this.active); }
+      await this.strip.turn(frame, effect, direction, duration, update);
+      return;
+    }
     this.cancel();
     const overlay = document.createElement('div'); overlay.className = `page-motion page-motion-${effect}`;
     overlay.setAttribute('aria-hidden', 'true'); overlay.style.visibility = 'hidden';
@@ -314,16 +314,21 @@ export class ReaderMotion {
       const newPage = await this.snapshot(frame, overlay, transaction.controller.signal);
       if (transaction.controller.signal.aborted) return;
       const sign = direction < 0 ? -1 : 1;
-      const options: KeyframeAnimationOptions = { duration, fill: 'both',
-        easing: 'cubic-bezier(.33,0,.67,1)' };
+      const options: KeyframeAnimationOptions = { duration, fill: 'both', easing: PAGE_EASING };
       const animate = (node: HTMLElement, keyframes: Keyframe[]) => {
         const animation = node.animate(keyframes, options); transaction.animations.push(animation); return animation;
       };
       if (effect === 'slide') {
         animate(oldPage, [{ transform: 'translateX(0)' }, { transform: `translateX(${-sign * 100}%)` }]);
         animate(newPage, [{ transform: `translateX(${sign * 100}%)` }, { transform: 'translateX(0)' }]);
+      } else if (effect === 'cover') {
+        // Earlier pages lie on top: forward slides the old page off, back slides the previous one in.
+        const top = sign > 0 ? oldPage : newPage;
+        top.style.zIndex = '1';
+        animate(top, sign > 0 ? [{ transform: 'translateX(0)' }, { transform: 'translateX(-100%)' }]
+          : [{ transform: 'translateX(-100%)' }, { transform: 'translateX(0)' }]);
       } else if (effect.startsWith('turn')) {
-        await this.turnPage(transaction, oldPage, newPage, effect, duration, direction, corner);
+        await this.turnPage(transaction, oldPage, newPage, effect, duration, direction, corner, spread);
       } else {
         animate(newPage, [{ opacity: 0 }, { opacity: 1 }]);
       }

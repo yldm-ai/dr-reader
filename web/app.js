@@ -3,8 +3,10 @@ import { icon, hydrate } from "./icons.ts";
 import { Reader } from "./reader.js";
 import { SettingsPanel } from "./settings.js";
 import { createLibraryOverlays } from "./library-overlays.js";
+import { Tooltips } from "./tooltip.ts";
 
 hydrate();
+const tooltips = new Tooltips();
 
 let books = [];
 let settings = null;
@@ -33,10 +35,17 @@ const settingsPanel = new SettingsPanel((value) => {
   else document.documentElement.style.removeProperty("color-scheme");
 });
 reader.onReadingSetting = patch => settingsPanel.update("reading", patch);
+reader.onApplicationSetting = patch => settingsPanel.update("application", patch);
 reader.onOpenSettings = () => settingsPanel.open("reading");
 
 window.chrome?.webview?.addEventListener("message", async ({ data }) => {
   if (data.event === "fullscreen") document.body.dataset.fullscreen = String(data.enabled);
+  if (data.event === "titlebar") document.body.dataset.titlebar = data.hidden ? "hidden" : "shown";
+  // A Direct2D caption button's tip: the button ends at the top edge of the web content.
+  if (data.event === "caption-tooltip") {
+    if (data.text) tooltips.show({ left: data.left, width: data.width, top: -1, height: 1 }, data.text);
+    else tooltips.hide();
+  }
   if (data.event === "closing") {
     await Promise.allSettled([reader.flush(), settingsPanel.flush()]);
     call("close").catch(() => {});
@@ -123,7 +132,7 @@ function render() {
   $("continue-section").hidden =
     !latest || filter !== "all" || !!query || !!author;
   if (latest) {
-    $("continue-book").innerHTML = `${cover(latest, "continue-cover")}<div class="continue-info"><strong>${escape(latest.title)}</strong><small>${escape(latest.author)} · ${escape(latest.chapters[latest.position?.chapter || 0]?.title || "")}</small><div class="continue-progress"><span class="progress-track"><i style="width:${Math.round(latest.progress * 100)}%"></i></span><span>${Math.round(latest.progress * 100)}%</span></div></div><span class="continue-action">继续阅读 ${icon("arrow-right")}</span>`;
+    $("continue-book").innerHTML = `${cover(latest, "continue-cover")}<div class="continue-info"><strong>${escape(latest.title)}</strong><small>${escape(latest.author)} · ${escape(latest.chapters[latest.position?.chapter || 0]?.title || "")}</small><div class="continue-progress"><span class="progress-track"><i style="width:${Math.round(latest.progress * 100)}%"></i></span><span>${Math.round(latest.progress * 100)}%</span></div></div><span class="continue-action">继续阅读 ${icon("arrow-right", "fluent")}</span>`;
     $("continue-book").onclick = () => openBook(latest.id);
   }
 
@@ -262,9 +271,10 @@ $("reader-app-settings").onclick = () => settingsPanel.open("application");
 $("reader-settings").onclick = () => settingsPanel.open("reading");
 
 document.addEventListener("keydown", (event) => {
-  if (event.altKey && event.key === "Enter") {
+  // Alt+Enter hides or restores the title bar; F11 toggles fullscreen.
+  if ((event.altKey && event.key === "Enter") || event.key === "F11") {
     event.preventDefault();
-    if (!event.repeat) call("fullscreen").catch(error => toast(error.message));
+    if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message));
     return;
   }
   if (event.key === "F8" && reader.book && !settingsPanel.applicationOpen) {

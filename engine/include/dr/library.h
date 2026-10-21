@@ -15,6 +15,9 @@ class Library
     Json save_position(const std::string &id, const Json &position);
     Json toggle_bookmark(const std::string &id, const Json &mark);
     Json search(const std::string &id, const std::string &query) const;
+    // Visible characters per chapter (UTF-16 units, whitespace excluded) from the search text,
+    // for estimating whole-book page counts without loading every chapter.
+    Json chapter_lengths(const std::string &id) const;
     Json settings() const;
     Json save_settings(const Json &settings);
     Json annotations(const std::string& id) const;

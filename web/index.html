@@ -13,7 +13,8 @@
   </head>
   <body>
     <div id="app" class="app">
-      <aside class="sidebar">
+      <!-- The library home keeps Segoe Fluent glyphs; the reader uses Material Symbols. -->
+      <aside class="sidebar" data-icon-set="fluent">
         <div class="brand">
           <span class="brand-mark" data-icon="book"></span>
           <div>DR Reader<small>留一点时间给阅读</small></div>
@@ -39,7 +40,7 @@
             >
           </button>
           <button class="nav-item" data-filter="unread">
-            <span data-icon="bookmark"></span>尚未开始
+            <span data-icon="unread"></span>尚未开始
           </button>
           <button class="nav-item" data-filter="finished">
             <span data-icon="check"></span>已经读完
@@ -64,7 +65,7 @@
           </button>
         </div>
       </aside>
-      <main id="library-view" class="library-view">
+      <main id="library-view" class="library-view" data-icon-set="fluent">
         <header class="library-header">
           <div class="eyebrow">YOUR PERSONAL LIBRARY</div>
           <div class="heading-row">
@@ -135,34 +136,64 @@
 
       </main>
       <main id="reader-view" class="reader-view" hidden>
-        <header class="reader-toolbar">
-          <button id="back-library" class="text-button">
-            <span data-icon="arrow-left"></span>书库</button
-          ><span class="toolbar-divider"></span>
-          <div class="reader-book-title" id="reader-book-title"></div>
-          <div class="reader-actions"><button id="reader-app-settings" class="icon-button" title="应用设置" aria-label="应用设置"><span data-icon="settings"></span></button>
-            <button
+        <header id="reader-toolbar" class="reader-toolbar">
+          <div class="toolbar-start">
+            <button id="back-library" class="text-button">
+              <span data-icon="arrow-left"></span>书库</button
+            ><span class="toolbar-divider"></span
+            ><button
               id="toggle-toc"
               class="icon-button"
-              title="显示 / 隐藏目录"
+              title="目录与笔记"
               aria-label="显示 / 隐藏目录"
             >
-              <span data-icon="list"></span></button
+              <span data-icon="toc"></span></button>
+            <div class="reader-book-title" id="reader-book-title"></div>
+          </div>
+          <!-- Everyday typesetting stays one click away; the drawer keeps the full set. -->
+          <div class="toolbar-quick" role="group" aria-label="快速排版">
+            <div class="quick-segment" role="radiogroup" aria-label="阅读方式">
+              <button type="button" class="quick-button" data-quick-mode="paged" role="radio" title="左右翻页" aria-label="左右翻页"><span data-icon="paged"></span></button
+              ><button type="button" class="quick-button" data-quick-mode="scroll" role="radio" title="上下滚动" aria-label="上下滚动"><span data-icon="scroll"></span></button>
+            </div>
+            <span class="quick-divider" aria-hidden="true"></span>
+            <div class="quick-themes" role="radiogroup" aria-label="页面配色">
+              <button type="button" class="quick-theme" data-quick-theme="light" role="radio" title="明亮" aria-label="明亮"></button
+              ><button type="button" class="quick-theme" data-quick-theme="dark" role="radio" title="黑暗" aria-label="黑暗"></button
+              ><button type="button" class="quick-theme" data-quick-theme="sepia" role="radio" title="纸张" aria-label="纸张"></button>
+            </div>
+            <span class="quick-divider" aria-hidden="true"></span>
+            <div class="quick-font" role="group" aria-label="字号">
+              <button type="button" id="font-smaller" class="quick-button" title="减小字号" aria-label="减小字号"><span data-icon="minus"></span></button
+              ><output id="quick-font-size" aria-live="polite" title="字号"></output
+              ><button type="button" id="font-larger" class="quick-button" title="增大字号" aria-label="增大字号"><span data-icon="plus"></span></button>
+            </div>
+          </div>
+          <div class="reader-actions">
+            <button id="reader-search" class="icon-button" title="书内搜索 (Ctrl F)" aria-label="书内搜索"><span data-icon="search"></span></button
             ><button
               id="add-bookmark"
               class="icon-button"
               title="添加 / 移除此处书签"
               aria-label="添加 / 移除此处书签"
             >
-              <span data-icon="bookmark"></span></button
-            ><button id="reader-settings" class="text-button">
-              <span data-icon="type"></span>阅读设置
-            </button>
+              <span class="bookmark-off" data-icon="bookmark"></span><span class="bookmark-on" data-icon="bookmark-filled"></span></button
+            ><button id="reader-fullscreen" class="icon-button" title="全屏 (F11)" aria-label="切换全屏"><span class="fullscreen-enter" data-icon="fullscreen"></span><span class="fullscreen-leave" data-icon="fullscreen-exit"></span></button
+            ><span class="toolbar-divider"></span
+            ><button id="reader-app-settings" class="icon-button" title="应用设置" aria-label="应用设置"><span data-icon="settings"></span></button
+            ><button id="reader-settings" class="text-button reader-settings-button" title="阅读设置 (F8)">
+              <span data-icon="cookie"></span>阅读设置
+            </button
+            ><button id="collapse-toolbar" class="icon-button" title="收起工具栏" aria-label="收起工具栏" aria-controls="reader-toolbar" aria-expanded="true"><span data-icon="collapse"></span></button>
           </div>
         </header>
+        <!-- Revealed by hovering the top-right corner while collapsed, where the collapse button was. -->
+        <button id="expand-toolbar" class="icon-button corner-button expand-toolbar" type="button" title="展开工具栏" aria-label="展开工具栏" aria-controls="reader-toolbar" aria-expanded="false"><span data-icon="expand"></span></button>
         <div class="reader-workspace">
           <div id="toc-reveal-zone" class="toc-reveal-zone" aria-hidden="true"></div>
           <aside id="toc-panel" class="toc-panel">
+            <!-- The rounded panel stays still; this layer scrolls under an inset overlay scrollbar. -->
+            <div id="toc-scroll" class="toc-scroll">
             <div class="toc-header">
             <div class="toc-tabs">
               <button data-tab="toc" class="active">目录</button
@@ -194,6 +225,7 @@
                 <p class="panel-hint">由 C++ 在本地检索正文。</p>
               </div>
             </div>
+            </div>
           </aside>
           <section class="reading-area">
             <div id="chapter-label" class="chapter-label"></div>
@@ -219,6 +251,7 @@
         </div>
         <footer class="reader-footer">
           <span id="reader-location"></span
+          ><span id="book-pages" class="book-pages" hidden></span
           ><input
             id="reading-progress"
             type="range"
@@ -228,33 +261,39 @@
             aria-label="全书阅读进度"
           /><span id="reader-percent">0%</span>
         </footer>
-        <div id="reader-quick-controls" class="reader-quick-controls" hidden>
-          <button id="quick-library" class="text-button" type="button"><span data-icon="arrow-left"></span>书库</button>
-          <button id="quick-settings" class="text-button" type="button"><span data-icon="type"></span>阅读设置 <kbd>F8</kbd></button>
-          <button id="quick-fullscreen" class="text-button" type="button">退出全屏</button>
-        </div>
+        <!-- With the toolbar collapsed, the top corners reveal these on hover. -->
+        <button id="corner-library" class="text-button corner-button corner-library" type="button" title="返回书库"><span data-icon="arrow-left"></span>书库</button>
       </main>
     </div>
 
     <div id="selection-menu" class="selection-menu" hidden>
       <div class="selection-preview" id="selection-preview"></div>
       <div class="selection-tools">
-        <div class="selection-group" id="selection-highlight">
-          <span class="selection-label">高亮</span>
-          <button data-color="yellow" class="color-dot yellow" aria-label="黄色高亮"></button>
-          <button data-color="green" class="color-dot green" aria-label="绿色高亮"></button>
-          <button data-color="blue" class="color-dot blue" aria-label="蓝色高亮"></button>
-          <button data-color="pink" class="color-dot pink" aria-label="粉色高亮"></button>
-          <button data-color="purple" class="color-dot purple" aria-label="紫色高亮"></button>
+        <!-- Each mark keeps one colour in front of its button; the dot opens the recent colours.
+             A pressed button means the passage already carries that mark: pressing again removes it. -->
+        <div class="mark-group" id="selection-highlight-group">
+          <button id="highlight-color" class="mark-color" type="button" data-style="highlight" title="高亮颜色" aria-label="选择高亮颜色" aria-haspopup="true"></button>
+          <button id="selection-highlight" class="selection-action mark-action" type="button" aria-pressed="false"><span data-icon="highlighter"></span>高亮</button>
+        </div>
+        <div class="mark-group" id="selection-underline-group">
+          <button id="underline-color" class="mark-color" type="button" data-style="underline" title="下划线颜色" aria-label="选择下划线颜色" aria-haspopup="true"></button>
+          <button id="selection-underline" class="selection-action mark-action" type="button" aria-pressed="false"><span data-icon="underline"></span>下划线</button>
         </div>
         <span class="selection-divider"></span>
-        <button id="selection-underline" class="selection-action"><span data-icon="underline"></span>下划线</button>
-        <button id="selection-delete" class="selection-action danger-button" hidden><span data-icon="delete"></span>删除标注</button>
-        <button id="selection-note" class="selection-action"><span data-icon="note"></span>记笔记</button>
+        <button id="selection-note" class="selection-action"><span data-icon="note"></span><span id="selection-note-label">记笔记</span></button>
+        <button id="selection-note-delete" class="selection-action danger-button" hidden><span data-icon="note-off"></span>删除笔记</button>
         <button id="selection-copy" class="selection-action"><span data-icon="copy"></span>复制</button>
         <button id="selection-search" class="selection-action"><span data-icon="search"></span>书内搜索</button>
         <button id="selection-dictionary" class="selection-action dictionary-action">查词 <span data-icon="chevron"></span></button>
       </div>
+      <!-- The five most recent colours, then the custom colour picker. -->
+      <div id="mark-palette" class="mark-palette" role="group" aria-label="标注颜色" hidden>
+        <span id="highlight-swatches" class="swatch-row"></span>
+      </div>
+    </div>
+    <!-- The note of a marked passage, shown while the pointer rests on it. -->
+    <div id="note-peek" class="note-peek" role="tooltip" hidden>
+      <div class="note-peek-text" id="note-peek-text"></div>
     </div>
 
     <dialog id="annotation-dialog" class="annotation-dialog">
@@ -267,16 +306,11 @@
         <label class="annotation-note-label">笔记<textarea id="annotation-note" rows="6" maxlength="32768" placeholder="写下此刻的想法…"></textarea></label>
         <div class="annotation-style-row">
           <span>颜色</span>
-          <div class="annotation-colors">
-            <button type="button" data-annotation-color="yellow" class="color-dot yellow" aria-label="黄色"></button>
-            <button type="button" data-annotation-color="green" class="color-dot green" aria-label="绿色"></button>
-            <button type="button" data-annotation-color="blue" class="color-dot blue" aria-label="蓝色"></button>
-            <button type="button" data-annotation-color="pink" class="color-dot pink" aria-label="粉色"></button>
-            <button type="button" data-annotation-color="purple" class="color-dot purple" aria-label="紫色"></button>
-          </div>
+          <div id="annotation-swatches" class="annotation-colors swatch-row"></div>
           <select id="annotation-style" aria-label="标注样式">
             <option value="highlight">高亮</option>
             <option value="underline">下划线</option>
+            <option value="note">仅笔记</option>
           </select>
         </div>
         <div class="annotation-actions">

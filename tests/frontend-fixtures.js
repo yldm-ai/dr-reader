@@ -8,7 +8,7 @@ export function bootstrapFixture() {
       lineHeight: 1.9, paragraphSpacing: 1, letterSpacing: 0, textIndent: 0, alignment: 'justify',
       width: 760, paddingX: 44, paddingY: 38, paddingTop: 38, paddingBottom: 38, paddingLeft: 44, paddingRight: 44,
       showToolbar: true, showToc: true, showChapterTitle: true, showPagination: true, showProgress: true,
-      fullBackground: false, fullWidth: false, animation: 'none', animationDuration: 220, turnDuration: 800,publisherStyles: false },
+      fullBackground: false, fullWidth: false, animation: 'none', animationDuration: 220, turnDuration: 800, layout: 'single', doubleAnimation: 'turn',publisherStyles: false },
   };
   const book = { id: 'fixture', title: '阅读与时光', author: '测试作者', addedAt: 1,
     lastRead: 0, progress: 0, chapters: [{ href: 'chapter.html', title: '第一章' }, { href: 'second.html', title: '第二章' }],
@@ -27,7 +27,14 @@ export function installNativeMock(data = bootstrapFixture()) {
       requests.push({ method, params });
       let result = true;
       if (method === 'bootstrap') result = structuredClone(data);
-      if (method === 'annotations') result = [];
+      data.annotations ||= [];
+      if (method === 'annotations') result = structuredClone(data.annotations);
+      if (method === 'annotation.save') {
+        const saved = { ...params.annotation, id: params.annotation.id || `note-${data.annotations.length + 1}` };
+        data.annotations = [...data.annotations.filter(item => item.id !== saved.id), saved];
+        result = structuredClone(saved);
+      }
+      if (method === 'annotation.delete') data.annotations = data.annotations.filter(item => item.id !== params.annotationId);
       if (method === 'book.delete') data.books = data.books.filter(book => book.id !== params.id);
       if (method === 'open') result = structuredClone(data.books[0]);
       if (method === 'position') {
@@ -39,6 +46,12 @@ export function installNativeMock(data = bootstrapFixture()) {
         data.fullscreen = params?.enabled ?? !data.fullscreen;
         result = data.fullscreen;
         queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { event: 'fullscreen', enabled: result } })));
+      }
+      if (method === 'book.stats') result = { chars: data.books[0].chapters.map(() => 2400) };
+      if (method === 'titlebar') {
+        data.titlebarHidden = params?.hidden ?? !data.titlebarHidden;
+        result = data.titlebarHidden;
+        queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { event: 'titlebar', hidden: result } })));
       }
       if (method === 'settings') {
         for (const group of ['reading', 'application']) if (params[group]) Object.assign(data.settings[group], params[group]);

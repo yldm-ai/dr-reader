@@ -20,7 +20,7 @@ class WebView
     void send(const Json &message);
     std::function<void(const Json &)> on_message;
     std::function<void(const std::wstring &)> on_error;
-    std::function<void()> on_toggle_fullscreen;
+    std::function<void()> on_toggle_borderless;
 
   private:
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> controller_;

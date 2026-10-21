@@ -94,7 +94,7 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                                      kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN))
                                                 {
                                                     args->put_Handled(TRUE);
-                                                    if (!status.WasKeyDown && on_toggle_fullscreen) on_toggle_fullscreen();
+                                                    if (!status.WasKeyDown && on_toggle_borderless) on_toggle_borderless();
                                                 }
                                                 return S_OK;
                                             }).Get(), &accelerator_token);

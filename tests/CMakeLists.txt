@@ -1,5 +1,6 @@
 add_executable(dr-engine-tests engine_tests.cpp)
-target_link_libraries(dr-engine-tests PRIVATE dr_engine miniz)
+# SQLite builds a version 1 annotation database to exercise the schema migration.
+target_link_libraries(dr-engine-tests PRIVATE dr_engine miniz dr_sqlite)
 add_test(NAME engine COMMAND dr-engine-tests)
 add_executable(dr-epub ../tools/epub_cli.cpp)
 target_link_libraries(dr-epub PRIVATE dr_engine)

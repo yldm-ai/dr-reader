@@ -106,6 +106,56 @@ try {
   check([...host.querySelectorAll('.stpageflip-host iframe')].some(item => item.contentDocument.body.textContent.includes('下一章')),
     'cross-chapter page-flip must wait for the new chapter');
   await pending;
+  // In-chapter slides and covers run on resident copies: they start at once, and a turn during a
+  // turn continues every page from where it is instead of waiting or jumping.
+  host.style.width = '600px';
+  await load(original);
+  for (const mode of ['slide', 'cover']) {
+    frame.contentWindow.scrollTo(0, 0);
+    motion.prepare(host, mode, `chapter-${mode}`);
+    await until(() => motion.strip.ready(`chapter-${mode}`));
+    const started = performance.now();
+    await motion.change(host, mode, 600, 1, () => frame.contentWindow.scrollTo(600, 0));
+    check(performance.now() - started < 50, `${mode}: a resident turn must start without loading snapshots`);
+    const panes = [...host.querySelectorAll('.motion-strip .motion-page.visible')];
+    check(panes.length === 2 && frame.style.visibility === 'hidden', `${mode}: old and new pages must both be on the strip`);
+    const offsets = panes.map(pane => pane.querySelector('iframe').contentWindow.scrollX).sort((a, b) => a - b).join();
+    check(offsets === '0,600', `${mode}: strip pages must show the old and the new page: ${offsets}`);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const position = () => panes.map(pane => new DOMMatrixReadOnly(getComputedStyle(pane).transform).m41);
+    const before = position();
+    await motion.change(host, mode, 600, -1, () => frame.contentWindow.scrollTo(0, 0));
+    const after = position();
+    check(before.every((x, i) => Math.abs(after[i] - x) < 40),
+      `${mode}: an interrupting turn must continue from the current positions: ${before} -> ${after}`);
+    check(host.querySelectorAll('.motion-strip .motion-page.visible').length === 2, `${mode}: turning back reuses the leaving page`);
+    await until(() => !host.querySelector('.motion-strip.active'));
+    check(frame.style.visibility === '' && frame.contentWindow.scrollX === 0, `${mode}: the settled turn must show the live page`);
+  }
+  // Two-page spreads turn as StPageFlip's own landscape book, soft or hard, in both directions.
+  host.style.width = '980px';
+  const spreadHtml = `<style>html{overflow:hidden}body{margin:0;display:flex;width:2940px;height:360px;background:#fffaf3}section{flex:0 0 490px;box-sizing:border-box;padding:30px;font:20px 'Microsoft YaHei'}</style>${
+    Array.from({ length: 6 }, (_, i) => `<section><h1>第 ${i + 1} 页</h1></section>`).join('')}`;
+  for (const effect of ['turn', 'turn-hard']) {
+    for (const direction of [1, -1]) {
+      await load(spreadHtml);
+      frame.contentWindow.scrollTo(980, 0);
+      const target = direction > 0 ? 1960 : 0;
+      pending = motion.change(host, effect, 500, direction, () => frame.contentWindow.scrollTo(target, 0), false, 'top', true);
+      await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
+      const engine = host.querySelector('.stpageflip-host');
+      check(engine.dataset.orientation === 'landscape' && engine.dataset.layout === 'double' && engine.dataset.pageCount === '4',
+        `${effect} ${direction}: spreads must use the landscape book with four pages`);
+      check(Math.abs(engine.getBoundingClientRect().width - 980) < 1, 'the spread engine must fill the reading width');
+      const halves = [...engine.querySelectorAll('.stpageflip-page .motion-page')];
+      check(halves.length === 4 && halves.every((pane, i) => pane.style.width === '980px' && pane.style.left === (i % 2 ? '-490px' : '0px')),
+        `${effect} ${direction}: each half page must crop its side of the spread snapshot`);
+      await pending;
+      check(!host.querySelector('.page-motion') && frame.style.visibility === '' && frame.contentWindow.scrollX === target,
+        `${effect} ${direction}: a finished spread turn must show the live spread`);
+    }
+  }
+  host.style.width = '600px';
   motion.setAllowed(false);
   await motion.change(host, 'slide', 600, 1, () => updates++);
   check(updates === 2 && !host.querySelector('.page-motion'), 'disabled motion must commit immediately');

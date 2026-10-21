@@ -1,5 +1,7 @@
 #include "dr/annotations.h"
 #include <sqlite3.h>
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -22,24 +24,40 @@ private:sqlite3* db_;sqlite3_stmt* value_=nullptr;
 };
 Json read_annotation(Statement& s){return {{"id",s.string(0)},{"bookId",s.string(1)},{"chapter",s.number(2)},{"href",s.string(3)},{"start",s.number(4)},{"end",s.number(5)},{"quote",s.string(6)},{"prefix",s.string(7)},{"suffix",s.string(8)},{"note",s.string(9)},{"color",s.string(10)},{"style",s.string(11)},{"createdAt",s.number(12)},{"updatedAt",s.number(13)}};}
 constexpr auto columns="id,book_id,chapter,href,start_offset,end_offset,quote,prefix,suffix,note,color,style,created_at,updated_at";
-}
-AnnotationStore::AnnotationStore(const fs::path& path){fs::create_directories(path.parent_path());auto result=sqlite3_open_v2(utf8(path).c_str(),&db_,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr);
- if(result!=SQLITE_OK){std::string message=db_?sqlite3_errmsg(db_):"无法打开数据库";if(db_)sqlite3_close(db_);db_=nullptr;throw std::runtime_error(message);}
- try{sqlite3_busy_timeout(db_,5000);execute(db_,"PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;");
- Statement version(db_,"PRAGMA user_version");version.row();if(version.number(0)>1)throw std::runtime_error("阅读数据库版本较新，请使用新版 DR Reader");
- execute(db_,R"(BEGIN IMMEDIATE;
- CREATE TABLE IF NOT EXISTS annotations(
+// Colours are the original five names or a custom lowercase #rrggbb (schema version 2); a 'note'
+// annotation keeps its note after its highlight or underline is removed (schema version 3).
+std::string annotation_table(const std::string& name){return "CREATE TABLE IF NOT EXISTS "+name+R"((
  id TEXT PRIMARY KEY DEFAULT(lower(hex(randomblob(16)))), book_id TEXT NOT NULL,
  chapter INTEGER NOT NULL CHECK(chapter>=0), href TEXT NOT NULL,
  start_offset INTEGER NOT NULL CHECK(start_offset>=0),end_offset INTEGER NOT NULL CHECK(end_offset>start_offset),
  quote TEXT NOT NULL CHECK(length(quote)>0),prefix TEXT NOT NULL DEFAULT '',suffix TEXT NOT NULL DEFAULT '',
- note TEXT NOT NULL DEFAULT '',color TEXT NOT NULL CHECK(color IN ('yellow','green','blue','pink','purple')),
- style TEXT NOT NULL CHECK(style IN ('highlight','underline')),
- created_at INTEGER NOT NULL DEFAULT(unixepoch()),updated_at INTEGER NOT NULL DEFAULT(unixepoch()));
- CREATE INDEX IF NOT EXISTS annotations_location ON annotations(book_id,chapter,start_offset);
- CREATE TABLE IF NOT EXISTS bookmarks(book_id TEXT NOT NULL,chapter INTEGER NOT NULL,ratio REAL NOT NULL,title TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL DEFAULT(unixepoch()),PRIMARY KEY(book_id,chapter,ratio));
- CREATE TABLE IF NOT EXISTS migrations(book_id TEXT PRIMARY KEY);
- PRAGMA user_version=1; COMMIT;)");
+ note TEXT NOT NULL DEFAULT '',color TEXT NOT NULL CHECK(color IN ('yellow','green','blue','pink','purple') OR color GLOB '#[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+ style TEXT NOT NULL CHECK(style IN ('highlight','underline','note')),
+ created_at INTEGER NOT NULL DEFAULT(unixepoch()),updated_at INTEGER NOT NULL DEFAULT(unixepoch()));)";}
+bool valid_color(const std::string& color){
+ if(color=="yellow"||color=="green"||color=="blue"||color=="pink"||color=="purple")return true;
+ return color.size()==7&&color[0]=='#'&&std::all_of(color.begin()+1,color.end(),[](unsigned char c){return std::isdigit(c)||(c>='a'&&c<='f');});}
+}
+AnnotationStore::AnnotationStore(const fs::path& path){fs::create_directories(path.parent_path());auto result=sqlite3_open_v2(utf8(path).c_str(),&db_,SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_FULLMUTEX,nullptr);
+ if(result!=SQLITE_OK){std::string message=db_?sqlite3_errmsg(db_):"无法打开数据库";if(db_)sqlite3_close(db_);db_=nullptr;throw std::runtime_error(message);}
+ try{sqlite3_busy_timeout(db_,5000);execute(db_,"PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;");
+ // The version statement is finalized before migrating: SQLite cannot drop a table while it runs.
+ const auto schema=[&]{Statement version(db_,"PRAGMA user_version");version.row();return version.number(0);}();
+ if(schema>3)throw std::runtime_error("阅读数据库版本较新，请使用新版 DR Reader");
+ execute(db_,"BEGIN IMMEDIATE");
+ try{
+  // Versions 1 and 2 had narrower colour and style CHECKs. SQLite cannot relax a CHECK in place,
+  // so the table is rebuilt once with every row copied unchanged.
+  if(schema==1||schema==2){execute(db_,(annotation_table("annotations_v3")+R"(
+   INSERT INTO annotations_v3()"+columns+") SELECT "+columns+R"( FROM annotations;
+   DROP TABLE annotations; ALTER TABLE annotations_v3 RENAME TO annotations;)").c_str());}
+  execute(db_,(annotation_table("annotations")+R"(
+  CREATE INDEX IF NOT EXISTS annotations_location ON annotations(book_id,chapter,start_offset);
+  CREATE TABLE IF NOT EXISTS bookmarks(book_id TEXT NOT NULL,chapter INTEGER NOT NULL,ratio REAL NOT NULL,title TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL DEFAULT(unixepoch()),PRIMARY KEY(book_id,chapter,ratio));
+  CREATE TABLE IF NOT EXISTS migrations(book_id TEXT PRIMARY KEY);
+  PRAGMA user_version=3;)").c_str());
+  execute(db_,"COMMIT");
+ }catch(...){sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
  }catch(...){sqlite3_close(db_);db_=nullptr;throw;}}
 AnnotationStore::~AnnotationStore(){if(db_)sqlite3_close(db_);}
 Json AnnotationStore::list(const std::string& book)const{std::string sql=std::string("SELECT ")+columns+" FROM annotations WHERE book_id=? ORDER BY chapter,start_offset,created_at";Statement s(db_,sql.c_str());s.text(1,book);Json result=Json::array();while(s.row())result.push_back(read_annotation(s));return result;}
@@ -47,7 +65,7 @@ Json AnnotationStore::save(const std::string& book,const Json& a){auto start=a.a
  const auto quote_length=utf16_length(quote);
  if(start<0||end<=start||end>2147483647||end-start>16000||quote.empty()||quote_length>32768||utf16_length(note)>32768)throw std::runtime_error("选中文字或笔记超出可保存范围");
  if(quote_length!=static_cast<size_t>(end-start))throw std::runtime_error("标注文本偏移不一致");
- if(color!="yellow"&&color!="green"&&color!="blue"&&color!="pink"&&color!="purple")throw std::runtime_error("无效高亮颜色");if(style!="highlight"&&style!="underline")throw std::runtime_error("无效标注样式");
+ if(!valid_color(color))throw std::runtime_error("无效高亮颜色");if(style!="highlight"&&style!="underline"&&style!="note")throw std::runtime_error("无效标注样式");
  auto prefix=a.value("prefix",std::string()),suffix=a.value("suffix",std::string());if(prefix.size()>512||suffix.size()>512)throw std::runtime_error("标注上下文过长");auto id=a.value("id",std::string());
  if(id.empty()){Statement random(db_,"SELECT lower(hex(randomblob(16)))");random.row();id=random.string(0);}else{Statement exists(db_,"SELECT 1 FROM annotations WHERE book_id=? AND id=?");exists.text(1,book);exists.text(2,id);if(!exists.row())throw std::runtime_error("这条笔记不存在或不属于当前书籍");}
  Statement s(db_,R"(INSERT INTO annotations(id,book_id,chapter,href,start_offset,end_offset,quote,prefix,suffix,note,color,style) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET chapter=excluded.chapter,href=excluded.href,start_offset=excluded.start_offset,end_offset=excluded.end_offset,quote=excluded.quote,prefix=excluded.prefix,suffix=excluded.suffix,note=excluded.note,color=excluded.color,style=excluded.style,updated_at=unixepoch() WHERE annotations.book_id=excluded.book_id)");

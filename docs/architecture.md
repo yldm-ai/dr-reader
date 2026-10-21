@@ -61,7 +61,7 @@ WebView2 本地资源映射参考 [Microsoft 文档](https://learn.microsoft.com
 
 pnpm 锁定开发依赖，Vite 以 `web/index.html` 为入口，构建到 `dist/`，资源路径采用相对路径以兼容 WebView2 虚拟主机映射。CMake 的增量依赖包含 HTML、CSS、JS、TS、配置及锁文件；安装包只携带构建后的静态文件。构建先独立执行 `tsc --noEmit`，因为 [Vite 的 TypeScript 转换不负责类型检查](https://vite.dev/guide/features#typescript)。
 
-新下拉组件、字体值与标签转换、章节缓存、图标映射和阅读设置比较使用 TypeScript，已有 DOM 阅读器逐步迁移，不引入框架运行时。图标使用本机 [Segoe Fluent Icons 字体及官方码位](https://learn.microsoft.com/windows/apps/design/iconography/segoe-fluent-icons-font)，旧系统回退 Segoe MDL2 Assets，不打包或重新分发系统字体。
+新下拉组件、字体值与标签转换、章节缓存、图标映射和阅读设置比较使用 TypeScript，已有 DOM 阅读器逐步迁移，不引入框架运行时。界面图标使用 [Material Symbols Rounded](https://fonts.google.com/icons)：`scripts/material-icons.mjs` 从固定版本的 `@material-symbols/svg-400` 中只抽取用到的路径，生成 `web/material-icons.ts` 内联到产物，运行时无需图标字体或网络。设置与作者图标保留本机 [Segoe Fluent Icons 字体及官方码位](https://learn.microsoft.com/windows/apps/design/iconography/segoe-fluent-icons-font)，旧系统回退 Segoe MDL2 Assets，不打包或重新分发系统字体。
 
 设置变化每帧合并通知，持久化仍按 250 ms 合并；没有变更的词典列表保持 DOM 身份。应用设置变化和重复服务端确认不再重写正文样式。每次标注刷新共用一个章节文本索引，单纯重排保留浏览器 Range；CSS Highlight 自动跟随字体与布局。最近四章使用 LRU 缓存，累计解码字符串最多约 6 MiB，按书籍内容 ID 与章节路径隔离。字体搜索仅修改临时查询，确认选项后才提交原始字体值，每次最多展示 81 个字体选项，避免大量系统字体拖慢弹出列表。
 
@@ -80,4 +80,4 @@ pnpm 锁定开发依赖，Vite 以 `web/index.html` 为入口，构建到 `dist/
 
 阅读设置存储五个界面区域的可见性、背景铺满、正文铺满和四个独立留白值。旧版 `paddingX` / `paddingY` 迁移为左右/上下相同的边距；边距以 px 保存，在极窄视口中按比例限制，至少保留 80 px 正文空间。分页步长始终为 iframe 的整数 viewport 宽度，左右不对称的留白通过列间距之和保持一致。
 
-左右各 30% 的点击区用于翻页，中央用于找回隐藏的工具入口。仅处理短时、未拖动的主指针点击，文字选择、链接和标注优先；F8 始终可恢复阅读设置。全屏状态为会话状态，由 C++ 保存并恢复 WINDOWPLACEMENT 和窗口样式；WebView2 的原生 AcceleratorKeyPressed 拦截 Alt+Enter（过滤重复按键），投递到窗口线程后再改变尺寸，避免同步回调内重入。D2D 和系统云母外壳都能进入无标题栏的监视器全屏。
+左右各 30% 的点击区用于翻页，中央用于找回隐藏的工具入口。仅处理短时、未拖动的主指针点击，文字选择、链接和标注优先；F8 始终可恢复阅读设置。全屏状态为会话状态，由 C++ 保存并恢复 WINDOWPLACEMENT 和窗口样式；WebView2 的原生 AcceleratorKeyPressed 拦截 Alt+Enter（过滤重复按键），投递到窗口线程后再改变尺寸，避免同步回调内重入。Alt+Enter 参照 Ndx 的无边框窗口隐藏标题栏：保留 `WS_OVERLAPPEDWINDOW`，`WM_NCCALCSIZE` 把标题栏高度并入客户区并保留两侧和底边的隐形调整边框（WebView2 子窗口覆盖客户区，客户区内的命中测试无法提供调整边），切换前后按内容区的屏幕位置反推窗口矩形，使正文不移动，恢复时保证标题栏留在工作区内。最大化窗口保持占满工作区。F11 和工具栏进入监视器全屏；D2D 和系统云母外壳都支持两者。

@@ -151,8 +151,24 @@ void Window::paint()
                                 reinterpret_cast<IUnknown **>(write_.GetAddressOf()));
         if (write_ && !text_)
         {
-            write_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12, L"zh-CN",
+            const wchar_t *family = L"Segoe UI";
+            Microsoft::WRL::ComPtr<IDWriteFontCollection> fonts;
+            if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)))
+            {
+                for (const auto candidate : {L"Noto Sans SC", L"Noto Sans CJK SC", L"Microsoft YaHei UI",
+                                             L"Microsoft YaHei", L"Segoe UI"})
+                {
+                    UINT32 index = 0;
+                    BOOL exists = FALSE;
+                    if (SUCCEEDED(fonts->FindFamilyName(candidate, &index, &exists)) && exists)
+                    {
+                        family = candidate;
+                        break;
+                    }
+                }
+            }
+            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_MEDIUM,
+                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, L"zh-CN",
                                      &text_);
             if (text_)
                 text_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);

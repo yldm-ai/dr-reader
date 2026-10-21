@@ -64,7 +64,8 @@ try {
           'StPageFlip root and shadows must stay 2D so snapshot text keeps ClearType');
         check(engine.dataset.density === (effect === 'turn-hard' ? 'hard' : 'soft'), 'wrong page material');
         check(engine.dataset.corner === corner, 'wrong curl corner');
-        const copied = direction > 0 && effect !== 'turn-hard';
+        // Soft pages curl forward, or uncurl the previous page backward, with a flap copy.
+        const copied = effect !== 'turn-hard';
         check(engine.dataset.pageCount === (copied ? '3' : '2'), 'unexpected page count');
         const snapshots = [...engine.querySelectorAll('iframe')];
         check(snapshots.length === (copied ? 3 : 2), 'unexpected temporary document count');

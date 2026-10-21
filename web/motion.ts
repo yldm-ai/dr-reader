@@ -127,15 +127,21 @@ export class ReaderMotion {
     const signal = controller.signal;
     const host = document.createElement('div');
     host.className = 'stpageflip-host';
-    host.style.visibility = 'hidden';
-    overlay.append(host);
+    // Build the engine underneath the old snapshot; removing that snapshot reveals
+    // the first frame of the turn. Visibility cannot hide it: the panes opt back in.
+    overlay.prepend(host);
     const forward = direction > 0;
     const density = effect === 'turn-hard' ? 'hard' : 'soft';
+    // In single-page mode StPageFlip turns back by sliding a flat sheet in from the
+    // hidden left half. A real previous page instead uncurls from the edge, which
+    // is a forward curl played backwards: previous page -> current page, reversed.
+    const unturn = !forward && density === 'soft';
+    const ahead = forward || unturn;
     host.dataset.density = density;
     host.dataset.corner = corner;
     host.dataset.direction = forward ? 'forward' : 'backward';
-    // Only a forward soft curl needs a separate copy of the old page for its folded flap.
-    const copied = forward && density === 'soft';
+    // Only a soft curl needs a separate copy of the curling page for its folded flap.
+    const copied = density === 'soft';
     const pages = Array.from({ length: copied ? 3 : 2 }, () => {
       const page = document.createElement('div');
       page.className = 'stpageflip-page';
@@ -146,7 +152,7 @@ export class ReaderMotion {
     });
     const flip = new PageFlip(host, {
       width: overlay.clientWidth, height: overlay.clientHeight, size: 'fixed',
-      usePortrait: true, autoSize: false, startPage: forward ? 0 : 1,
+      usePortrait: true, autoSize: false, startPage: ahead ? 0 : 1,
       drawShadow: true, maxShadowOpacity: .32, flippingTime: duration,
       showCover: false, useMouseEvents: false, showPageCorners: false,
       mobileScrollSupport: false, clickEventForward: false,
@@ -164,7 +170,8 @@ export class ReaderMotion {
     host.dataset.orientation = flip.getOrientation();
     // In portrait mode the library lays out one full-width page, even in a wide window.
     if (flip.getOrientation() !== 'portrait') throw new Error('无法初始化单页翻页');
-    const sources = forward ? [oldPage, newPage, oldPage].slice(0, pages.length) : [newPage, oldPage];
+    // [resting page, page revealed under the curl, copy of the resting page for the flap].
+    const sources = (forward ? [oldPage, newPage, oldPage] : [newPage, oldPage, newPage]).slice(0, pages.length);
     // Load snapshots after StPageFlip has reparented the shells: moving an iframe resets its document.
     await Promise.all(pages.map((page, index) =>
       this.snapshot(sources[index].querySelector('iframe')!, page, signal)));
@@ -224,14 +231,40 @@ export class ReaderMotion {
       }
     };
     const startAnimation = render.startAnimation.bind(render);
+    let first: (() => void) | undefined;
     render.startAnimation = (frames, time, done) => {
+      if (unturn) {
+        // Retrace the library's forward path backwards. Its corner is held height/10
+        // inside the page, which tilts the fold toward the chosen corner; a corner
+        // sliding along the edge would fold straight down for top and bottom alike.
+        // A last short leg settles the lifted corner onto the page instead of snapping.
+        const { pageWidth, height } = render.getRect();
+        const bottom = corner === 'bottom', margin = height / 10;
+        const edge = (inset: number) => bottom ? height - inset : inset;
+        // The fold calculation rejects points exactly on the page edge; such a frame
+        // draws nothing and lets the resting previous page flash through.
+        const path = [{ x: 1 - pageWidth, y: edge(1) }, { x: pageWidth - margin, y: edge(margin) },
+          { x: pageWidth - 1, y: edge(1) }];
+        const legs = [Math.hypot(path[1].x - path[0].x, path[1].y - path[0].y),
+          Math.hypot(path[2].x - path[1].x, path[2].y - path[1].y)];
+        const flipper = flip.getFlipController();
+        frames = frames.map((_, index) => {
+          let distance = index / Math.max(1, frames.length - 1) * (legs[0] + legs[1]);
+          const leg = distance <= legs[0] ? 0 : 1;
+          if (leg) distance -= legs[0];
+          const t = legs[leg] ? distance / legs[leg] : 1;
+          const point = { x: path[leg].x + (path[leg + 1].x - path[leg].x) * t,
+            y: path[leg].y + (path[leg + 1].y - path[leg].y) * t };
+          return () => flipper.do(point);
+        });
+      }
+      first = frames[0];
       const hold = Math.ceil(frames.length * 34 / Math.max(time, 1));
       startAnimation([...frames, ...Array(hold).fill(frames.at(-1))],
         time * (frames.length + hold) / frames.length, done);
     };
     await new Promise(resolve => requestAnimationFrame(resolve));
     if (signal.aborted) throw aborted();
-    oldPage.remove(); newPage.remove();
     await new Promise<void>((resolve, reject) => {
       const onAbort = () => finish(aborted());
       const timer = setTimeout(() => finish(new Error('翻页动画超时')), Math.max(2500, duration * 4));
@@ -244,13 +277,13 @@ export class ReaderMotion {
       signal.addEventListener('abort', onAbort, { once: true });
       flip.on('changeState', event => {
         host.dataset.state = String(event.data);
-        // Do not expose PageFlip's initial resting spread. The first visible
-        // frame must already be the active fold, otherwise the old page
-        // flashes for one paint before the curl starts.
-        if (event.data === 'flipping') host.style.visibility = 'visible';
         if (event.data === 'read') finish();
       });
-      if (forward) flip.flipNext(corner); else flip.flipPrev(corner);
+      if (ahead) flip.flipNext(corner); else flip.flipPrev(corner);
+      // The resting spread of an uncurl is the previous page. Pose the fully turned
+      // first frame now so the paint that reveals the engine still shows the old page.
+      if (unturn) { first?.(); render.drawFrame(); }
+      oldPage.remove(); newPage.remove();
       if (signal.aborted) onAbort();
     });
   }

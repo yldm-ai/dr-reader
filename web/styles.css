@@ -1936,7 +1936,8 @@ body > .page-surface { max-width: none; }
 /* The library promotes its root and pages to 3D layers, which turns snapshot text
    from ClearType to grayscale for the whole turn. Stay flat; the turning flap
    still gets its own transform from the renderer. */
-.stpageflip-host { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; overflow: hidden; transform: none !important; }
+/* z-index 0 keeps the engine under the old snapshot pane until that pane is removed. */
+.stpageflip-host { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; overflow: hidden; transform: none !important; }
 .stpageflip-host .stf__item { transform-style: flat; }
 .stpageflip-host .stf__wrapper { position: relative; width: 100%; height: 100%; }
 .stpageflip-page {

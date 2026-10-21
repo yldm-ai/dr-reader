@@ -10,7 +10,9 @@ declare module 'page-flip/dist/js/page-flip.module.js' {
     off(event: string): void;
     loadFromHTML(pages: HTMLElement[]): void;
     getPage(index: number): Page;
+    getFlipController(): { do(point: { x: number; y: number }): void };
     getRender(): {
+      getRect(): { pageWidth: number; height: number };
       drawFrame(): void;
       startAnimation(frames: (() => void)[], duration: number, onAnimateEnd: () => void): void;
     };

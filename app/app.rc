@@ -1,2 +1,4 @@
 #include <windows.h>
+#include "resource.h"
+IDI_DR_READER ICON "../resources/dr-reader.ico"
 1 RT_MANIFEST "app.manifest"

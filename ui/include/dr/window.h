@@ -18,7 +18,7 @@ enum class ShellStyle
 class Window
 {
   public:
-    bool create(HINSTANCE instance, ShellStyle style);
+    bool create(HINSTANCE instance, ShellStyle style, int icon_resource);
     HWND handle() const
     {
         return hwnd_;
@@ -41,9 +41,12 @@ class Window
     void paint();
     int caption_hit(POINT point) const;
     void apply_frame();
+    void update_icons();
     int scale(int dip) const;
     int caption_height() const;
     HWND hwnd_ = nullptr;
+    int icon_resource_ = 0;
+    HICON small_icon_ = nullptr, large_icon_ = nullptr;
     ShellStyle style_ = ShellStyle::Mica;
     bool dark_ = false, mica_available_ = false;
     int hot_ = HTNOWHERE, pressed_ = HTNOWHERE;

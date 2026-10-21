@@ -1,4 +1,5 @@
 #include "application.h"
+#include "../resource.h"
 #include "dr/settings.h"
 #include <shobjidl.h>
 #include <stdexcept>
@@ -210,7 +211,7 @@ int Application::run(HINSTANCE instance)
         settings["application"]["shell"] = shell_override_;
     if (!window_.create(instance, settings["application"].value("shell", std::string("mica")) == "direct2d"
                                       ? ShellStyle::Direct2D
-                                      : ShellStyle::Mica))
+                                      : ShellStyle::Mica, IDI_DR_READER))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
     window_.set_dark(settings["application"].value("theme", std::string("light")) == "dark");

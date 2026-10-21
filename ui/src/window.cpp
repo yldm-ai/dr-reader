@@ -20,15 +20,18 @@ int Window::caption_height() const
     const int resize=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
     return -frame.top-(IsZoomed(hwnd_)?resize:0);
 }
-bool Window::create(HINSTANCE instance, ShellStyle style)
+bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource)
 {
     style_ = style;
+    icon_resource_ = icon_resource;
     WNDCLASSEXW wc{sizeof(wc)};
     wc.hInstance = instance;
     wc.lpfnWndProc = procedure;
     wc.lpszClassName = L"DRReader.NativeShell";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(icon_resource_));
+    wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(icon_resource_), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     RegisterClassExW(&wc);
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
@@ -41,10 +44,32 @@ bool Window::create(HINSTANCE instance, ShellStyle style)
                             instance, this);
     if (!hwnd_)
         return false;
+    update_icons();
     apply_frame();
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
     return true;
+}
+void Window::update_icons()
+{
+    const auto dpi = GetDpiForWindow(hwnd_);
+    const auto instance = reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd_, GWLP_HINSTANCE));
+    // Own DPI-specific window icons; class icons remain shared system resources.
+    for (const auto size : {ICON_SMALL, ICON_BIG})
+    {
+        const bool is_small = size == ICON_SMALL;
+        const auto icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(icon_resource_), IMAGE_ICON,
+            GetSystemMetricsForDpi(is_small ? SM_CXSMICON : SM_CXICON, dpi),
+            GetSystemMetricsForDpi(is_small ? SM_CYSMICON : SM_CYICON, dpi), LR_DEFAULTCOLOR));
+        if (icon)
+        {
+            SendMessageW(hwnd_, WM_SETICON, size, reinterpret_cast<LPARAM>(icon));
+            auto &previous = is_small ? small_icon_ : large_icon_;
+            if (previous)
+                DestroyIcon(previous);
+            previous = icon;
+        }
+    }
 }
 RECT Window::content_bounds() const
 {
@@ -246,6 +271,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     }
     case WM_DPICHANGED:
     {
+        update_icons();
         auto r = reinterpret_cast<RECT *>(l);
         SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER);
         if (on_resize)
@@ -265,6 +291,11 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;
     case WM_DESTROY:
+        if (small_icon_)
+            DestroyIcon(small_icon_);
+        if (large_icon_)
+            DestroyIcon(large_icon_);
+        small_icon_ = large_icon_ = nullptr;
         PostQuitMessage(0);
         return 0;
     }

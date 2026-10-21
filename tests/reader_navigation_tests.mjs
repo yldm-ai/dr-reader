@@ -1,0 +1,89 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+// Exercise the reader's navigation without native storage or a WebView window.
+globalThis.window = {};
+globalThis.document = {
+  getElementById: () => ({ hidden: false }),
+  querySelector: () => null,
+};
+const { Reader } = await import('../web/reader.js');
+
+function reader() {
+  const value = Object.create(Reader.prototype);
+  const view = { innerWidth: 700, scrollX: 0, scrollTo(x) { this.scrollX = x; } };
+  Object.assign(value, {
+    doc: { defaultView: view }, generation: 1, settings: { mode: 'paged' },
+    turnQueue: Promise.resolve(), page: 0, pages: 8, chapter: 0,
+    book: { chapters: [{}, {}] }, loading: false, reflowing: false,
+    hideSelection() {},
+    report() { this.page = Math.round(view.scrollX / view.innerWidth); },
+    async animatePageChange(direction, update) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      update();
+    },
+  });
+  return value;
+}
+function wheel(deltaY, extra = {}) {
+  return { deltaX: 0, deltaY, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
+}
+
+test('each wheel event turns exactly one page regardless of scroll distance', async () => {
+  const value = reader();
+  for (const delta of [1, 120, 960]) {
+    const event = wheel(delta);
+    const previous = value.page;
+    await value.wheel(event);
+    assert.equal(value.page, previous + 1);
+    assert.equal(event.prevented, true);
+  }
+  await value.wheel(wheel(-120));
+  assert.equal(value.page, 2);
+});
+
+test('consecutive notches complete in order instead of cancelling animations', async () => {
+  const value = reader();
+  await Promise.all([120, 120, 120, -120].map(delta => value.wheel(wheel(delta))));
+  assert.equal(value.page, 2);
+});
+
+test('scroll mode, zoom gestures and zero deltas retain their default behavior', async () => {
+  const value = reader();
+  const zoom = wheel(120, { ctrlKey: true });
+  await value.wheel(zoom);
+  assert.equal(zoom.prevented, false);
+  const zero = wheel(0);
+  await value.wheel(zero);
+  assert.equal(zero.prevented, false);
+  value.settings.mode = 'scroll';
+  const scroll = wheel(120);
+  await value.wheel(scroll);
+  assert.equal(scroll.prevented, false);
+  assert.equal(value.page, 0);
+});
+
+test('pending turns cannot affect a different chapter or reading mode', async () => {
+  const value = reader();
+  const queued = value.wheel(wheel(120));
+  value.generation++;
+  await queued;
+  assert.equal(value.page, 0);
+  const modeChange = value.wheel(wheel(120));
+  value.settings.mode = 'scroll';
+  await modeChange;
+  assert.equal(value.page, 0);
+});
+
+test('forward at chapter end and backward at chapter start navigate chapters', async () => {
+  const value = reader();
+  const loads = [];
+  value.load = async (...args) => { loads.push(args); };
+  value.page = 7;
+  await value.wheel(wheel(120));
+  assert.deepEqual(loads[0], [1, 0, '', '', '', 1]);
+  value.page = 0;
+  value.chapter = 1;
+  await value.wheel(wheel(-120));
+  assert.deepEqual(loads[1], [0, 1, '', '', '', -1]);
+});

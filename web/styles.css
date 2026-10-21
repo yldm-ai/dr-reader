@@ -1602,7 +1602,6 @@ input[type="range"] {
 .application-settings-page .settings-body h3 { font-size: 15px; }
 .application-settings-page .theme-options { max-width: 480px; }
 .application-settings-page .storage-note { padding: 0 28px; overflow-wrap: anywhere; }
-.reading-mode-toggle .text-button { padding: 7px 12px; font-size: 12px; }
 @media (max-width: 760px) {
   .application-settings-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .application-settings-nav { position: static; display: flex; flex-wrap: wrap; gap: 0; }

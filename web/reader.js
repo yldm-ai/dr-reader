@@ -17,6 +17,7 @@ export class Reader {
     this.pages = 1;
     this.generation = 0;
     this.saveTimer = null;
+    this.turnQueue = Promise.resolve();
     this.motion = new ReaderMotion();
     this.selection = null;
     this.editingAnnotation = null;
@@ -34,6 +35,7 @@ export class Reader {
       }
     }, true);
 
+    $("page-surface").addEventListener("wheel", (event) => this.wheel(event), { passive: false });
     $("prev-page").onclick = () => this.turn(-1);
     $("next-page").onclick = () => this.turn(1);
     $("toggle-toc").onclick = () => {
@@ -407,7 +409,7 @@ export class Reader {
       }
     });
     doc.addEventListener("pointerdown", () => this.hideSelection());
-    doc.addEventListener("wheel", () => this.hideSelection(), { passive: true });
+    doc.addEventListener("wheel", (event) => this.wheel(event), { passive: false });
     doc.addEventListener("touchmove", () => this.hideSelection(), { passive: true });
     doc.addEventListener("selectionchange", () => {
       if (doc.getSelection()?.isCollapsed) this.hideSelection();
@@ -489,11 +491,6 @@ export class Reader {
     };
     this.hideSelection();
     this.settings = settings.reading || settings;
-    for (const mode of ["paged", "scroll"]) {
-      const selected = this.settings.mode === mode;
-      $(`mode-${mode}`).classList.toggle("selected", selected);
-      $(`mode-${mode}`).setAttribute("aria-pressed", String(selected));
-    }
     this.motion.setAllowed(this.appSettings.animations);
     document.documentElement.style.setProperty(
       "--reading-width",
@@ -646,7 +643,31 @@ export class Reader {
     }
   }
 
-  async turn(direction) {
+  wheel(event) {
+    this.hideSelection();
+    if (this.settings?.mode !== "paged" || event.ctrlKey || event.metaKey) return;
+    const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    if (!delta) return;
+    event.preventDefault();
+    if (this.loading || this.reflowing) return;
+    // Each wheel event advances one page, independent of the OS scroll distance.
+    // Serializing turns also lets consecutive notches finish their animations.
+    return this.turn(delta > 0 ? 1 : -1);
+  }
+
+  turn(direction) {
+    const doc = this.doc;
+    const generation = this.generation;
+    const mode = this.settings?.mode;
+    this.turnQueue = this.turnQueue.then(() => {
+      if (doc !== this.doc || generation !== this.generation || mode !== this.settings?.mode ||
+          $("app").hidden || document.querySelector("dialog[open]")) return;
+      return this.turnPage(direction);
+    }).catch((error) => toast(error.message));
+    return this.turnQueue;
+  }
+
+  async turnPage(direction) {
     if (!this.doc || this.loading) return;
     this.hideSelection();
     const view = this.doc.defaultView;
@@ -680,7 +701,7 @@ export class Reader {
     }
     const next = this.chapter + direction;
     if (next >= 0 && next < this.book.chapters.length)
-      this.load(next, direction > 0 ? 0 : 1, "", "", "", direction);
+      await this.load(next, direction > 0 ? 0 : 1, "", "", "", direction);
   }
 
   async animatePageChange(direction, update) {

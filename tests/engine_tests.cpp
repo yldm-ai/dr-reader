@@ -170,6 +170,10 @@ int main()
                     customized["reading"]["fontSize"] == 24 &&
                     customized["reading"]["animation"] == "turn",
                 "settings patch");
+        auto legacy_corner = dr::normalize_settings(
+            {{"version", 2}, {"reading", {{"fontSize", 26}, {"animation", "turn-bottom"}}}});
+        require(legacy_corner["reading"]["animation"] == "turn" && legacy_corner["reading"]["fontSize"] == 26,
+                "saved bottom-corner turns migrate without discarding other settings");
         auto immersive = dr::patch_settings(defaults, {{"reading", {
             {"showToolbar", false}, {"showToc", false}, {"showChapterTitle", false},
             {"showPagination", false}, {"showProgress", false}, {"fullBackground", true}, {"fullWidth", true},

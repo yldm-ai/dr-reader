@@ -25,7 +25,7 @@ export interface ReadingSettings {
   showProgress: boolean;
   fullBackground: boolean;
   fullWidth: boolean;
-  animation: 'none' | 'slide' | 'fade' | 'turn' | 'turn-bottom' | 'turn-hard';
+  animation: 'none' | 'slide' | 'fade' | 'turn' | 'turn-hard';
   animationDuration: number;
   publisherStyles: boolean;
 }

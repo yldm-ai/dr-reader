@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { fontChoices, fontStack } from '../web/fonts.ts';
 import { ChapterCache } from '../web/chapter-cache.ts';
 import { sameReading } from '../web/settings-state.ts';
-import { pageMargins, pageClickDirection } from '../web/reading-layout.ts';
+import { pageMargins, pageClickDirection, pageCorner } from '../web/reading-layout.ts';
 
 test('font choices distinguish saved values from labels and preserve missing current fonts', () => {
   const choices = fontChoices(['Microsoft YaHei', '', '宋体', ' 宋体 '], 'Missing Font');
@@ -44,4 +44,10 @@ test('page click zones leave the center available for reader controls', () => {
   assert.equal(pageClickDirection(10, 800), -1);
   assert.equal(pageClickDirection(400, 800), 0);
   assert.equal(pageClickDirection(790, 800), 1);
+});
+test('the pointer half of the page picks the soft-page curl corner', () => {
+  assert.equal(pageCorner(10, 600), 'top');
+  assert.equal(pageCorner(300, 600), 'top');
+  assert.equal(pageCorner(301, 600), 'bottom');
+  assert.equal(pageCorner(100, 0), 'top');
 });

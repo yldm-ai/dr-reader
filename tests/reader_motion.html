@@ -42,7 +42,8 @@ try {
   // Every viewport remains a single page, including wide landscape-shaped windows.
   for (const width of [600, 980]) {
     host.style.width = `${width}px`;
-    for (const effect of ['turn', 'turn-bottom', 'turn-hard']) {
+    // The reader picks the soft-page corner from the pointer and passes it in.
+    for (const [effect, corner] of [['turn', 'top'], ['turn', 'bottom'], ['turn-hard', 'top']]) {
       for (const direction of [1, -1]) {
         const dark = effect === 'turn-hard';
         const paper = dark ? '#191919' : '#fffaf3';
@@ -54,7 +55,7 @@ try {
         const mark = doc.createRange(); mark.selectNodeContents(doc.querySelector('p').firstChild);
         doc.defaultView.CSS.highlights.set('test-mark', new doc.defaultView.Highlight(mark));
         const next = direction > 0 ? width : 0;
-        pending = motion.change(host, effect, 600, direction, () => doc.defaultView.scrollTo(next, 0));
+        pending = motion.change(host, effect, 600, direction, () => doc.defaultView.scrollTo(next, 0), false, corner);
         await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
         const engine = host.querySelector('.stpageflip-host');
         check(engine.dataset.orientation === 'portrait', `${width}: StPageFlip must stay in single-page mode`);
@@ -62,7 +63,7 @@ try {
           [...engine.querySelectorAll('[class*="Shadow"]')].every(item => !item.style.transform.includes('3d')),
           'StPageFlip root and shadows must stay 2D so snapshot text keeps ClearType');
         check(engine.dataset.density === (effect === 'turn-hard' ? 'hard' : 'soft'), 'wrong page material');
-        check(engine.dataset.corner === (effect === 'turn-bottom' ? 'bottom' : 'top'), 'wrong curl corner');
+        check(engine.dataset.corner === corner, 'wrong curl corner');
         const copied = direction > 0 && effect !== 'turn-hard';
         check(engine.dataset.pageCount === (copied ? '3' : '2'), 'unexpected page count');
         const snapshots = [...engine.querySelectorAll('iframe')];
@@ -84,7 +85,7 @@ try {
         check(Math.abs(rect.width - width) < 1, 'single-page engine must fill one reading viewport');
         if (width === 600) {
           await new Promise(resolve => setTimeout(resolve, 170));
-          await window.captureMotion?.(`${effect}-${direction > 0 ? 'forward' : 'backward'}`);
+          await window.captureMotion?.(`${effect}-${corner}-${direction > 0 ? 'forward' : 'backward'}`);
         }
         await pending;
         check(!host.querySelector('.page-motion') && frame.style.visibility === '' &&
@@ -98,8 +99,9 @@ try {
   motion.cancel(); await pending;
   check(!host.querySelector('.page-motion') && frame.style.visibility === '', 'cancelled StPageFlip must release its overlay');
   // A new chapter is rendered before the old page is removed, using the same engine.
-  pending = motion.change(host, 'turn-bottom', 600, 1, () => load(original.replace('第一页', '下一章')), true);
+  pending = motion.change(host, 'turn', 600, 1, () => load(original.replace('第一页', '下一章')), true, 'bottom');
   await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
+  check(host.querySelector('.stpageflip-host').dataset.corner === 'bottom', 'cross-chapter turn must keep the pointer corner');
   check([...host.querySelectorAll('.stpageflip-host iframe')].some(item => item.contentDocument.body.textContent.includes('下一章')),
     'cross-chapter page-flip must wait for the new chapter');
   await pending;

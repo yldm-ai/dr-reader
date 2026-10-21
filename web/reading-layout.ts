@@ -17,3 +17,8 @@ export function pageClickDirection(x: number, width: number): -1 | 0 | 1 {
   if (width <= 0 || x < 0 || x > width) return 0;
   return x < width * .3 ? -1 : x > width * .7 ? 1 : 0;
 }
+
+/** A soft page curls from the corner on the half of the page under the pointer. */
+export function pageCorner(y: number, height: number): 'top' | 'bottom' {
+  return height > 0 && y > height / 2 ? 'bottom' : 'top';
+}

@@ -117,7 +117,7 @@ export class ReaderMotion {
   }
 
   private async turnPage(transaction: Transition, oldPage: HTMLDivElement, newPage: HTMLDivElement,
-    effect: string, duration: number, direction: number) {
+    effect: string, duration: number, direction: number, corner: 'top' | 'bottom') {
     // The new snapshot is only a source for StPageFlip's pages. Left visible it
     // covers the old page for the whole setup and flashes the destination.
     newPage.style.visibility = 'hidden';
@@ -131,7 +131,6 @@ export class ReaderMotion {
     overlay.append(host);
     const forward = direction > 0;
     const density = effect === 'turn-hard' ? 'hard' : 'soft';
-    const corner = effect === 'turn-bottom' ? 'bottom' : 'top';
     host.dataset.density = density;
     host.dataset.corner = corner;
     host.dataset.direction = forward ? 'forward' : 'backward';
@@ -256,7 +255,8 @@ export class ReaderMotion {
     });
   }
 
-  async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false) {
+  async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false,
+    corner: 'top' | 'bottom' = 'top') {
     const animated = this.enabled(effect);
     if (!animated && !retainPage) { await update(); return; }
     const frame = element.querySelector<HTMLIFrameElement>('#book-frame');
@@ -290,7 +290,7 @@ export class ReaderMotion {
         animate(oldPage, [{ transform: 'translateX(0)' }, { transform: `translateX(${-sign * 100}%)` }]);
         animate(newPage, [{ transform: `translateX(${sign * 100}%)` }, { transform: 'translateX(0)' }]);
       } else if (effect.startsWith('turn')) {
-        await this.turnPage(transaction, oldPage, newPage, effect, duration, direction);
+        await this.turnPage(transaction, oldPage, newPage, effect, duration, direction, corner);
       } else {
         animate(newPage, [{ opacity: 0 }, { opacity: 1 }]);
       }

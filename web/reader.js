@@ -9,7 +9,7 @@ import { ReaderMotion } from "./motion.ts";
 import { fontStack } from "./fonts.ts";
 import { readingPalette } from "./reading-palette.ts";
 import { sameReading } from "./settings-state.ts";
-import { pageMargins, pageClickDirection } from "./reading-layout.ts";
+import { pageMargins, pageClickDirection, pageCorner } from "./reading-layout.ts";
 import { ChapterCache } from "./chapter-cache.ts";
 import { icon } from "./icons.ts";
 
@@ -398,6 +398,7 @@ export class Reader {
     query = "",
     annotationId = "",
     direction = 0,
+    corner = "top",
   ) {
     if (!this.book) return;
     clearTimeout(this.saveTimer);
@@ -455,7 +456,7 @@ export class Reader {
       });
       if (retainPage) await this.motion.change($("page-surface"),
         direction && this.settings.mode === "paged" ? this.settings.animation : "none",
-        this.settings.animationDuration, direction, update, true);
+        this.settings.animationDuration, direction, update, true, corner);
       else await update();
     } catch (error) {
       if (generation !== this.generation) return;
@@ -681,10 +682,11 @@ export class Reader {
         start.selected || this.doc?.getSelection()?.toString() ||
         event.target.closest?.("a,button,input,select,textarea,[contenteditable]")) return;
     const direction = pageClickDirection(event.clientX - offsetX, width);
+    const corner = this.cornerAt(event);
     // A second press cancels the pending tap before double-click word selection.
     const doc = this.doc, generation = this.generation;
     if (direction) this.tapTimer = setTimeout(() => {
-      if (doc === this.doc && generation === this.generation && !this.doc?.getSelection()?.toString()) this.turn(direction);
+      if (doc === this.doc && generation === this.generation && !this.doc?.getSelection()?.toString()) this.turn(direction, corner);
     }, 220);
     else this.peekControls();
   }
@@ -839,36 +841,44 @@ export class Reader {
     if (this.loading || this.reflowing) return;
     // Each wheel event advances one page, independent of the OS scroll distance.
     // Serializing turns also lets consecutive notches finish their animations.
-    return this.turn(delta > 0 ? 1 : -1);
+    return this.turn(delta > 0 ? 1 : -1, this.cornerAt(event));
   }
 
-  turn(direction) {
+  /** Book-page half under a pointer event, from the shell or from inside the book frame. */
+  cornerAt(event) {
+    const frame = $("book-frame");
+    const y = event.clientY + (event.view === frame.contentWindow ? frame.getBoundingClientRect().top : 0);
+    const page = $("page-surface").getBoundingClientRect();
+    return pageCorner(y - page.top, page.height);
+  }
+
+  turn(direction, corner = "top") {
     const doc = this.doc;
     const generation = this.generation;
     const mode = this.settings?.mode;
     this.turnQueue = this.turnQueue.then(() => {
       if (doc !== this.doc || generation !== this.generation || mode !== this.settings?.mode ||
           $("app").hidden || document.querySelector("dialog[open]")) return;
-      return this.turnPage(direction);
+      return this.turnPage(direction, corner);
     }).catch((error) => toast(error.message));
     return this.turnQueue;
   }
 
-  async turnPage(direction) {
+  async turnPage(direction, corner = "top") {
     if (!this.doc || this.loading) return;
     this.hideSelection();
     const view = this.doc.defaultView;
     if (this.settings.mode === "paged") {
       if (direction > 0 && this.page < this.pages - 1) {
         await this.animatePageChange(direction, () =>
-          view.scrollTo((this.page + 1) * view.innerWidth, 0),
+          view.scrollTo((this.page + 1) * view.innerWidth, 0), corner,
         );
         this.report();
         return;
       }
       if (direction < 0 && this.page > 0) {
         await this.animatePageChange(direction, () =>
-          view.scrollTo((this.page - 1) * view.innerWidth, 0),
+          view.scrollTo((this.page - 1) * view.innerWidth, 0), corner,
         );
         this.report();
         return;
@@ -887,10 +897,10 @@ export class Reader {
     }
     const next = this.chapter + direction;
     if (next >= 0 && next < this.book.chapters.length)
-      await this.load(next, direction > 0 ? 0 : 1, "", "", "", direction);
+      await this.load(next, direction > 0 ? 0 : 1, "", "", "", direction, corner);
   }
 
-  async animatePageChange(direction, update) {
+  async animatePageChange(direction, update, corner = "top") {
     if (!this.settings.animation || this.settings.animation === "none") {
       update();
       return;
@@ -901,6 +911,8 @@ export class Reader {
       this.settings.animationDuration,
       direction,
       update,
+      false,
+      corner,
     );
   }
 

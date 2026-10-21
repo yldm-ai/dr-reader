@@ -4,7 +4,8 @@ import { test } from 'node:test';
 // Exercise the reader's navigation without native storage or a WebView window.
 globalThis.window = {};
 globalThis.document = {
-  getElementById: () => ({ hidden: false }),
+  // Every stub element doubles as a 700×600 book page at the window origin.
+  getElementById: () => ({ hidden: false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 700, height: 600 }) }),
   querySelector: () => null,
 };
 const { Reader } = await import('../web/reader.js');
@@ -18,7 +19,9 @@ function reader() {
     book: { chapters: [{}, {}] }, loading: false, reflowing: false,
     hideSelection() {},
     report() { this.page = Math.round(view.scrollX / view.innerWidth); },
-    async animatePageChange(direction, update) {
+    corners: [],
+    async animatePageChange(direction, update, corner) {
+      this.corners.push(corner);
       await new Promise(resolve => setTimeout(resolve, 5));
       update();
     },
@@ -26,8 +29,16 @@ function reader() {
   return value;
 }
 function wheel(deltaY, extra = {}) {
-  return { deltaX: 0, deltaY, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
+  return { deltaX: 0, deltaY, clientY: 100, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
 }
+
+test('the wheel curls a soft page from the corner on the half under the pointer', async () => {
+  const value = reader();
+  await value.wheel(wheel(120, { clientY: 120 }));
+  await value.wheel(wheel(120, { clientY: 480 }));
+  await value.wheel(wheel(-120, { clientY: 599 }));
+  assert.deepEqual(value.corners, ['top', 'bottom', 'bottom']);
+});
 
 test('each wheel event turns exactly one page regardless of scroll distance', async () => {
   const value = reader();
@@ -81,9 +92,9 @@ test('forward at chapter end and backward at chapter start navigate chapters', a
   value.load = async (...args) => { loads.push(args); };
   value.page = 7;
   await value.wheel(wheel(120));
-  assert.deepEqual(loads[0], [1, 0, '', '', '', 1]);
+  assert.deepEqual(loads[0], [1, 0, '', '', '', 1, 'top']);
   value.page = 0;
   value.chapter = 1;
-  await value.wheel(wheel(-120));
-  assert.deepEqual(loads[1], [0, 1, '', '', '', -1]);
+  await value.wheel(wheel(-120, { clientY: 500 }));
+  assert.deepEqual(loads[1], [0, 1, '', '', '', -1, 'bottom']);
 });

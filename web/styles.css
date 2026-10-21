@@ -12,7 +12,7 @@
   --hover: #f0f2eb;
   --shadow: 0 12px 38px #2838250d;
   --reader-bg: #f1f1eb;
-  --font-ui: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+  --font-ui: "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans SC", "Noto Sans CJK SC", "Segoe UI", sans-serif;
   --text-caption: 12px;
   --text-secondary: 13px;
   --text-body: 14px;
@@ -157,7 +157,7 @@ button {
   padding: 11px 17px;
   border-radius: 7px;
   font-size: var(--text-body);
-  font-weight: 600;
+  font-weight: 500;
   transition: filter 0.15s;
 }
 .primary:hover {
@@ -178,7 +178,7 @@ button {
   font-size: var(--text-caption);
 }
 kbd {
-  font: 500 var(--text-caption)/1.4 var(--font-ui);
+  font: 400 var(--text-caption)/1.4 var(--font-ui);
   color: var(--muted);
   letter-spacing: 0.4px;
 }
@@ -187,7 +187,7 @@ kbd {
   letter-spacing: .8px;
   color: var(--muted);
   margin: 30px 12px 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .nav-item {
   width: 100%;
@@ -199,7 +199,7 @@ kbd {
   gap: 12px;
   text-align: left;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: 400;
 }
 .nav-item:hover {
   background: var(--hover);
@@ -207,7 +207,7 @@ kbd {
 .nav-item.active {
   background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 500;
 }
 .count {
   margin-left: auto;
@@ -288,7 +288,7 @@ kbd {
   font-size: var(--text-caption);
   letter-spacing: 2.4px;
   color: var(--muted);
-  font-weight: 600;
+  font-weight: 500;
 }
 .heading-row {
   display: flex;
@@ -361,7 +361,7 @@ h1 span {
 .continue-info strong {
   display: block;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -550,7 +550,7 @@ h1 span {
 }
 .book-card h3 {
   font-size: var(--text-body);
-  font-weight: 600;
+  font-weight: 500;
   margin: 0 5px 7px;
   line-height: 1.8;
   display: -webkit-box;
@@ -654,7 +654,7 @@ h1 span {
   margin-bottom: 15px;
 }
 .empty-state h2 {
-  font-weight: 500;
+  font-weight: 400;
   font-size: var(--text-heading);
 }
 .empty-state p {
@@ -691,7 +691,7 @@ body[data-animations="false"] .selection-menu {
   padding: 8px 10px;
   border-radius: 5px;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: 400;
 }
 .text-button svg {
   width: 16px;
@@ -709,7 +709,7 @@ body[data-animations="false"] .selection-menu {
   color: var(--muted);
   min-width: 0;
   flex: 1;
-  font-weight: 500;
+  font-weight: 400;
 }
 .reader-actions {
   margin-left: auto;
@@ -748,7 +748,7 @@ body[data-animations="false"] .selection-menu {
   padding: 15px 4px;
   color: var(--muted);
   border-bottom: 2px solid transparent;
-  font-weight: 600;
+  font-weight: 500;
 }
 .toc-tabs button.active {
   border-color: var(--accent);
@@ -774,7 +774,7 @@ body[data-animations="false"] .selection-menu {
 .toc-entry.active {
   background: var(--accent-soft);
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 500;
 }
 .panel-hint {
   font-size: var(--text-body);
@@ -955,7 +955,7 @@ input[type="range"] {
   -webkit-box-orient: vertical;
   font-size: var(--text-body);
   line-height: 1.7;
-  font-weight: 500;
+  font-weight: 400;
 }
 .note-copy small {
   color: var(--muted);
@@ -1005,7 +1005,7 @@ input[type="range"] {
 }
 .settings-header h2 {
   font-size: var(--text-heading);
-  font-weight: 600;
+  font-weight: 500;
   margin: 10px 0 0;
   line-height: 1.4;
 }
@@ -1022,7 +1022,7 @@ input[type="range"] {
 }
 .settings-body h3 {
   font-size: var(--text-section);
-  font-weight: 600;
+  font-weight: 500;
   margin: 0 0 20px;
 }
 .theme-options {
@@ -1068,7 +1068,7 @@ input[type="range"] {
   font-size: var(--text-body);
   row-gap: 13px;
   margin: 19px 0;
-  font-weight: 500;
+  font-weight: 400;
 }
 .setting-row small {
   display: block;
@@ -1136,7 +1136,7 @@ input[type="range"] {
 .checkbox-row > span {
   color: var(--text);
   font-size: var(--text-body);
-  font-weight: 500;
+  font-weight: 400;
 }
 .checkbox-row input {
   width: auto !important;
@@ -1194,7 +1194,7 @@ input[type="range"] {
 }
 .dictionary-row strong {
   font-size: var(--text-body);
-  font-weight: 500;
+  font-weight: 400;
 }
 .dictionary-row small {
   color: var(--muted);
@@ -1351,7 +1351,7 @@ input[type="range"] {
 .annotation-header h2 {
   margin: 8px 0 0;
   font-size: var(--text-heading);
-  font-weight: 600;
+  font-weight: 500;
 }
 .annotation-dialog blockquote {
   margin: 21px 0;
@@ -1368,7 +1368,7 @@ input[type="range"] {
 .annotation-note-label {
   display: block;
   font-size: var(--text-body);
-  font-weight: 600;
+  font-weight: 500;
 }
 .annotation-note-label textarea {
   display: block;
@@ -1454,7 +1454,7 @@ input[type="range"] {
 }
 .shell-option strong {
   font-size: var(--text-body);
-  font-weight: 500;
+  font-weight: 400;
 }
 .shell-option small {
   display: block;
@@ -1475,7 +1475,7 @@ input[type="range"] {
 }
 .about strong {
   font-size: var(--text-body);
-  font-weight: 600;
+  font-weight: 500;
 }
 .about small {
   display: block;
@@ -1624,7 +1624,7 @@ input[type="range"] {
 .application-settings-nav a {
   color: var(--text); text-decoration: none; padding: 13px 16px; border-radius: 8px;
   font-size: var(--text-navigation);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.6;
 }
 .application-settings-nav a:hover { background: var(--accent-soft); }

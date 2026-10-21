@@ -63,7 +63,9 @@
 
 ## 界面字体与字号
 
-- 界面优先使用本机 Noto Sans SC，依次回退至 Noto Sans CJK SC、微软雅黑 UI、微软雅黑、Segoe UI 和系统无衬线字体；自绘标题栏使用相同的可用字体顺序。
-- 统一字号层级：辅助说明 12–13px、常用标签与控件 14px、导航 15px、分组标题 16px、面板标题 20px。应用设置分类使用 600 字重，正文和说明保留常规字重。
+- 界面优先使用微软雅黑，依次回退至微软雅黑 UI、Noto Sans SC、Noto Sans CJK SC、Segoe UI 和系统无衬线字体；自绘标题栏使用相同的可用字体顺序。
+- 统一字号层级：辅助说明 12–13px、常用标签与控件 14px、导航 15px、分组标题 16px、面板标题 20px。应用设置分类及分组标题使用 500 字重，常用标签、正文和说明保留 400 常规字重。
 - 已在明亮及夜间主题检查应用设置、书架、目录和阅读设置，确认字体加大后控件无挤压；阅读设置面板使用可伸缩内容区，底部内容仍可滚动访问。
-- EPUB 正文继续使用阅读设置中的字体和字号；选择默认无衬线字体时优先 Noto Sans SC。
+- EPUB 正文继续使用阅读设置中的字体和字号；选择默认无衬线字体时优先微软雅黑。
+
+- Direct2D 标题栏使用 Segoe Fluent Icons 的 ChromeMinimize（E921）、ChromeMaximize（E922）、ChromeRestore（E923）和 ChromeClose（E8BB），字形来自[微软官方定义](https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font)。最大化后切换还原图标，并保留关闭按钮的红色悬停效果；没有 Fluent 字体时回退至 Segoe MDL2 Assets。

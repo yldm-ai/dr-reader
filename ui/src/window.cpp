@@ -155,8 +155,8 @@ void Window::paint()
             Microsoft::WRL::ComPtr<IDWriteFontCollection> fonts;
             if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)))
             {
-                for (const auto candidate : {L"Noto Sans SC", L"Noto Sans CJK SC", L"Microsoft YaHei UI",
-                                             L"Microsoft YaHei", L"Segoe UI"})
+                for (const auto candidate : {L"Microsoft YaHei", L"Microsoft YaHei UI", L"Noto Sans SC",
+                                             L"Noto Sans CJK SC", L"Segoe UI"})
                 {
                     UINT32 index = 0;
                     BOOL exists = FALSE;
@@ -167,11 +167,30 @@ void Window::paint()
                     }
                 }
             }
-            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_MEDIUM,
+            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                                      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, L"zh-CN",
                                      &text_);
             if (text_)
                 text_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+        if (write_ && !caption_icons_)
+        {
+            const wchar_t *family = L"Segoe Fluent Icons";
+            Microsoft::WRL::ComPtr<IDWriteFontCollection> fonts;
+            UINT32 index = 0;
+            BOOL exists = FALSE;
+            if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)) &&
+                SUCCEEDED(fonts->FindFamilyName(family, &index, &exists)) && !exists)
+                family = L"Segoe MDL2 Assets";
+            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10, L"en-US",
+                                     &caption_icons_);
+            if (caption_icons_)
+            {
+                caption_icons_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                caption_icons_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                caption_icons_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            }
         }
         if (factory_ && !target_)
             factory_->CreateHwndRenderTarget(
@@ -207,24 +226,14 @@ void Window::paint()
                     brush->SetColor(D2D1::ColorF(hot_ == HTCLOSE && hit == HTCLOSE ? 0xffffff
                                                  : dark_                           ? 0xe3e3dd
                                                                                    : 0x30372f));
-                    float cx = x + 23, cy = height/2;
-                    if (i == 0)
-                        target_->DrawLine({cx - 5, cy}, {cx + 5, cy}, brush.Get());
-                    else if (i == 1)
-                    {
-                        if (IsZoomed(hwnd_))
-                        {
-                            target_->DrawRectangle(D2D1::RectF(cx - 3, cy - 6, cx + 6, cy + 3), brush.Get());
-                            target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 4, cx + 4, cy + 5), brush.Get());
-                        }
-                        else
-                            target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 5, cx + 5, cy + 5), brush.Get());
-                    }
-                    else
-                    {
-                        target_->DrawLine({cx - 5, cy - 5}, {cx + 5, cy + 5}, brush.Get());
-                        target_->DrawLine({cx - 5, cy + 5}, {cx + 5, cy - 5}, brush.Get());
-                    }
+                    // Segoe Fluent Icons: ChromeMinimize, ChromeMaximize/Restore, ChromeClose.
+                    const wchar_t glyph = i == 0 ? L'\uE921'
+                                          : i == 1 ? (IsZoomed(hwnd_) ? L'\uE923' : L'\uE922')
+                                                   : L'\uE8BB';
+                    if (caption_icons_)
+                        target_->DrawTextW(&glyph, 1, caption_icons_.Get(),
+                                           D2D1::RectF(x, 0, x + 46, height), brush.Get(),
+                                           D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 }
             }
             if (target_->EndDraw() == D2DERR_RECREATE_TARGET)

@@ -767,8 +767,8 @@ body[data-animations="false"] .selection-menu {
   overflow: hidden;
   word-break: break-word;
 }
-.toc-entry:hover,
-.mark-entry:hover {
+#toc-panel:not([data-scrolling]) .toc-entry:not(.active):hover,
+#toc-panel:not([data-scrolling]) .mark-entry:hover {
   background: var(--hover);
 }
 .toc-entry.active {
@@ -906,7 +906,7 @@ input[type="range"] {
   color: var(--muted);
   margin: 0;
 }
-.search-result:hover {
+#toc-panel:not([data-scrolling]) .search-result:hover {
   background: var(--hover);
 }
 .note-entry {
@@ -919,7 +919,7 @@ input[type="range"] {
   padding: 12px 10px;
   border-bottom: 1px solid var(--border);
 }
-.note-entry:hover {
+#toc-panel:not([data-scrolling]) .note-entry:hover {
   background: var(--hover);
 }
 .note-color {
@@ -1314,6 +1314,10 @@ input[type="range"] {
   border-radius: 4px;
   font-size: var(--text-secondary);
   white-space: nowrap;
+}
+.selection-action[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .selection-action:hover {
   background: var(--hover);

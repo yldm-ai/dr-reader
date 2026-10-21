@@ -6,6 +6,7 @@ import {
 import { AnnotationLayer } from "./annotations.js";
 import { ReaderMotion } from "./motion.js";
 import { fontStack } from "./settings.js";
+import { icon } from "./icons.js";
 
 export class Reader {
   constructor(onUpdate) {
@@ -21,6 +22,7 @@ export class Reader {
     this.motion = new ReaderMotion();
     this.selection = null;
     this.editingAnnotation = null;
+    this.attachTocHover();
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
       if (!event.target.closest("#selection-menu")) this.hideSelection();
@@ -77,6 +79,7 @@ export class Reader {
       );
       this.saveSelection(existing?.color || "yellow", "underline");
     };
+    $("selection-delete").onclick = () => this.deleteSelection();
     $("selection-note").onclick = () => this.openAnnotationDialog();
     $("selection-copy").onclick = () => this.copySelection();
     $("selection-search").onclick = () => this.searchSelection();
@@ -98,6 +101,15 @@ export class Reader {
     $("annotation-delete").onclick = () => this.deleteFromDialog();
     this.observer = new ResizeObserver(() => this.reflow());
     this.observer.observe($("book-frame"));
+  }
+
+  attachTocHover() {
+    const panel = $("toc-panel");
+    panel.addEventListener("scroll", () => { panel.dataset.scrolling = "true"; }, { passive: true, capture: true });
+    panel.addEventListener("pointermove", (event) => {
+      if (event.movementX || event.movementY) delete panel.dataset.scrolling;
+    });
+    panel.addEventListener("pointerleave", () => { delete panel.dataset.scrolling; });
   }
 
   async open(book, settings) {
@@ -773,6 +785,19 @@ export class Reader {
     if (!rect || (!rect.width && !rect.height)) return;
     const text = range.toString().trim();
     if (!text) return;
+    if (!annotationId) {
+      for (const [id, candidate] of this.annotationLayer?.ranges || []) {
+        if (range.compareBoundaryPoints(Range.START_TO_START, candidate) === 0 &&
+            range.compareBoundaryPoints(Range.END_TO_END, candidate) === 0) {
+          annotationId = id;
+          break;
+        }
+      }
+    }
+    const existing = this.annotations.find((annotation) => annotation.id === annotationId);
+    $("selection-delete").hidden = !existing;
+    $("selection-delete").title = existing?.note ? "删除此标注及其笔记" : "删除此标注";
+    $("selection-underline").setAttribute("aria-pressed", String(existing?.style === "underline"));
     this.selection = {
       range: range.cloneRange(),
       text,
@@ -938,24 +963,35 @@ export class Reader {
     }
   }
 
+  async removeAnnotation(annotation) {
+    const bookId = this.book.id;
+    await call("annotation.delete", { id: bookId, annotationId: annotation.id });
+    if (this.book?.id !== bookId) return;
+    this.annotations = this.annotations.filter((item) => item.id !== annotation.id);
+    if (this.editingAnnotation?.id === annotation.id) this.editingAnnotation = null;
+    this.hideSelection();
+    this.doc?.getSelection()?.removeAllRanges();
+    this.refreshAnnotations();
+    this.notes();
+  }
+
+  async deleteSelection() {
+    const existing = this.annotations.find((annotation) => annotation.id === this.selection?.annotationId);
+    if (!existing) return;
+    try {
+      await this.removeAnnotation(existing);
+      toast("标注已删除");
+    } catch (error) { toast(error.message); }
+  }
+
   async deleteFromDialog() {
     if (!this.editingAnnotation) return;
     try {
-      await call("annotation.delete", {
-        id: this.book.id,
-        annotationId: this.editingAnnotation.id,
-      });
-      this.annotations = this.annotations.filter(
-        (annotation) => annotation.id !== this.editingAnnotation.id,
-      );
-      this.editingAnnotation = null;
+      await this.removeAnnotation(this.editingAnnotation);
       $("annotation-dialog").close("cancel");
-      this.refreshAnnotations();
-      this.notes();
+      this.selection = null;
       toast("标注已删除");
-    } catch (error) {
-      toast(error.message);
-    }
+    } catch (error) { toast(error.message); }
   }
 
   async copySelection() {
@@ -988,6 +1024,7 @@ export class Reader {
       ) || [];
     if (!dictionaries.length) return;
     const text = this.selection.text.slice(0, 8192);
+    this.hideSelection();
     const dictionary =
       dictionaries.length === 1
         ? dictionaries[0]
@@ -1004,26 +1041,44 @@ export class Reader {
   chooseDictionary(dictionaries) {
     return new Promise((resolve) => {
       const dialog = document.createElement("dialog");
+      this.hideSelection();
       dialog.className = "dictionary-picker";
-      dialog.innerHTML = `<div class="annotation-header"><div><span class="eyebrow">LOOK UP</span><h2>选择查词网站</h2></div></div><div class="dictionary-picker-list"></div>`;
+      dialog.setAttribute("aria-label", "选择查词网站");
+      dialog.innerHTML = `<div class="annotation-header"><div><span class="eyebrow">LOOK UP</span><h2>选择查词网站</h2></div><button type="button" class="icon-button" aria-label="关闭查词窗口" title="关闭">${icon("close")}</button></div><div class="dictionary-picker-list"></div>`;
+      let settled = false;
+      const finish = (id = "") => {
+        if (settled) return;
+        settled = true;
+        const selected = dictionaries.find((item) => item.id === id) || null;
+        dialog.close(id);
+        dialog.remove();
+        resolve(selected);
+      };
+      dialog.querySelector(".annotation-header button").onclick = () => finish();
+      const outside = (event) => {
+        const rect = dialog.getBoundingClientRect();
+        return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right ||
+          event.clientY < rect.top || event.clientY > rect.bottom);
+      };
+      let backdropPressed = false;
+      dialog.addEventListener("pointerdown", (event) => { backdropPressed = outside(event); });
+      dialog.addEventListener("click", (event) => {
+        if (backdropPressed && outside(event)) finish();
+        backdropPressed = false;
+      });
       const root = dialog.querySelector(".dictionary-picker-list");
       for (const dictionary of dictionaries) {
         const button = document.createElement("button");
         button.className = "dictionary-choice";
         button.textContent = dictionary.name;
-        button.onclick = () => dialog.close(dictionary.id);
+        button.onclick = () => finish(dictionary.id);
         root.append(button);
       }
       dialog.addEventListener("cancel", (event) => {
         event.preventDefault();
-        dialog.close();
+        finish();
       });
-      dialog.addEventListener("close", () => {
-        const selected =
-          dictionaries.find((item) => item.id === dialog.returnValue) || null;
-        dialog.remove();
-        resolve(selected);
-      });
+      dialog.addEventListener("close", () => finish(dialog.returnValue));
       document.body.append(dialog);
       dialog.showModal();
     });

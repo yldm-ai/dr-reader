@@ -1,0 +1,92 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Reader interaction regression</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const watchdog = setTimeout(() => { output.textContent = 'FAIL: interaction timed out'; document.documentElement.dataset.result = 'fail'; }, 8000);
+const messages = new EventTarget();
+const requests = [];
+const stored = new Map();
+window.chrome ||= {};
+window.chrome.webview = {
+  addEventListener: (...args) => messages.addEventListener(...args),
+  postMessage({ id, method, params }) {
+    requests.push({ method, params });
+    if (method === 'annotation.delete') stored.delete(params.annotationId);
+    queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { id, result: true } })));
+  },
+};
+function check(condition, message) { if (!condition) throw Error(message); }
+try {
+  // Use the production menu markup, but keep all bridge data in this test page.
+  const html = new DOMParser().parseFromString(await (await fetch('../web/index.html')).text(), 'text/html');
+  document.body.append(...html.body.children);
+  const { Reader } = await import('../web/reader.js');
+  const reader = Object.create(Reader.prototype);
+  let refreshed = 0;
+  Object.assign(reader, {
+    book: { id: 'test-book' }, doc: document, annotations: [],
+    appSettings: { selectionActions: {}, dictionaries: [] },
+    refreshAnnotations() { refreshed++; }, notes() {},
+  });
+  const text = document.createElement('p');
+  text.textContent = '这是原创的下划线交互测试。';
+  document.body.append(text);
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  reader.annotationLayer = { ranges: new Map([['underline-test', range]]), rect: value => value.getBoundingClientRect() };
+  const annotation = { id: 'underline-test', style: 'underline', note: '' };
+  stored.set(annotation.id, annotation);
+  reader.annotations = [annotation];
+  // Reselecting precisely the existing underline must still expose deletion.
+  reader.showSelectionMenu(range);
+  check(!document.getElementById('selection-delete').hidden, 'existing underline needs a delete action');
+  check(document.getElementById('selection-underline').getAttribute('aria-pressed') === 'true', 'underline state is missing');
+  await reader.deleteSelection();
+  check(!stored.has(annotation.id) && !reader.annotations.length && refreshed === 1,
+    'delete must remove persisted data and refresh visible annotations');
+  check(requests[0].params.annotationId === annotation.id, 'delete targeted the wrong annotation');
+  reader.showSelectionMenu(range);
+  check(document.getElementById('selection-delete').hidden, 'unmarked text must not offer annotation deletion');
+
+  const dictionaries = [{ id: 'one', name: '测试词典一' }, { id: 'two', name: '测试词典二' }];
+  let pending = reader.chooseDictionary(dictionaries);
+  let dialog = document.querySelector('.dictionary-picker');
+  check(dialog.open, 'dictionary chooser did not open');
+  dialog.querySelector('[aria-label="关闭查词窗口"]').click();
+  check(await pending === null && !dialog.isConnected, 'close button must cancel and remove the chooser');
+  pending = reader.chooseDictionary(dictionaries);
+  dialog = document.querySelector('.dictionary-picker');
+  const rect = dialog.getBoundingClientRect();
+  dialog.dispatchEvent(new PointerEvent('pointerdown', { clientX: rect.left + 5, clientY: rect.top + 5 }));
+  dialog.dispatchEvent(new MouseEvent('click', { clientX: rect.left + 5, clientY: rect.top + 5 }));
+  check(dialog.open, 'blank space inside the chooser must not dismiss it');
+  dialog.dispatchEvent(new PointerEvent('pointerdown', { clientX: -1, clientY: -1 }));
+  dialog.dispatchEvent(new MouseEvent('click', { clientX: -1, clientY: -1 }));
+  check(await pending === null && !dialog.isConnected, 'backdrop click must dismiss the chooser');
+  pending = reader.chooseDictionary(dictionaries);
+  dialog = document.querySelector('.dictionary-picker');
+  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  check(await pending === null, 'Escape/cancel must dismiss the chooser');
+  pending = reader.chooseDictionary(dictionaries);
+  dialog = document.querySelector('.dictionary-picker');
+  dialog.querySelectorAll('.dictionary-choice')[1].click();
+  check((await pending).id === 'two', 'dictionary selection must still work');
+
+  reader.attachTocHover();
+  const panel = document.getElementById('toc-panel');
+  panel.dispatchEvent(new Event('scroll'));
+  check(panel.dataset.scrolling === 'true', 'scroll must suppress stale hover');
+  panel.dispatchEvent(new PointerEvent('pointermove'));
+  check(panel.dataset.scrolling === 'true', 'layout-only pointer events must not reenable hover');
+  panel.dispatchEvent(new PointerEvent('pointermove', { movementY: 2 }));
+  check(!panel.hasAttribute('data-scrolling'), 'real pointer movement must restore hover');
+  output.textContent = 'PASS: underline deletion, chooser close/backdrop/Escape/selection, scroll hover';
+  document.documentElement.dataset.result = 'pass';
+} catch (error) {
+  output.textContent = 'FAIL\n' + error.stack;
+  document.documentElement.dataset.result = 'fail';
+}
+clearTimeout(watchdog);
+</script>

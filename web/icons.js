@@ -12,6 +12,7 @@ const paths = {
   search: "m21 21-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z",
   grid: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.1M3 12h.1M3 18h.1",
+  "arrow-up": "m5 12 7-7 7 7M12 5v15",
   "arrow-left": "m12 5-7 7 7 7M5 12h15",
   "arrow-right": "m12 5 7 7-7 7M4 12h15",
   type: "M4 5h16M12 5v15M8 20h8",

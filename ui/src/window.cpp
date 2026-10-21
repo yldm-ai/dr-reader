@@ -167,7 +167,7 @@ void Window::paint()
                     }
                 }
             }
-            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_LIGHT,
                                      DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, L"zh-CN",
                                      &text_);
             if (text_)
@@ -210,7 +210,7 @@ void Window::paint()
                 brush->SetColor(D2D1::ColorF(dark_ ? 0xe3e3dd : 0x30372f));
                 if (text_)
                     target_->DrawTextW(title_.c_str(), static_cast<UINT32>(title_.size()), text_.Get(),
-                                       D2D1::RectF(18, 0, std::max(18.f, size.width - 150), height), brush.Get(),
+                                       D2D1::RectF(10, 0, std::max(10.f, size.width - 150), height), brush.Get(),
                                        D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 for (int i = 0; i < 3; ++i)
                 {

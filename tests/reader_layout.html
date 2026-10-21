@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Reader pagination regression</title>
+<div id="app"></div>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import { Reader } from '../web/reader.js';
+
+const settings = {
+  application: { animations: false },
+  reading: {
+    mode: 'paged', theme: 'light', fontFamily: 'sans-serif', fontSize: 20,
+    fontWeight: 400, lineHeight: 1.9, paragraphSpacing: 1, letterSpacing: 0,
+    textIndent: 0, alignment: 'justify', width: 760, paddingX: 44, paddingY: 38,
+    publisherStyles: false,
+  },
+};
+const results = [];
+function check(condition, message) {
+  if (!condition) throw Error(message);
+}
+async function frameAt(width) {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = `display:block;border:0;width:${width}px;height:480px`;
+  const ready = new Promise(resolve => frame.onload = resolve);
+  const paragraph = '这是原创的分页回归样本。每一行文字都应完整落在正文边界内，最后一页也应保留左右留白。';
+  frame.srcdoc = `<style>body{margin:1%;font-family:serif}div{margin:0;padding:0;font-family:monospace}p{margin:5pt 0;text-indent:2em}</style><div>${Array.from({length: 45}, (_, i) => `<p>${i + 1}. ${paragraph.repeat(3)}</p>`).join('')}</div>`;
+  document.body.append(frame);
+  await ready;
+  return frame;
+}
+try {
+  for (const width of [760, 731.5, 540]) {
+    const frame = await frameAt(width);
+    const doc = frame.contentDocument;
+    const reader = Object.create(Reader.prototype);
+    Object.assign(reader, {
+      doc, style: doc.head.appendChild(doc.createElement('style')),
+      motion: { setAllowed() {} }, hideSelection() {}, reflow() {},
+    });
+    reader.apply(settings);
+    await doc.fonts.ready;
+    reader.measure();
+    check(reader.pages > 1, 'fixture must span multiple pages');
+    const pages = reader.pages;
+    const view = doc.defaultView;
+    const destination = (pages - 1) * view.innerWidth;
+    view.scrollTo(destination, 0);
+    check(Math.abs(view.scrollX - destination) <= 1,
+      `${width}: final page clamped (${view.scrollX} instead of ${destination})`);
+    const range = doc.createRange();
+    range.selectNodeContents(doc.body.lastElementChild.lastElementChild);
+    const rects = [...range.getClientRects()].filter(rect => rect.width > 0);
+    check(rects.some(rect => rect.left >= 0 && rect.left < view.innerWidth), 'last paragraph must be visible');
+    for (const rect of rects.filter(rect => rect.left >= 0 && rect.left < view.innerWidth)) {
+      check(rect.left >= settings.reading.paddingX - 1 &&
+        rect.right <= view.innerWidth - settings.reading.paddingX + 1,
+        `${width}: text exceeds horizontal margins (${rect.left}, ${rect.right})`);
+    }
+    reader.measure();
+    check(reader.pages === pages, `${width}: repeated reflow added a phantom page`);
+    check(getComputedStyle(doc.body.firstElementChild).fontFamily.includes('Microsoft YaHei'),
+      'publisher wrapper must inherit the selected reading font');
+    reader.apply({ ...settings, reading: { ...settings.reading, mode: 'scroll' } });
+    reader.measure();
+    check(getComputedStyle(reader.pageTail).display === 'none', 'pagination spacer must be removed in scroll mode');
+    results.push(`${width}px: PASS (${pages} pages)`);
+    frame.remove();
+  }
+  document.getElementById('result').textContent = 'PASS\n' + results.join('\n');
+  document.documentElement.dataset.result = 'pass';
+} catch (error) {
+  document.getElementById('result').textContent = 'FAIL\n' + error.stack;
+  document.documentElement.dataset.result = 'fail';
+}
+</script>

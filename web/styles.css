@@ -1642,3 +1642,20 @@ input[type="range"] {
   .application-settings-nav a { padding: 10px; font-size: var(--text-body); }
   .application-settings-page .settings-body section { padding: 20px; }
 }
+
+.back-to-top {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  width: 44px;
+  height: 44px;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 4px 20px #17221426;
+}
+.back-to-top:hover { background: var(--accent-soft); }
+.back-to-top svg { width: 20px; height: 20px; }
+.application-settings-header h1:focus { outline: none; }

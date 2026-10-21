@@ -18,9 +18,16 @@ export class SettingsPanel {
  <section><h3>页面布局</h3>${slider('width','正文区域宽度',400,1600,20,'px')}${slider('paddingX','左右留白',12,120,2,'px')}${slider('paddingY','上下留白',12,100,2,'px')}</section>
  <section><h3>翻页动画</h3>${select('animation','动画效果',[['none','无动画'],['slide','平移'],['fade','淡入淡出'],['turn','书页转动']])}${slider('animationDuration','动画时长',100,600,10,'ms')}<p class="setting-note">动画在应用关闭动态效果或系统偏好减少动态效果时自动停用。</p></section><button id="reset-reading" class="text-button reset-button">恢复默认排版</button>`;
  for(const id of ['application-settings','reading-settings'])document.getElementById(id)?.remove();
- document.body.insertAdjacentHTML('beforeend',`<main id="application-settings" class="application-settings-page" aria-labelledby="application-settings-title" hidden><header class="application-settings-header"><button id="application-settings-back" class="text-button">${icon('arrow-left')}返回书库</button><div><span class="eyebrow">APPLICATION SETTINGS</span><h1 id="application-settings-title">应用设置</h1><p>管理应用外观、窗口与选词操作。阅读页面的字体和排版可在书内调整。</p></div></header><div class="application-settings-layout"><nav class="application-settings-nav" aria-label="设置分类">${['应用外观','原生窗口外壳','选中文字后的菜单','自定义查词网站','关于与存储'].map((name,index)=>`<a href="#app-setting-section-${index}">${name}</a>`).join('')}</nav><div class="settings-body">${application}</div></div></main>`+dialog('reading-settings','阅读设置','READING PREFERENCES',reading));
+ document.body.insertAdjacentHTML('beforeend',`<main id="application-settings" class="application-settings-page" aria-labelledby="application-settings-title" hidden><header class="application-settings-header"><button id="application-settings-back" class="text-button">${icon('arrow-left')}返回书库</button><div><span class="eyebrow">APPLICATION SETTINGS</span><h1 id="application-settings-title" tabindex="-1">应用设置</h1><p>管理应用外观、窗口与选词操作。阅读页面的字体和排版可在书内调整。</p></div></header><div class="application-settings-layout"><nav class="application-settings-nav" aria-label="设置分类">${['应用外观','原生窗口外壳','选中文字后的菜单','自定义查词网站','关于与存储'].map((name,index)=>`<a href="#app-setting-section-${index}">${name}</a>`).join('')}</nav><div class="settings-body">${application}</div></div><button id="application-back-top" class="back-to-top" aria-label="回到顶部" title="回到顶部" hidden>${icon("arrow-up")}</button></main>`+dialog('reading-settings','阅读设置','READING PREFERENCES',reading));
  $('application-settings').querySelectorAll('section').forEach((section,index)=>section.id=`app-setting-section-${index}`);
  $('application-settings-back').onclick=()=>this.closeApplication();
+ $('application-settings').addEventListener('scroll',()=>this.syncBackToTop(),{passive:true});
+ $('application-back-top').onclick=()=>{
+ $('application-settings-title').focus({preventScroll:true});
+ const animate=this.value.application.animations&&!matchMedia('(prefers-reduced-motion: reduce)').matches;
+ $('application-settings').scrollTo({top:0,behavior:animate?'smooth':'instant'});
+ };
+
  $('application-settings').querySelectorAll('.application-settings-nav a').forEach(link=>link.onclick=event=>{
  event.preventDefault();$(link.getAttribute('href').slice(1)).scrollIntoView({block:'start'});
  });
@@ -41,9 +48,10 @@ export class SettingsPanel {
  this.returnFocus=document.activeElement;
  document.dispatchEvent(new Event('reader-dismiss-selection'));
  $('application-settings-back').lastChild.textContent=$('reader-view').hidden?'返回书库':'返回阅读';
- $('app').hidden=true;$('application-settings').hidden=false;$('application-settings-back').focus();
+ $('app').hidden=true;$('application-settings').hidden=false;$('application-settings-back').focus({preventScroll:true});this.syncBackToTop();
  return;
  }document.dispatchEvent(new Event('reader-dismiss-selection'));$('reading-settings').showModal();}
+ syncBackToTop(){$('application-back-top').hidden=$('application-settings').scrollTop<160;}
  closeApplication(){if($('application-settings').hidden)return;$('application-settings').hidden=true;$('app').hidden=false;this.returnFocus?.focus();this.flush();}
  get applicationOpen(){return !$('application-settings').hidden;}
  sync(){if(!this.value)return;const a=this.value.application,r=this.value.reading;document.querySelectorAll('[data-setting-theme]').forEach(b=>b.classList.toggle('selected',this.value[b.dataset.settingTheme].theme===b.dataset.value));document.querySelectorAll('[name=shell]').forEach(b=>b.checked=b.value===a.shell);$('app-animations').checked=a.animations;document.querySelectorAll('[data-selection-action]').forEach(i=>i.checked=a.selectionActions[i.dataset.selectionAction]);for(const input of document.querySelectorAll('[data-reading]')){if(input.type==='checkbox')input.checked=r[input.dataset.reading];else if(document.activeElement!==input||input.id.startsWith('number-'))input.value=r[input.dataset.reading];}for(const output of document.querySelectorAll('[id^=value-]'))output.value=formatValue(r[output.id.slice(6)]);const preview=$('type-preview');preview.style.fontFamily=fontStack(r.fontFamily);preview.style.fontSize=`${Math.min(r.fontSize,30)}px`;preview.style.fontWeight=r.fontWeight;preview.style.lineHeight=r.lineHeight;preview.style.letterSpacing=`${r.letterSpacing}px`;preview.style.textAlign=r.alignment;preview.querySelector('p').style.marginTop=`${r.paragraphSpacing}em`;this.applyPreviewTheme();this.renderDictionaries();}

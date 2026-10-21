@@ -69,3 +69,12 @@
 - EPUB 正文继续使用阅读设置中的字体和字号；选择默认无衬线字体时优先微软雅黑。
 
 - Direct2D 标题栏使用 Segoe Fluent Icons 的 ChromeMinimize（E921）、ChromeMaximize（E922）、ChromeRestore（E923）和 ChromeClose（E8BB），字形来自[微软官方定义](https://learn.microsoft.com/en-us/windows/apps/design/iconography/segoe-fluent-icons-font)。最大化后切换还原图标，并保留关闭按钮的红色悬停效果；没有 Fluent 字体时回退至 Segoe MDL2 Assets。
+
+
+## 末页留白与设置回顶回归
+
+- 修复 CSS 分栏末页的滚动范围缺少尾部留白：章节末页现在保留完整页面宽度，避免 `scrollTo` 被浏览器钳制后把文字推到右边缘。分栏宽度与翻页步长一致，覆盖小数像素窗口宽度。
+- `tests/reader_layout.html` 通过本地 HTTP 服务打开后应显示 PASS。它直接使用阅读器的样式与分页测量，在 760 / 731.5 / 540px 三种宽度验证末页位置、文字左右边界、重复重排页数、容器字体继承和滚动模式关闭分页占位。
+- 本轮已使用 Edge 无头模式运行上述真实布局测试，三种宽度全部通过；另以本机《流俗地》的对应章节副本验收，副本仅位于忽略的 build 目录。
+- 应用设置向下滚动超过 160px 时，右下角显示回到顶部按钮；点击后返回顶部并收起，关闭动画或启用系统减少动态效果时直接返回。
+- Direct2D 标题栏文字使用 300 字重，左边距由 18 DIP 调整为 10 DIP。

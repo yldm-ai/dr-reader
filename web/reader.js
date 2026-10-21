@@ -513,22 +513,36 @@ export class Reader {
       ? ""
       : `body p{text-indent:${reading.textIndent}em!important;text-align:${reading.alignment}!important}`;
     const margin = paged
-      ? `padding:0!important;column-count:auto!important;margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(100vw - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(100vw - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
+      ? `padding:0!important;column-count:auto!important;margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(var(--dr-page-width,100vw) - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(var(--dr-page-width,100vw) - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
       : `margin:0!important;padding:${reading.paddingY}px ${reading.paddingX}px 60px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
-    this.style.textContent = `html{background:${colors[0]}!important;color:${colors[1]}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors[0]}!important;color:${colors[1]}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-size:inherit!important;line-height:inherit!important;color:inherit!important}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors[2]}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:#8dac7855!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors[2]}55;border-radius:4px}`;
+    this.style.textContent = `html{background:${colors[0]}!important;color:${colors[1]}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors[0]}!important;color:${colors[1]}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors[2]}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:#8dac7855!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors[2]}55;border-radius:4px}`;
     this.reflow();
   }
 
   measure() {
     if (!this.doc) return;
-    const view = this.doc.defaultView;
-    this.pages = Math.max(
-      1,
-      Math.ceil(
-        (this.doc.documentElement.scrollWidth - 2) /
-          Math.max(1, view.innerWidth),
-      ),
-    );
+    const doc = this.doc;
+    const view = doc.defaultView;
+    if (!this.pageTail || this.pageTail.ownerDocument !== doc) {
+      this.pageTail = doc.createElement("div");
+      this.pageTail.setAttribute("aria-hidden", "true");
+      // Outside body: this spacer must not become another column or text anchor.
+      this.pageTail.style.cssText = "position:absolute!important;top:0!important;width:1px!important;height:1px!important;margin:0!important;padding:0!important;border:0!important;visibility:hidden!important;pointer-events:none!important";
+      doc.documentElement.append(this.pageTail);
+    }
+    const paged = this.settings.mode === "paged";
+    this.pageTail.style.setProperty("display", paged ? "block" : "none", "important");
+    this.pageTail.style.left = "0px";
+    if (!paged) {
+      this.pages = 1;
+      return;
+    }
+    const width = Math.max(1, view.innerWidth);
+    doc.documentElement.style.setProperty("--dr-page-width", `${width}px`);
+    this.pages = Math.max(1, Math.ceil((doc.documentElement.scrollWidth - 2) / width));
+    // Column overflow omits the last outer margin. Reserve the complete last
+    // viewport so scrollTo(lastPage * width) cannot be clamped to a partial page.
+    this.pageTail.style.left = `${this.pages * width - 1}px`;
   }
 
   restore() {

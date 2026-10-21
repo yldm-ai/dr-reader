@@ -2,6 +2,7 @@ import { call, bookUrl, $, escape, toast, busy } from "./bridge.js";
 import { icon, hydrate } from "./icons.ts";
 import { Reader } from "./reader.js";
 import { SettingsPanel } from "./settings.js";
+import { createLibraryOverlays } from "./library-overlays.js";
 
 hydrate();
 
@@ -10,6 +11,12 @@ let settings = null;
 let filter = "all";
 let author = "";
 let listMode = false;
+let pendingRemoval = null;
+const libraryOverlays = createLibraryOverlays(book => {
+  pendingRemoval = book;
+  $("delete-book-title").textContent = `删除《${book.title}》？`;
+  $("delete-book-dialog").showModal();
+});
 
 const reader = new Reader((book) => {
   const index = books.findIndex((item) => item.id === book.id);
@@ -43,6 +50,7 @@ function cover(book, className = "cover-image") {
 }
 
 function render() {
+  libraryOverlays.dismiss();
   const query = $("library-search").value.toLocaleLowerCase();
   const visible = books.filter(
     (book) =>
@@ -85,12 +93,16 @@ function render() {
   const cards = document.createDocumentFragment();
   grid.classList.toggle("list-mode", listMode);
   for (const book of visible) {
+    const item = document.createElement("div");
+    item.className = "book-item";
     const card = document.createElement("button");
     card.className = "book-card";
     card.setAttribute("aria-label", `阅读 ${book.title}`);
     card.innerHTML = `<div class="cover-wrap">${cover(book)}</div><h3>${escape(book.title)}</h3><div class="book-author">${escape(book.author)}</div><div class="book-status">${book.lastRead ? `<span class="progress-track"><i style="width:${Math.round(book.progress * 100)}%"></i></span><span>已读 ${Math.round(book.progress * 100)}%</span>` : '<span class="new-label">未读</span><span>EPUB</span>'}</div>`;
     card.onclick = () => openBook(book.id);
-    cards.append(card);
+    libraryOverlays.bind(card, book);
+    item.append(card);
+    cards.append(item);
   }
   grid.replaceChildren(cards);
 
@@ -142,9 +154,17 @@ function setNavigation() {
         !author && button.dataset.filter === filter,
       ),
     );
+  const active = $("library-nav").querySelector(".nav-item.active");
+  const indicator = $("library-nav").querySelector(".library-nav-indicator");
+  indicator.style.opacity = active ? "1" : "0";
+  if (active) {
+    indicator.style.height = `${active.offsetHeight / 2}px`;
+    indicator.style.transform = `translate(-50%, ${active.offsetTop + active.offsetHeight / 4}px)`;
+  }
 }
 
 async function openBook(id) {
+  libraryOverlays.dismiss();
   busy(true, "正在打开电子书…");
   try {
     const book = await call("open", { id });
@@ -159,6 +179,28 @@ async function openBook(id) {
     busy(false);
   }
 }
+
+$("delete-book-dialog").addEventListener("close", () => { pendingRemoval = null; });
+$("delete-book-confirm").onclick = async () => {
+  const book = pendingRemoval;
+  if (!book) return;
+  $("delete-book-dialog").close();
+  busy(true, "正在删除图书…");
+  try {
+    await call("book.delete", { id: book.id });
+    books = books.filter(item => item.id !== book.id);
+    if (author && !books.some(item => item.author === author)) {
+      author = "";
+      setNavigation();
+    }
+    render();
+    toast("图书已从书库删除");
+  } catch (error) {
+    toast(`删除图书失败：${error.message}`);
+  } finally {
+    busy(false);
+  }
+};
 
 async function importBooks() {
   busy(true, "正在导入 EPUB，C++ 正在解析与拆分章节…");

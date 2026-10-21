@@ -144,8 +144,13 @@ void Application::receive(const Json &request)
                     }
                     initial_files_.clear();
                     auto sample = assets_.parent_path() / "resources" / "welcome.epub";
-                    if (library_.list().empty() && fs::exists(sample))
-                        library_.import_book(sample);
+                    auto welcome_marker = library_.root() / "welcome-initialized";
+                    if (!fs::exists(welcome_marker))
+                    {
+                        if (library_.list().empty() && fs::exists(sample))
+                            library_.import_book(sample);
+                        write_atomic(welcome_marker, "1");
+                    }
                     result = {{"books", library_.list()},
                               {"settings", library_.settings()},
                               {"dataPath", utf8(library_.root())},
@@ -157,6 +162,11 @@ void Application::receive(const Json &request)
                 }
                 else if (method == "list")
                     result = library_.list();
+                else if (method == "book.delete")
+                {
+                    library_.remove_book(params.at("id"));
+                    result = true;
+                }
                 else if (method == "close")
                 {
                     window_.post([this] { DestroyWindow(window_.handle()); });

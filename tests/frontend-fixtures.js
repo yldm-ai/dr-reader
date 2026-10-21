@@ -11,8 +11,9 @@ export function bootstrapFixture() {
       fullBackground: false, fullWidth: false, animation: 'none', animationDuration: 220, publisherStyles: false },
   };
   const book = { id: 'fixture', title: '阅读与时光', author: '测试作者', addedAt: 1,
-    lastRead: 0, progress: 0, chapters: [{ href: 'chapter.html', title: '第一章' }],
-    toc: [{ href: 'chapter.html', title: '第一章', chapter: 0, children: [] }], bookmarks: [] };
+    lastRead: 0, progress: 0, chapters: [{ href: 'chapter.html', title: '第一章' }, { href: 'second.html', title: '第二章' }],
+    toc: [{ href: 'chapter.html', title: '第一章', chapter: 0, children: [] },
+      { href: 'second.html', title: '第二章', chapter: 1, children: [] }], bookmarks: [] };
   return { settings, defaults: structuredClone(settings), books: [book], dataPath: 'test-only',
     fonts: ['Microsoft YaHei', '宋体', 'Microsoft YaHei', ...Array.from({ length: 180 }, (_, i) => `Test Font ${i}`)] };
 }
@@ -27,6 +28,7 @@ export function installNativeMock(data = bootstrapFixture()) {
       let result = true;
       if (method === 'bootstrap') result = structuredClone(data);
       if (method === 'annotations') result = [];
+      if (method === 'book.delete') data.books = data.books.filter(book => book.id !== params.id);
       if (method === 'open') result = structuredClone(data.books[0]);
       if (method === 'position') {
         data.books[0].position = params.position;

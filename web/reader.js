@@ -29,6 +29,7 @@ export class Reader {
     this.selection = null;
     this.editingAnnotation = null;
     this.attachTocHover();
+    this.attachTocAutoHide();
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
       if (!event.target.closest("#selection-menu")) this.hideSelection();
@@ -47,6 +48,10 @@ export class Reader {
     $("prev-page").onclick = () => this.turn(-1);
     $("next-page").onclick = () => this.turn(1);
     $("toggle-toc").onclick = () => {
+      if (this.settings?.showToc !== false && !this.settings?.tocPinned) {
+        this.setTocExpanded($("toc-panel").dataset.expanded !== "true");
+        return;
+      }
       const showToc = $("toc-panel").hidden;
       if (this.onReadingSetting) this.onReadingSetting({ showToc });
       else $("toc-panel").hidden = !showToc;
@@ -118,7 +123,7 @@ export class Reader {
       this.saveFromDialog();
     });
     $("annotation-delete").onclick = () => this.deleteFromDialog();
-    this.observer = new ResizeObserver(() => { this.motion.cancel(); this.reflow(); });
+    this.observer = new ResizeObserver(() => { this.motion.cancel(); this.reflow(); this.updateTocIndicator(); });
     this.observer.observe($("book-frame"));
   }
 
@@ -131,6 +136,56 @@ export class Reader {
     panel.addEventListener("pointerleave", () => { delete panel.dataset.scrolling; });
   }
 
+  attachTocAutoHide() {
+    const panel = $("toc-panel");
+    $("toc-reveal-zone").addEventListener("pointerenter", () => this.setTocExpanded(true));
+    $("toc-reveal-zone").addEventListener("pointerleave", () => this.scheduleTocHide());
+    panel.addEventListener("pointerenter", () => this.setTocExpanded(true));
+    panel.addEventListener("pointerleave", () => this.scheduleTocHide());
+    panel.addEventListener("focusin", () => this.setTocExpanded(true));
+    panel.addEventListener("focusout", () => this.scheduleTocHide());
+    $("pin-toc").onclick = () => {
+      const tocPinned = !this.settings?.tocPinned;
+      this.setTocExpanded(true);
+      if (this.onReadingSetting) this.onReadingSetting({ tocPinned });
+      else { this.settings = { ...this.settings, tocPinned }; this.syncChrome(); }
+      if (!tocPinned && !panel.matches(":hover")) this.scheduleTocHide();
+    };
+    window.addEventListener("blur", () => this.setTocExpanded(false));
+    document.addEventListener("pointermove", event => this.trackTocPointer(event.clientX, event.clientY));
+  }
+
+  trackTocPointer(x, y) {
+    const panel = $("toc-panel");
+    if (!this.book || this.settings?.tocPinned || panel.hidden || panel.dataset.expanded !== "true") return;
+    const rect = panel.getBoundingClientRect();
+    const edge = $("toc-reveal-zone").getBoundingClientRect();
+    if (x >= edge.left && x <= edge.right && y >= edge.top && y <= edge.bottom) {
+      clearTimeout(this.tocHideTimer); this.tocHideTimer = null; return;
+    }
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) this.scheduleTocHide();
+    else { clearTimeout(this.tocHideTimer); this.tocHideTimer = null; }
+  }
+
+  scheduleTocHide() {
+    if (this.tocHideTimer) return;
+    this.tocHideTimer = setTimeout(() => {
+      this.tocHideTimer = null;
+      const panel = $("toc-panel");
+      if (!panel.matches(":hover") && !$("toc-reveal-zone").matches(":hover") && !panel.querySelector(":focus-visible"))
+        this.setTocExpanded(false);
+    }, 220);
+  }
+
+  setTocExpanded(expanded) {
+    clearTimeout(this.tocHideTimer);
+    this.tocHideTimer = null;
+    const panel = $("toc-panel");
+    panel.dataset.expanded = String(expanded);
+    panel.inert = !this.settings?.tocPinned && !expanded;
+    if (expanded) this.updateTocIndicator();
+  }
+
   async open(book, settings) {
     await this.flush();
     this.book = book;
@@ -138,6 +193,7 @@ export class Reader {
     this.chapter = 0;
     this.ratio = 0;
     $("reader-book-title").textContent = book.title;
+    this.setTocExpanded(false);
     $("toc-panel").hidden = false;
     this.tab("toc");
     this.toc();
@@ -175,11 +231,15 @@ export class Reader {
       $(`${key}-content`).hidden = key !== name;
     if (name === "notes") this.notes();
     if (name === "search") $("book-search-input").focus();
+    if (name === "toc") this.updateTocIndicator();
   }
 
   toc() {
     const root = $("toc-content");
-    root.replaceChildren();
+    const indicator = document.createElement("span");
+    indicator.className = "toc-active-indicator";
+    indicator.setAttribute("aria-hidden", "true");
+    root.replaceChildren(indicator);
     for (const item of this.book.toc) {
       const button = document.createElement("button");
       button.className = "toc-entry";
@@ -196,7 +256,7 @@ export class Reader {
     if (!this.book) return;
     const href = this.book.chapters[this.chapter].href;
     let active = null;
-    for (const button of $("toc-content").children) {
+    for (const button of $("toc-content").querySelectorAll(".toc-entry")) {
       button.classList.toggle(
         "active",
         button.dataset.href.split("#")[0] === href,
@@ -204,6 +264,24 @@ export class Reader {
       if (!active && button.classList.contains("active")) active = button;
     }
     active?.scrollIntoView({ block: "nearest" });
+    this.updateTocIndicator();
+  }
+
+  updateTocIndicator() {
+    const root = $("toc-content");
+    const indicator = root.querySelector(".toc-active-indicator");
+    const active = root.querySelector(".toc-entry.active");
+    if (!indicator) return;
+    indicator.style.opacity = active ? "1" : "0";
+    if (!active?.offsetHeight) return;
+    if (!indicator.dataset.ready) indicator.style.transition = "none";
+    indicator.style.height = `${active.offsetHeight / 2}px`;
+    indicator.style.transform = `translate(-50%, ${active.offsetTop + active.offsetHeight / 4}px)`;
+    if (!indicator.dataset.ready) {
+      void indicator.offsetHeight;
+      indicator.dataset.ready = "true";
+      indicator.style.removeProperty("transition");
+    }
   }
 
   marks() {
@@ -433,7 +511,11 @@ export class Reader {
       }
     });
     doc.addEventListener("pointerdown", event => { this.beginPageTap(event); this.hideSelection(); });
-    doc.addEventListener("pointermove", event => { if (event.clientY < 24) this.peekControls(); });
+    doc.addEventListener("pointermove", event => {
+      if (event.clientY < 24) this.peekControls();
+      const rect = $("book-frame").getBoundingClientRect();
+      this.trackTocPointer(rect.left + event.clientX, rect.top + event.clientY);
+    });
     doc.addEventListener("wheel", (event) => this.wheel(event), { passive: false });
     doc.addEventListener("touchmove", () => this.hideSelection(), { passive: true });
     doc.addEventListener("selectionchange", () => {
@@ -556,6 +638,15 @@ export class Reader {
     root.style.setProperty("--reading-paper", readingPalette(r.theme).paper);
     root.style.setProperty("--reading-text", readingPalette(r.theme).text);
     $("toc-panel").hidden = r.showToc === false;
+    const panel = $("toc-panel");
+    panel.dataset.pinned = String(Boolean(r.tocPinned));
+    panel.inert = !r.tocPinned && panel.dataset.expanded !== "true";
+    $("toc-reveal-zone").hidden = r.showToc === false || Boolean(r.tocPinned);
+    const pin = $("pin-toc");
+    pin.setAttribute("aria-pressed", String(Boolean(r.tocPinned)));
+    pin.title = r.tocPinned ? "取消固定侧边栏" : "固定侧边栏";
+    pin.setAttribute("aria-label", pin.title);
+    requestAnimationFrame(() => this.updateTocIndicator());
     if (r.showToolbar !== false) $("reader-quick-controls").hidden = true;
   }
 
@@ -817,6 +908,8 @@ export class Reader {
       this.tab("search");
       $("toc-panel").hidden = false;
       this.onReadingSetting?.({showToc: true});
+      this.setTocExpanded(true);
+      $("book-search-input").focus();
       return;
     }
     if (
@@ -1048,17 +1141,18 @@ export class Reader {
     if (!existing) return;
     try {
       await this.removeAnnotation(existing);
-      toast("标注已删除");
+      if (existing.style !== "underline") toast("标注已删除");
     } catch (error) { toast(error.message); }
   }
 
   async deleteFromDialog() {
     if (!this.editingAnnotation) return;
+    const existing = this.editingAnnotation;
     try {
-      await this.removeAnnotation(this.editingAnnotation);
+      await this.removeAnnotation(existing);
       $("annotation-dialog").close("cancel");
       this.selection = null;
-      toast("标注已删除");
+      if (existing.style !== "underline") toast("标注已删除");
     } catch (error) { toast(error.message); }
   }
 
@@ -1079,6 +1173,8 @@ export class Reader {
     const query = this.selection.text.replace(/\s+/g, " ").slice(0, 256);
     this.hideSelection();
     $("toc-panel").hidden = false;
+    this.onReadingSetting?.({ showToc: true });
+    this.setTocExpanded(true);
     this.tab("search");
     $("book-search-input").value = query;
     this.search();

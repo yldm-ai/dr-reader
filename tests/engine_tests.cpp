@@ -153,6 +153,12 @@ int main()
         auto defaults = dr::default_settings();
         require(defaults["application"]["shell"] == "mica" && defaults["reading"]["mode"] == "paged",
                 "settings defaults");
+        require(!defaults["reading"]["tocPinned"].get<bool>(), "sidebar defaults to auto-hide");
+        auto pinned_settings = library.save_settings({{"reading", {{"tocPinned", true}}}});
+        require(pinned_settings["reading"]["tocPinned"].get<bool>() &&
+                    library.settings()["reading"]["tocPinned"].get<bool>(), "sidebar pin preference persists");
+        rejects([&] { library.save_settings({{"reading", {{"tocPinned", "true"}}}}); },
+                "sidebar pin requires a boolean");
         auto scroll_preferences = dr::normalize_settings(
             {{"version", 2}, {"reading", {{"mode", "scroll"}}}});
         require(scroll_preferences["reading"]["mode"] == "scroll",
@@ -197,6 +203,30 @@ int main()
                     lookup.find("%2F") != std::string::npos,
                 "dictionary URL encoding");
         rejects([&] { library.save_position(id, {{"chapter", -1}}); }, "invalid progress");
+        library.save_annotation(id, {{"chapter", 1}, {"href", annotation_href},
+                                    {"start", 0}, {"end", 4}, {"quote", "结尾文字"}});
+        library.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}});
+        rejects([&] { library.remove_book("../library"); }, "reject unsafe deletion ID");
+        require(library.list().size() == 1, "invalid deletion preserves library");
+        {
+            dr::AnnotationStore store(root / "library" / "reader.sqlite3");
+            store.toggle_bookmark("another-book", {{"chapter", 0}, {"ratio", 0.2}});
+            library.remove_book(id);
+            require(store.list(id).empty() && store.bookmarks(id).empty(), "delete book reading data");
+            require(store.bookmarks("another-book").size() == 1, "preserve other book data");
+        }
+        require(library.list().empty() && !dr::fs::exists(root / "library" / "books" / id),
+                "delete removes library entry and extracted files");
+        require(dr::fs::exists(epub), "delete preserves original EPUB");
+        rejects([&] { library.get(id); }, "deleted book cannot open");
+        rejects([&] { library.remove_book(id); }, "missing book deletion reports error");
+        {
+            dr::Library reopened(root / "library");
+            require(reopened.list().empty(), "deletion survives restart");
+            auto reimported = reopened.import_book(epub);
+            require(reimported.value("lastRead", 0) == 0 && reopened.annotations(id).empty() &&
+                        reopened.get(id)["bookmarks"].empty(), "reimport starts with clean reading data");
+        }
         }
         auto bad = root / "bad.epub";
         zip(bad, {{"../outside.txt", "escape"}});

@@ -72,6 +72,51 @@ try {
         await app.locator('#setting-mode-trigger').press('Escape');
         await app.locator('[data-close="reading-settings"]').click();
         await capture('reader-dark.png');
+        const tocPanel = app.locator('#toc-panel');
+        await app.locator('#book-frame').hover();
+        await tocPanel.waitFor({ state: 'hidden' });
+        const expandedWidth = await app.locator('#book-frame').evaluate(el => el.clientWidth);
+        const revealWidth = await app.locator('#toc-reveal-zone').evaluate(el => el.getBoundingClientRect().width);
+        const panelWidth = await tocPanel.evaluate(el => el.getBoundingClientRect().width);
+        if (Math.abs(revealWidth * 4 - panelWidth) > 1) throw Error('reveal zone must be a quarter of the sidebar width');
+        await app.locator('#toc-reveal-zone').hover({ position: { x: 8, y: 100 } });
+        await tocPanel.waitFor({ state: 'visible' });
+        await app.locator('.toc-entry').first().hover();
+        if (await app.locator('#book-frame').evaluate(el => el.clientWidth) !== expandedWidth)
+          throw Error('auto-hide sidebar must overlay without reflowing the book');
+        await app.locator('#pin-toc').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocPinned === true);
+        await app.locator('#book-frame').hover();
+        if (!await tocPanel.isVisible() || await app.locator('#pin-toc').getAttribute('aria-pressed') !== 'true')
+          throw Error('pinned sidebar must remain visible outside hover');
+        await app.locator('.toc-entry').nth(1).click();
+        await app.waitForFunction(() => document.querySelectorAll('.toc-entry')[1].classList.contains('active'));
+        if (!await app.locator('.toc-active-indicator').evaluate(el => el.getAnimations().some(a => a.playState === 'running')))
+          throw Error('chapter capsule must animate between entries');
+        await app.locator('.toc-active-indicator').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
+        if (!await app.locator('.toc-active-indicator').evaluate(el => {
+          const marker = el.getBoundingClientRect(), active = document.querySelector('.toc-entry.active').getBoundingClientRect();
+          return Math.abs(marker.height * 2 - active.height) < 1 &&
+            Math.abs(marker.top + marker.height / 2 - active.top - active.height / 2) < 1 &&
+            Math.abs(marker.left + marker.width / 2 - active.left) < 1;
+        })) throw Error('chapter capsule must stay half-height and align to the active entry left edge');
+        await app.locator('.toc-entry').first().click();
+        await app.locator('#reader-loading').waitFor({ state: 'hidden' });
+        await capture('reader-pinned-sidebar.png');
+        await app.locator('#pin-toc').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocPinned === false);
+        await app.locator('#book-frame').hover();
+        await tocPanel.waitFor({ state: 'hidden' });
+        await app.locator('#toggle-toc').click();
+        await tocPanel.waitFor({ state: 'visible' });
+        await app.locator('#book-frame').hover();
+        await tocPanel.waitFor({ state: 'hidden' });
+        await app.locator('#book-frame').press('Control+f');
+        await app.locator('#book-search-input').waitFor({ state: 'visible' });
+        if (!await app.locator('#book-search-input').evaluate(el => document.activeElement === el))
+          throw Error('book search must expand the sidebar and receive keyboard focus');
+        await app.locator('[data-tab="toc"]').click();
+        console.log('PASS auto-hide sidebar, quarter-width reveal zone, pin persistence, chapter capsule animation and keyboard search');
         await app.locator('#reader-app-settings').click();
         await app.locator('[data-setting-theme="application"][data-value="light"]').click();
         await app.waitForFunction(() => document.body.dataset.theme === 'light');
@@ -152,6 +197,65 @@ try {
         await app.locator('[data-close="reading-settings"]').click();
         await app.locator('.reader-toolbar').waitFor({ state: 'visible' });
         console.log('PASS immersive controls, margins, side taps, selection guard, F8 and fullscreen protocol');
+        await app.locator('#back-library').click();
+        const originalTitle = await app.locator('.book-card h3').textContent();
+        const fullTitle = '庄子——中华经典名著全本全注全译丛书（中华书局）· 完整书名悬浮提示';
+        await app.locator('.book-card h3').evaluate((el, title) => { el.textContent = title; }, fullTitle);
+        for (const [width, height] of [[180, 270], [270, 180]]) {
+          const centered = await app.locator('.cover-wrap').evaluate(async (wrap, [width, height]) => {
+            const image = document.createElement('img');
+            image.className = 'cover-image';
+            image.src = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#526b7c"/></svg>`);
+            wrap.replaceChildren(image);
+            await image.decode();
+            const box = wrap.getBoundingClientRect(), cover = image.getBoundingClientRect();
+            const title = wrap.parentElement.querySelector('h3');
+            return Math.abs(box.left + box.width / 2 - cover.left - cover.width / 2) < 1 &&
+              Math.abs(box.top + box.height / 2 - cover.top - cover.height / 2) < 1 &&
+              cover.top >= box.top && cover.bottom <= box.bottom &&
+              title.scrollWidth > title.clientWidth && getComputedStyle(title).whiteSpace === 'nowrap' &&
+              getComputedStyle(title).textOverflow === 'ellipsis';
+          }, [width, height]);
+          if (!centered) throw Error('cover must be centered and contained; long titles must use a single-line ellipsis');
+        }
+        await app.locator('.book-card h3').hover();
+        await app.locator('#book-title-tooltip').waitFor({ state: 'visible' });
+        if (await app.locator('#book-title-tooltip').textContent() !== fullTitle) throw Error('tooltip must show the full book title');
+        await capture('library-title-tooltip.png');
+        await app.locator('.library-footer').hover();
+        await app.locator('#book-title-tooltip').waitFor({ state: 'hidden' });
+        await app.locator('.book-card h3').evaluate((el, title) => { el.textContent = title; }, originalTitle);
+        if (await app.locator('.book-remove').count()) throw Error('delete must only appear in the context menu');
+        await app.locator('.book-card').click({ button: 'right' });
+        await app.locator('#book-context-menu').waitFor({ state: 'visible' });
+        await app.locator('#book-menu-delete').press('Escape');
+        await app.locator('#book-context-menu').waitFor({ state: 'hidden' });
+        await app.locator('.book-card').dispatchEvent('contextmenu', {
+          clientX: await app.evaluate(() => innerWidth - 2), clientY: await app.evaluate(() => innerHeight - 2),
+        });
+        if (!await app.locator('#book-context-menu').evaluate(el => {
+          const rect = el.getBoundingClientRect();
+          return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+        })) throw Error('context menu must stay within the viewport');
+        await capture('library-context-menu.png');
+        await app.locator('#book-menu-delete').click();
+        await app.locator('#delete-book-dialog').waitFor({ state: 'visible' });
+        if (!await app.locator('#reader-view').evaluate(el => el.hidden)) throw Error('delete button opened the book');
+        await capture('delete-book-confirmation.png');
+        await app.locator('#delete-book-dialog button[value="cancel"]').click();
+        if (await app.evaluate(() => window.nativeProbe.requests.some(r => r.method === 'book.delete'))) throw Error('cancel must preserve book');
+        await app.locator('#list-view').click();
+        await capture('library-list-delete.png');
+        await app.locator('.book-card').focus();
+        await app.locator('.book-card').press('Shift+F10');
+        await app.locator('#book-menu-delete').click();
+        await app.locator('#delete-book-confirm').click();
+        await app.locator('.book-card').waitFor({ state: 'detached' });
+        if (!await app.evaluate(() => window.nativeProbe.data.books.length === 0 &&
+          document.getElementById('count-all').textContent === '0' &&
+          !document.getElementById('empty-state').hidden && document.getElementById('continue-section').hidden))
+          throw Error('delete must persist and refresh counts, empty state and continue reading');
+        console.log('PASS centered covers, title ellipsis and tooltip, context menu, deletion confirmation, cancellation and empty library');
       }
       if (name === 'settings_controls') {
         await page.setViewportSize({ width: 360, height: 800 });

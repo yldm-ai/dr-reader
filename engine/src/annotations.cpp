@@ -54,6 +54,15 @@ Json AnnotationStore::save(const std::string& book,const Json& a){auto start=a.a
  s.text(1,id);s.text(2,book);s.integer(3,a.at("chapter"));s.text(4,a.at("href"));s.integer(5,start);s.integer(6,end);s.text(7,quote);s.text(8,prefix);s.text(9,suffix);s.text(10,note);s.text(11,color);s.text(12,style);s.row();
  std::string sql=std::string("SELECT ")+columns+" FROM annotations WHERE id=? AND book_id=?";Statement saved(db_,sql.c_str());saved.text(1,id);saved.text(2,book);if(!saved.row())throw std::runtime_error("未能保存笔记");return read_annotation(saved);}
 void AnnotationStore::remove(const std::string& book,const std::string& id){Statement s(db_,"DELETE FROM annotations WHERE book_id=? AND id=?");s.text(1,book);s.text(2,id);s.row();if(sqlite3_changes(db_)!=1)throw std::runtime_error("标注不存在或已被删除");}
+void AnnotationStore::remove_book(const std::string& book){
+ execute(db_,"BEGIN IMMEDIATE");
+ try{
+  for(auto sql:{"DELETE FROM annotations WHERE book_id=?","DELETE FROM bookmarks WHERE book_id=?","DELETE FROM migrations WHERE book_id=?"}){
+   Statement s(db_,sql);s.text(1,book);s.row();
+  }
+  execute(db_,"COMMIT");
+ }catch(...){sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
 void AnnotationStore::migrate_bookmarks(const std::string& book,const Json& legacy)const{Statement migrated(db_,"SELECT 1 FROM migrations WHERE book_id=?");migrated.text(1,book);if(migrated.row())return;
  execute(db_,"BEGIN IMMEDIATE");try{for(auto& mark:legacy){int chapter=mark.value("chapter",-1);double ratio=mark.value("ratio",0.0);if(chapter<0||!std::isfinite(ratio)||ratio<0||ratio>1)continue;
  Statement s(db_,"INSERT OR IGNORE INTO bookmarks(book_id,chapter,ratio,title) VALUES(?,?,?,?)");s.text(1,book);s.integer(2,chapter);s.real(3,ratio);s.text(4,mark.value("title",std::string()));s.row();}

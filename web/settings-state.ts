@@ -19,6 +19,7 @@ export interface ReadingSettings {
   paddingRight: number;
   showToolbar: boolean;
   showToc: boolean;
+  tocPinned: boolean;
   showChapterTitle: boolean;
   showPagination: boolean;
   showProgress: boolean;

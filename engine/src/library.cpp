@@ -106,6 +106,21 @@ Json Library::import_book(const fs::path &file)
         throw;
     }
 }
+void Library::remove_book(const std::string &id)
+{
+    auto path = book_path(id);
+    if (!fs::exists(path / "book.json"))
+        throw std::runtime_error("图书不存在或已被删除");
+    // Hide the book first; restore it if the database transaction fails.
+    auto removed = root_ / ("removed-" + id);
+    if (fs::exists(removed)) fs::remove_all(removed);
+    fs::rename(path, removed);
+    try { annotations_->remove_book(id); }
+    catch (...) { fs::rename(removed, path); throw; }
+    // A locked resource must not turn a completed deletion into an error.
+    std::error_code error;
+    fs::remove_all(removed, error);
+}
 Json Library::save_position(const std::string &id, const Json &position)
 {
     auto book = get(id);

@@ -12,6 +12,7 @@ public:
  Json list(const std::string& book) const;
  Json save(const std::string& book,const Json& annotation);
  void remove(const std::string& book,const std::string& id);
+ void remove_book(const std::string& book);
  void migrate_bookmarks(const std::string& book,const Json& legacy) const;
  Json bookmarks(const std::string& book) const;
  Json toggle_bookmark(const std::string& book,const Json& mark);

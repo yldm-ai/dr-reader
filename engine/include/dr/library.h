@@ -10,6 +10,7 @@ class Library
     explicit Library(fs::path root);
     Json list() const;
     Json import_book(const fs::path &archive);
+    void remove_book(const std::string &id);
     Json get(const std::string &id) const;
     Json save_position(const std::string &id, const Json &position);
     Json toggle_bookmark(const std::string &id, const Json &mark);

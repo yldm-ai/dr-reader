@@ -23,6 +23,7 @@
         </button>
         <div class="nav-label">我的书库</div>
         <nav id="library-nav">
+          <span class="library-nav-indicator" aria-hidden="true"></span>
           <button class="nav-item active" data-filter="all">
             <span data-icon="library"></span>全部图书<span
               class="count"
@@ -160,12 +161,16 @@
           </div>
         </header>
         <div class="reader-workspace">
+          <div id="toc-reveal-zone" class="toc-reveal-zone" aria-hidden="true"></div>
           <aside id="toc-panel" class="toc-panel">
+            <div class="toc-header">
             <div class="toc-tabs">
               <button data-tab="toc" class="active">目录</button
               ><button data-tab="marks">书签</button
               ><button data-tab="notes">笔记</button
               ><button data-tab="search">搜索</button>
+            </div>
+            <button id="pin-toc" class="icon-button toc-pin" aria-label="固定侧边栏" aria-pressed="false" title="固定侧边栏"><span data-icon="pin"></span></button>
             </div>
             <div id="toc-content"></div>
             <div id="marks-content" hidden></div>
@@ -279,6 +284,18 @@
           <span></span>
           <button value="cancel" class="text-button">取消</button>
           <button id="annotation-save" type="submit" class="primary">保存笔记</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="delete-book-dialog" class="annotation-dialog" aria-labelledby="delete-book-title" aria-describedby="delete-book-description">
+      <form method="dialog">
+        <div class="annotation-header"><h2 id="delete-book-title">删除图书？</h2></div>
+        <p id="delete-book-description">将删除阅读器中的图书、阅读进度、书签和标注，无法撤销。原始 EPUB 文件会保留。</p>
+        <div class="annotation-actions">
+          <span></span>
+          <button value="cancel" class="text-button" autofocus>取消</button>
+          <button id="delete-book-confirm" type="button" class="danger-button">删除图书</button>
         </div>
       </form>
     </dialog>

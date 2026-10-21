@@ -154,11 +154,14 @@ button {
 .sidebar {
   width: 224px;
   flex: 0 0 224px;
+  margin: 12px 0 12px 12px;
   background: var(--sidebar);
   padding: 20px 12px 12px;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px #0000000d;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -253,15 +256,33 @@ kbd {
   color: var(--text);
   font-weight: 500;
 }
-.nav-item.active::before {
-  content: "";
+.toc-active-indicator {
   position: absolute;
   left: 0;
-  top: 12px;
-  bottom: 12px;
+  top: 0;
+  height: 0;
   width: 3px;
-  border-radius: 2px;
+  transform: translate(-50%, 0);
+  border-radius: 999px;
   background: var(--accent);
+  z-index: 1;
+  pointer-events: none;
+  transition: transform 240ms var(--ease-ui), height 240ms var(--ease-ui), opacity 120ms ease;
+}
+#toc-content { position: relative; }
+#library-nav { position: relative; }
+.library-nav-indicator {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translate(-50%, 9px);
+  pointer-events: none;
+  transition: transform 240ms var(--ease-ui), height 240ms var(--ease-ui), opacity 120ms ease;
 }
 .count {
   margin-left: auto;
@@ -543,6 +564,48 @@ h1 span {
   align-content: start;
   padding-bottom: 30px;
 }
+.book-item { min-width: 0; max-width: 210px; }
+.book-item .book-card { width: 100%; }
+.list-mode .book-item { max-width: none; }
+.list-mode .book-item .book-card { grid-template-columns: 65px minmax(0, 1fr) 130px 100px; }
+.book-title-tooltip,
+.book-context-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-flyout);
+}
+.book-title-tooltip {
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 10px 14px;
+  font-size: var(--text-secondary);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.book-context-menu { min-width: 166px; max-width: calc(100vw - 16px); padding: 5px; }
+.book-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: var(--text-body);
+}
+.book-context-menu button:is(:hover, :focus-visible) { background: var(--hover); outline: none; }
+.book-title-tooltip:popover-open,
+.book-context-menu:popover-open { animation: flyout-enter 120ms var(--ease-ui); }
+@media (prefers-reduced-motion: reduce) {
+  .book-title-tooltip:popover-open, .book-context-menu:popover-open { animation: none; }
+}
+body[data-animations="false"] :is(.book-title-tooltip, .book-context-menu) { animation: none; }
+#delete-book-description { line-height: 1.8; margin: 20px 0; }
 .book-card {
   display: flex;
   flex-direction: column;
@@ -557,27 +620,25 @@ h1 span {
 .cover-wrap {
   height: 225px;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   position: relative;
   margin-bottom: 16px;
   border-radius: 5px;
   background: linear-gradient(145deg, var(--hover), transparent);
-  padding: 12px 14px 0;
+  padding: 12px 14px;
   transition: background 0.2s;
 }
 .book-card:hover .cover-wrap {
   background: var(--selected);
 }
-.book-card:hover .cover-image {
-  transform: translateY(-4px);
-}
 .cover-image {
   max-width: 100%;
+  max-height: 100%;
   height: 210px;
   width: auto;
   object-fit: contain;
-  object-position: bottom;
+  object-position: center;
   filter: drop-shadow(3px 5px 5px #0002);
   border-radius: 2px 5px 5px 2px;
   transition: transform 0.2s;
@@ -622,9 +683,9 @@ h1 span {
   font-weight: 500;
   margin: 0 5px 7px;
   line-height: 1.8;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   overflow: hidden;
 }
 .book-author {
@@ -788,18 +849,59 @@ body[data-animations="false"] .selection-menu {
   flex-shrink: 0;
 }
 .reader-workspace {
+  --toc-panel-width: 248px;
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
 }
 .toc-panel {
-  flex: 0 0 248px;
-  width: 248px;
+  flex: 0 0 var(--toc-panel-width);
+  width: var(--toc-panel-width);
+  margin: 12px 0 12px 12px;
   background: var(--surface);
-  border-right: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px #0000000d;
   overflow: auto;
   padding: 0 8px 16px;
 }
+.toc-panel[data-pinned="false"] {
+  position: absolute;
+  z-index: 10;
+  inset: 12px auto 12px 12px;
+  margin: 0;
+  transform: translateX(calc(-100% - 24px));
+  visibility: hidden;
+  transition: transform 220ms var(--ease-ui), visibility 0s 220ms;
+}
+.toc-panel[data-pinned="false"][data-expanded="true"] {
+  transform: translateX(0);
+  visibility: visible;
+  transition-delay: 0s;
+}
+.toc-reveal-zone {
+  position: absolute;
+  z-index: 9;
+  inset: 0 auto 0 0;
+  width: calc(var(--toc-panel-width) / 4);
+}
+.toc-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.toc-header .toc-tabs { position: static; flex: 1; min-width: 0; border: 0; margin: 0; }
+.toc-header .toc-tabs button { padding: 12px 4px; min-width: 0; }
+.toc-pin { flex: none; width: 28px; height: 28px; justify-content: center; padding: 4px; }
+.toc-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.toc-pin[aria-pressed="false"] .fluent-icon { transform: rotate(35deg); }
 .toc-tabs {
   display: flex;
   position: sticky;
@@ -851,9 +953,10 @@ body[data-animations="false"] .selection-menu {
   background: var(--hover);
 }
 .toc-entry.active {
+  position: relative;
+  overflow: visible;
   background: var(--selected);
   color: var(--text);
-  box-shadow: inset 3px 0 var(--accent);
   font-weight: 500;
 }
 .panel-hint {
@@ -892,7 +995,6 @@ body[data-animations="false"] .selection-menu {
   box-shadow: var(--shadow);
   background: var(--paper);
   transform-origin: center;
-  backface-visibility: hidden;
 }
 #book-frame {
   border: 0;
@@ -1645,10 +1747,7 @@ input[type="range"] {
   .cover-image {
     height: 190px;
   }
-  .toc-panel {
-    width: 215px;
-    flex-basis: 215px;
-  }
+  .reader-workspace { --toc-panel-width: 215px; }
   .reading-area {
     padding: 0 20px;
   }

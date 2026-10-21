@@ -6,7 +6,7 @@ const glyphs: Record<string, number> = {
   'chevron-down': 0xe70d, settings: 0xe713, search: 0xe721,
   grid: 0xe8a9, list: 0xe8fd, 'arrow-up': 0xe74a,
   'arrow-left': 0xe72b, 'arrow-right': 0xe72a, type: 0xe8d2,
-  close: 0xe711, play: 0xe768, edit: 0xe70f, delete: 0xe74d,
+  close: 0xe711, play: 0xe768, edit: 0xe70f, delete: 0xe74d, pin: 0xe718,
   copy: 0xe8c8, note: 0xe70b, underline: 0xe8dc, dictionary: 0xe82d,
 };
 export function icon(name: string): string {

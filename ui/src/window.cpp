@@ -167,8 +167,8 @@ void Window::paint()
                     }
                 }
             }
-            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_LIGHT,
-                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13, L"zh-CN",
+            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12, L"zh-CN",
                                      &text_);
             if (text_)
                 text_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);

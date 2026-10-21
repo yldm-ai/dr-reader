@@ -67,6 +67,17 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                     controller_ = controller;
                                     controller_->get_CoreWebView2(&view_);
                                     controller_->put_Bounds(bounds_);
+                                    controller_->put_ZoomFactor(1.0);
+                                    EventRegistrationToken zoom_token{};
+                                    controller_->add_ZoomFactorChanged(
+                                        Callback<ICoreWebView2ZoomFactorChangedEventHandler>(
+                                            [](ICoreWebView2Controller *sender, IUnknown *) -> HRESULT
+                                            {
+                                                double zoom = 1.0;
+                                                if (SUCCEEDED(sender->get_ZoomFactor(&zoom)) && zoom != 1.0)
+                                                    return sender->put_ZoomFactor(1.0);
+                                                return S_OK;
+                                            }).Get(), &zoom_token);
                                     EventRegistrationToken accelerator_token{};
                                     controller_->add_AcceleratorKeyPressed(
                                         Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
@@ -114,6 +125,11 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                     // via fetch+srcdoc.
                                     Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
                                     view_->get_Settings(&settings);
+                                    // Disable browser zoom shortcuts and Ctrl+wheel for every page/frame.
+                                    settings->put_IsZoomControlEnabled(FALSE);
+                                    Microsoft::WRL::ComPtr<ICoreWebView2Settings5> settings5;
+                                    if (SUCCEEDED(settings.As(&settings5)))
+                                        settings5->put_IsPinchZoomEnabled(FALSE);
                                     settings->put_AreDefaultContextMenusEnabled(FALSE);
                                     settings->put_IsStatusBarEnabled(FALSE);
                                     settings->put_AreHostObjectsAllowed(FALSE);

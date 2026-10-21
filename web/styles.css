@@ -1932,10 +1932,26 @@ input[type="range"] {
 .page-motion { position: absolute; inset: 0; z-index: 8; overflow: hidden; pointer-events: none; isolation: isolate; perspective: 1600px; }
 .motion-page { position: absolute; inset: 0; background: var(--reading-paper, var(--paper)); }
 .motion-page iframe { display: block; border: 0; width: 100%; height: 100%; pointer-events: none; }
-.motion-sheet { position: absolute; inset: 0; transform-origin: left center; transform-style: preserve-3d; will-change: transform; }
-.motion-front, .motion-back { position: absolute; inset: 0; backface-visibility: hidden; }
-.motion-back { transform: rotateY(180deg); background: linear-gradient(90deg, #00000020, transparent 18%), var(--reading-paper, var(--paper)); }
-.motion-shade { position: absolute; inset: 0; background: linear-gradient(90deg, #0000004d, transparent 24%, #ffffff08 76%, #00000024); pointer-events: none; opacity: 0; }
+body > .page-surface { max-width: none; }
+/* The library promotes its root and pages to 3D layers, which turns snapshot text
+   from ClearType to grayscale for the whole turn. Stay flat; the turning flap
+   still gets its own transform from the renderer. */
+.stpageflip-host { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; overflow: hidden; transform: none !important; }
+.stpageflip-host .stf__item { transform-style: flat; }
+.stpageflip-host .stf__wrapper { position: relative; width: 100%; height: 100%; }
+.stpageflip-page {
+  /* Keep snapshot iframes laid out while StPageFlip switches its active
+     spread.  The library hides inactive pages with an inline display rule;
+     that collapses their iframe viewport to 0px and loses the captured
+     column offset.  The renderer still controls visibility through clipping,
+     transforms and z-index during the turn. */
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: var(--reading-paper, var(--paper));
+  overflow: hidden;
+}
+.stpageflip-page .motion-page { position: absolute; inset: 0; }
 
 .icon-button, .text-button, .nav-item, .toc-tabs button, .theme-swatch, .select-option {
   transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);
@@ -1955,10 +1971,6 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
   animation: none !important;
   transition: none !important;
 }
-@media (prefers-reduced-motion: reduce) {
-  :is(button, a, .select-popup, .select-option) { animation: none !important; transition: none !important; }
-}
-
 /* Quiet chrome keeps the book and user content as the visual focus. */
 .library-header > .eyebrow, .settings-header .eyebrow, .application-settings-header .eyebrow { display: none; }
 .reader-toolbar #back-library { justify-content: flex-start; flex-shrink: 0; }

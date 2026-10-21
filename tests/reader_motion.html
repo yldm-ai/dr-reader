@@ -39,32 +39,74 @@ try {
   await window.captureMotion?.('slide-forward');
   animations.forEach(animation => animation.finish()); await pending;
   check(updates === 1 && !host.querySelector('.page-motion') && frame.style.visibility === '', 'slide must commit once and clean up');
-  pending = motion.change(host, 'turn', 600, -1, () => { updates++; source.defaultView.scrollTo(0, 0); });
-  await until(() => host.querySelector('.motion-sheet')?.getAnimations().length);
-  overlay = host.querySelector('.page-motion'); animations = overlay.getAnimations({ subtree: true });
-  animations.forEach(animation => { animation.pause(); animation.currentTime = 420; });
-  const sheetFrames = overlay.querySelector('.motion-sheet').getAnimations()[0].effect.getKeyframes();
-  check(sheetFrames[0].transform === 'rotateY(-180deg)' && sheetFrames.at(-1).transform === 'rotateY(0deg)', 'backward turn must rotate a hinged sheet through 180 degrees');
-  check(overlay.querySelector('.motion-front iframe') && overlay.querySelector('.motion-back') && overlay.querySelector('.motion-shade'), 'turn needs a front, back and moving shade');
-  await window.captureMotion?.('turn-backward');
+  // Every viewport remains a single page, including wide landscape-shaped windows.
+  for (const width of [600, 980]) {
+    host.style.width = `${width}px`;
+    for (const effect of ['turn', 'turn-bottom', 'turn-hard']) {
+      for (const direction of [1, -1]) {
+        const dark = effect === 'turn-hard';
+        const paper = dark ? '#191919' : '#fffaf3';
+        host.style.setProperty('--reading-paper', paper);
+        const html = `<style>html{overflow:hidden}body{margin:0;display:flex;width:${width * 2}px;height:360px;background:${paper};color:${dark ? '#cfcfcd' : '#37352f'};font:20px/1.8 'Microsoft YaHei'}section{flex:0 0 ${width}px;box-sizing:border-box;padding:35px}</style><section><h1>第一页</h1><p>原文与标注随单张纸页翻动。</p></section><section><h1>第二页</h1><p>单页阅读不显示左右双页。</p></section>`;
+        await load(html);
+        const doc = frame.contentDocument;
+        if (direction < 0) doc.defaultView.scrollTo(width, 0);
+        const mark = doc.createRange(); mark.selectNodeContents(doc.querySelector('p').firstChild);
+        doc.defaultView.CSS.highlights.set('test-mark', new doc.defaultView.Highlight(mark));
+        const next = direction > 0 ? width : 0;
+        pending = motion.change(host, effect, 600, direction, () => doc.defaultView.scrollTo(next, 0));
+        await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
+        const engine = host.querySelector('.stpageflip-host');
+        check(engine.dataset.orientation === 'portrait', `${width}: StPageFlip must stay in single-page mode`);
+        check(getComputedStyle(engine).transform === 'none' &&
+          [...engine.querySelectorAll('[class*="Shadow"]')].every(item => !item.style.transform.includes('3d')),
+          'StPageFlip root and shadows must stay 2D so snapshot text keeps ClearType');
+        check(engine.dataset.density === (effect === 'turn-hard' ? 'hard' : 'soft'), 'wrong page material');
+        check(engine.dataset.corner === (effect === 'turn-bottom' ? 'bottom' : 'top'), 'wrong curl corner');
+        const copied = direction > 0 && effect !== 'turn-hard';
+        check(engine.dataset.pageCount === (copied ? '3' : '2'), 'unexpected page count');
+        const snapshots = [...engine.querySelectorAll('iframe')];
+        check(snapshots.length === (copied ? 3 : 2), 'unexpected temporary document count');
+        check(snapshots.every(item => item.contentWindow.innerWidth === width &&
+          item.contentDocument.body.textContent.includes('第一页')), `snapshot width or real text changed: ${JSON.stringify({
+            width, pageCount: engine.dataset.pageCount, snapshots: snapshots.map(item => ({
+              width: item.contentWindow.innerWidth,
+              scrollX: item.contentWindow.scrollX,
+              text: item.contentDocument.body.textContent.slice(0, 40),
+            })),
+          })}`);
+        check(snapshots[0].contentWindow.scrollX === 0 && snapshots[1].contentWindow.scrollX === width,
+          `page reparenting must preserve each snapshot column offset: ${JSON.stringify(
+            snapshots.map(item => item.contentWindow.scrollX))}`);
+        check(snapshots[0].contentWindow.CSS.highlights.get('test-mark')?.size === 1,
+          'page-flip snapshots must preserve text highlights');
+        const rect = engine.getBoundingClientRect();
+        check(Math.abs(rect.width - width) < 1, 'single-page engine must fill one reading viewport');
+        if (width === 600) {
+          await new Promise(resolve => setTimeout(resolve, 170));
+          await window.captureMotion?.(`${effect}-${direction > 0 ? 'forward' : 'backward'}`);
+        }
+        await pending;
+        check(!host.querySelector('.page-motion') && frame.style.visibility === '' &&
+          frame.contentWindow.scrollX === next, 'completed turn must restore the live selectable document');
+      }
+    }
+  }
+  // A cancelled library turn must tear down its renderer and show the committed live page.
+  pending = motion.change(host, 'turn', 600, 1, () => frame.contentWindow.scrollTo(980, 0));
+  await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
   motion.cancel(); await pending;
-  check(updates === 2 && !host.querySelector('.page-motion') && frame.style.visibility === '', 'canceling a turn must retain the committed page and remove overlays');
-  pending = motion.change(host, 'slide', 600, -1, () => { updates++; source.defaultView.scrollTo(600, 0); });
-  await until(() => host.querySelector('.page-motion')?.getAnimations({ subtree: true }).length === 2);
-  check(host.querySelector('.page-motion').getAnimations({ subtree: true })[0].effect.getKeyframes().at(-1).transform === 'translateX(100%)', 'backward slide must reverse direction');
-  motion.cancel(); await pending;
-  pending = motion.change(host, 'turn', 600, 1, () => load(original.replace('第一页', '下一章')));
-  await until(() => host.querySelector('.motion-sheet')?.getAnimations().length);
-  animations = host.querySelector('.page-motion').getAnimations({ subtree: true });
-  animations.forEach(animation => { animation.pause(); animation.currentTime = 240; });
-  check(host.querySelector('.motion-sheet').getAnimations()[0].effect.getKeyframes().at(-1).transform === 'rotateY(-180deg)', 'forward turn must reverse the backward hinge motion');
-  check(host.querySelector('.page-motion > .motion-page iframe').contentDocument.body.textContent.includes('下一章'), 'cross-chapter snapshot must wait for the new document');
-  await window.captureMotion?.('turn-forward');
-  animations.forEach(animation => animation.finish()); await pending;
+  check(!host.querySelector('.page-motion') && frame.style.visibility === '', 'cancelled StPageFlip must release its overlay');
+  // A new chapter is rendered before the old page is removed, using the same engine.
+  pending = motion.change(host, 'turn-bottom', 600, 1, () => load(original.replace('第一页', '下一章')), true);
+  await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
+  check([...host.querySelectorAll('.stpageflip-host iframe')].some(item => item.contentDocument.body.textContent.includes('下一章')),
+    'cross-chapter page-flip must wait for the new chapter');
+  await pending;
   motion.setAllowed(false);
   await motion.change(host, 'slide', 600, 1, () => updates++);
-  check(updates === 4 && !host.querySelector('.page-motion'), 'disabled motion must commit immediately');
-  output.textContent = 'PASS: full-distance simultaneous slide, hinged front/back turn, copied highlights, cross-chapter readiness, cancellation and reduced motion';
+  check(updates === 2 && !host.querySelector('.page-motion'), 'disabled motion must commit immediately');
+  output.textContent = 'PASS: full-distance slide; StPageFlip single-page soft/hard turns in both directions and viewport shapes; highlights, chapter readiness and cancellation';
   document.documentElement.dataset.result = 'pass';
 } catch (error) { output.textContent = 'FAIL\n' + error.stack; document.documentElement.dataset.result = 'fail'; }
 </script>

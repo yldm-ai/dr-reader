@@ -25,8 +25,11 @@ const settingsPanel = new SettingsPanel((value) => {
     document.documentElement.style.setProperty("color-scheme", "dark");
   else document.documentElement.style.removeProperty("color-scheme");
 });
+reader.onReadingSetting = patch => settingsPanel.update("reading", patch);
+reader.onOpenSettings = () => settingsPanel.open("reading");
 
 window.chrome?.webview?.addEventListener("message", async ({ data }) => {
+  if (data.event === "fullscreen") document.body.dataset.fullscreen = String(data.enabled);
   if (data.event === "closing") {
     await Promise.allSettled([reader.flush(), settingsPanel.flush()]);
     call("close").catch(() => {});
@@ -217,6 +220,14 @@ $("reader-app-settings").onclick = () => settingsPanel.open("application");
 $("reader-settings").onclick = () => settingsPanel.open("reading");
 
 document.addEventListener("keydown", (event) => {
+  if (event.altKey && event.key === "Enter") {
+    event.preventDefault();
+    if (!event.repeat) call("fullscreen").catch(error => toast(error.message));
+    return;
+  }
+  if (event.key === "F8" && reader.book && !settingsPanel.applicationOpen) {
+    event.preventDefault(); settingsPanel.open("reading"); return;
+  }
   if (settingsPanel.applicationOpen) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -225,6 +236,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.defaultPrevented) return;
+  if (event.key === "Escape" && document.body.dataset.fullscreen === "true" && !document.querySelector("dialog[open]")) {
+    event.preventDefault(); call("fullscreen", { enabled: false }).catch(error => toast(error.message)); return;
+  }
   const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(
     event.target.tagName,
   );

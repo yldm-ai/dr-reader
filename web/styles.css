@@ -877,7 +877,6 @@ body[data-animations="false"] .selection-menu {
   box-shadow: var(--shadow);
   background: var(--paper);
   transform-origin: center;
-  will-change: transform, opacity;
   backface-visibility: hidden;
 }
 #book-frame {
@@ -1786,6 +1785,43 @@ input[type="range"] {
 .select-search > .fluent-icon { color: var(--muted); }
 .select-search input[type="search"] { width: 100%; min-width: 0; min-height: 36px; height: 36px; padding: 0; background: transparent; border: 0; border-radius: 0; outline: none; color: var(--text); font-size: var(--text-body); }
 .select-hint { font-size: var(--text-secondary); color: var(--muted); margin: 8px 9px; }
+
+.reader-view[data-toolbar="false"] > .reader-toolbar,
+.reader-view[data-chapter-title="false"] .chapter-label,
+.reader-view[data-pagination="false"] .reader-pagination,
+.reader-view[data-progress="false"] > .reader-footer { display: none; }
+.reader-view[data-full-background="true"] { background: var(--reading-paper); }
+.reader-view[data-full-background="true"] .page-surface { box-shadow: none; }
+.reader-view[data-full-background="true"] .chapter-label,
+.reader-view[data-full-background="true"] .reader-pagination { color: var(--reading-text); }
+.reader-view[data-full-width="true"] .reading-area { padding: 0; }
+.reader-view[data-full-width="true"] .page-surface { max-width: none; }
+.reader-view .page-surface, .reader-view #book-frame, .reader-view .reader-loading { background: var(--reading-paper, var(--paper)); }
+.reader-quick-controls {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-flyout);
+}
+.reading-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.reading-presets button { border: 1px solid var(--border); }
+
+/* Snapshot frames keep real EPUB layout and allow both sheets to move concurrently. */
+.page-motion { position: absolute; inset: 0; z-index: 8; overflow: hidden; pointer-events: none; isolation: isolate; perspective: 1600px; }
+.motion-page { position: absolute; inset: 0; background: var(--reading-paper, var(--paper)); }
+.motion-page iframe { display: block; border: 0; width: 100%; height: 100%; pointer-events: none; }
+.motion-sheet { position: absolute; inset: 0; transform-origin: left center; transform-style: preserve-3d; will-change: transform; }
+.motion-front, .motion-back { position: absolute; inset: 0; backface-visibility: hidden; }
+.motion-back { transform: rotateY(180deg); background: linear-gradient(90deg, #00000020, transparent 18%), var(--reading-paper, var(--paper)); }
+.motion-shade { position: absolute; inset: 0; background: linear-gradient(90deg, #0000004d, transparent 24%, #ffffff08 76%, #00000024); pointer-events: none; opacity: 0; }
 
 .icon-button, .text-button, .nav-item, .toc-tabs button, .theme-swatch, .select-option {
   transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);

@@ -75,7 +75,7 @@ RECT Window::content_bounds() const
 {
     RECT r{};
     GetClientRect(hwnd_, &r);
-    if (style_ == ShellStyle::Direct2D)
+    if (style_ == ShellStyle::Direct2D && !fullscreen_)
         r.top = caption_height();
     return r;
 }
@@ -107,14 +107,45 @@ void Window::set_theme(const std::string &theme)
     DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
     InvalidateRect(hwnd_, nullptr, FALSE);
 }
+void Window::set_fullscreen(bool enabled)
+{
+    if (fullscreen_ == enabled) return;
+    if (enabled)
+    {
+        windowed_placement_.length = sizeof(WINDOWPLACEMENT);
+        GetWindowPlacement(hwnd_, &windowed_placement_);
+        windowed_style_ = GetWindowLongPtrW(hwnd_, GWL_STYLE);
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor);
+        fullscreen_ = true;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, windowed_style_ & ~WS_OVERLAPPEDWINDOW);
+        apply_frame();
+        SetWindowPos(hwnd_, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
+                     monitor.rcMonitor.right - monitor.rcMonitor.left,
+                     monitor.rcMonitor.bottom - monitor.rcMonitor.top,
+                     SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+    }
+    else
+    {
+        fullscreen_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, windowed_style_);
+        apply_frame();
+        SetWindowPlacement(hwnd_, &windowed_placement_);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+    target_.Reset();
+    if (on_resize) on_resize();
+    InvalidateRect(hwnd_, nullptr, TRUE);
+}
 void Window::apply_frame()
 {
-    DWORD backdrop = style_ == ShellStyle::Mica ? 2 : 1;
+    DWORD backdrop = style_ == ShellStyle::Mica && !fullscreen_ ? 2 : 1;
     mica_available_ = SUCCEEDED(DwmSetWindowAttribute(hwnd_, 38, &backdrop, sizeof(backdrop))) &&
-                      style_ == ShellStyle::Mica;
-    DWORD corners = 2;
+                      style_ == ShellStyle::Mica && !fullscreen_;
+    DWORD corners = fullscreen_ ? 1 : 2;
     DwmSetWindowAttribute(hwnd_, 33, &corners, sizeof(corners));
-    MARGINS margins{0, 0, style_ == ShellStyle::Mica ? 1 : 0, 0};
+    MARGINS margins{0, 0, style_ == ShellStyle::Mica && !fullscreen_ ? 1 : 0, 0};
     DwmExtendFrameIntoClientArea(hwnd_, &margins);
     SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 }
@@ -147,7 +178,7 @@ void Window::paint()
     BeginPaint(hwnd_, &ps);
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    if (style_ == ShellStyle::Direct2D && rc.right > 0 && rc.bottom > 0)
+    if (style_ == ShellStyle::Direct2D && !fullscreen_ && rc.right > 0 && rc.bottom > 0)
     {
         if (!factory_)
             D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.GetAddressOf());
@@ -270,6 +301,19 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     }
     switch (m)
     {
+    case WM_SYSKEYDOWN:
+        if (w == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
+        {
+            if (!(l & (1LL << 30)) && on_toggle_fullscreen) on_toggle_fullscreen();
+            return 0;
+        }
+        break;
+    case WM_NCCALCSIZE:
+        if (fullscreen_) return 0;
+        break;
+    case WM_NCHITTEST:
+        if (fullscreen_) return HTCLIENT;
+        break;
     case WM_PAINT:
         paint();
         return 0;
@@ -326,7 +370,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         PostQuitMessage(0);
         return 0;
     }
-    if (style_ == ShellStyle::Direct2D)
+    if (style_ == ShellStyle::Direct2D && !fullscreen_)
     {
         switch (m)
         {

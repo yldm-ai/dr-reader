@@ -131,6 +131,7 @@
           <span id="library-total">0 本图书</span
           ><span>一本书，一段不被打扰的时光。</span><span>EPUB · 本地阅读</span>
         </footer>
+
       </main>
       <main id="reader-view" class="reader-view" hidden>
         <header class="reader-toolbar">
@@ -222,6 +223,11 @@
             aria-label="全书阅读进度"
           /><span id="reader-percent">0%</span>
         </footer>
+        <div id="reader-quick-controls" class="reader-quick-controls" hidden>
+          <button id="quick-library" class="text-button" type="button"><span data-icon="arrow-left"></span>书库</button>
+          <button id="quick-settings" class="text-button" type="button"><span data-icon="type"></span>阅读设置 <kbd>F8</kbd></button>
+          <button id="quick-fullscreen" class="text-button" type="button">退出全屏</button>
+        </div>
       </main>
     </div>
 

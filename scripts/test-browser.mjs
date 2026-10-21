@@ -16,10 +16,11 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['reader_layout', 'reader_interactions', 'settings_controls', 'production_smoke']) {
+  for (const name of ['reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'production_smoke']) {
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    if (name === 'reader_motion') await page.exposeFunction('captureMotion', label => page.locator('#page-surface').screenshot({ path: resolve(directory, `${label}.png`) }));
     try {
       await page.goto(`http://127.0.0.1:${port}/tests/${name}.html`);
       await page.waitForSelector('html[data-result]', { timeout: 18000, state: 'attached' });
@@ -84,6 +85,60 @@ try {
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
         await capture('library-light.png');
+        // Exercise immersive mode through the shipped controls, then recover without a toolbar.
+        await app.locator('.book-card').first().click();
+        await app.locator('#reader-loading').waitFor({ state: 'hidden' });
+        await app.locator('#reader-settings').click();
+        await app.locator('#immersive-reading').click();
+        await app.waitForFunction(() => document.getElementById('reader-view').dataset.toolbar === 'false');
+        for (const [key, value] of [['paddingTop', '20'], ['paddingBottom', '80'], ['paddingLeft', '10'], ['paddingRight', '90']])
+          await app.locator(`#number-${key}`).fill(value);
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.paddingRight === 90);
+        await app.locator('[data-close="reading-settings"]').click();
+        await app.waitForFunction(() => {
+          const frame = document.getElementById('book-frame');
+          return frame.clientWidth === innerWidth && frame.clientHeight === innerHeight &&
+            getComputedStyle(frame.contentDocument.body).marginLeft === '10px';
+        });
+        const edges = await app.locator('#book-frame').evaluate(el => {
+          const s = getComputedStyle(el.contentDocument.body);
+          return [s.marginTop, s.marginRight, s.marginBottom, s.marginLeft];
+        });
+        if (edges.join(',') !== '20px,90px,80px,10px') throw Error(`independent margins were lost: ${edges}`);
+        for (const selector of ['.reader-toolbar', '#toc-panel', '.chapter-label', '.reader-pagination', '.reader-footer'])
+          if (await app.locator(selector).isVisible()) throw Error(`${selector} remains visible in immersive mode`);
+        await capture('reader-immersive.png');
+        const book = await (await app.$('#book-frame')).contentFrame();
+        const size = await book.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+        const pageNumber = () => app.locator('#page-indicator').textContent().then(text => parseInt(text));
+        const beforeTap = await pageNumber();
+        await book.locator('html').click({ position: { x: size.width - 5, y: size.height * .5 } });
+        await app.waitForFunction(previous => parseInt(document.getElementById('page-indicator').textContent) === previous + 1, beforeTap);
+        await book.locator('html').click({ position: { x: 5, y: size.height * .5 } });
+        await app.waitForFunction(previous => parseInt(document.getElementById('page-indicator').textContent) === previous, beforeTap);
+        await book.evaluate(() => {
+          const text = document.querySelector('p').firstChild;
+          const range = document.createRange(); range.selectNodeContents(text);
+          getSelection().removeAllRanges(); getSelection().addRange(range);
+        });
+        await book.locator('html').click({ position: { x: size.width - 5, y: size.height * .5 } });
+        await page.waitForTimeout(300);
+        if (await pageNumber() !== beforeTap) throw Error('clicking to dismiss a selection also turned the page');
+        await page.keyboard.press('F8');
+        await app.locator('#reading-settings').waitFor({ state: 'visible' });
+        await app.locator('[data-close="reading-settings"]').click();
+        await page.keyboard.press('Alt+Enter');
+        await app.waitForFunction(() => document.body.dataset.fullscreen === 'true');
+        await page.keyboard.press('Escape');
+        await app.waitForFunction(() => document.body.dataset.fullscreen === 'false');
+        if (await app.locator('#reader-view').evaluate(el => el.hidden)) throw Error('Escape should exit fullscreen before leaving the book');
+        await book.locator('html').click({ position: { x: size.width * .5, y: size.height * .5 } });
+        await app.locator('#quick-settings').waitFor({ state: 'visible' });
+        await app.locator('#quick-settings').click();
+        await app.locator('#restore-reader-chrome').click();
+        await app.locator('[data-close="reading-settings"]').click();
+        await app.locator('.reader-toolbar').waitFor({ state: 'visible' });
+        console.log('PASS immersive controls, margins, side taps, selection guard, F8 and fullscreen protocol');
       }
       if (name === 'settings_controls') {
         await page.setViewportSize({ width: 360, height: 800 });

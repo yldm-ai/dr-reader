@@ -13,6 +13,17 @@ export interface ReadingSettings {
   width: number;
   paddingX: number;
   paddingY: number;
+  paddingTop: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  paddingRight: number;
+  showToolbar: boolean;
+  showToc: boolean;
+  showChapterTitle: boolean;
+  showPagination: boolean;
+  showProgress: boolean;
+  fullBackground: boolean;
+  fullWidth: boolean;
   animation: 'none' | 'slide' | 'fade' | 'turn';
   animationDuration: number;
   publisherStyles: boolean;

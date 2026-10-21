@@ -81,6 +81,14 @@ try {
     reader.apply({ ...settings, reading: { ...settings.reading, mode: 'scroll' } });
     reader.measure();
     check(getComputedStyle(reader.pageTail).display === 'none', 'pagination spacer must be removed in scroll mode');
+    const asymmetric = { ...settings.reading, paddingLeft: 11, paddingRight: 89, paddingTop: 20, paddingBottom: 60 };
+    reader.apply({ ...settings, reading: asymmetric });
+    reader.measure();
+    view.scrollTo((reader.pages - 1) * view.innerWidth, 0);
+    check(Math.abs(view.scrollX - (reader.pages - 1) * view.innerWidth) <= 1, 'asymmetric final page was clamped');
+    range.selectNodeContents(doc.body.querySelector('p:last-child'));
+    const finalRects = [...range.getClientRects()].filter(rect => rect.left >= 0 && rect.left < view.innerWidth && rect.width > 0);
+    check(finalRects.length > 0 && finalRects.every(rect => rect.left >= 10 && rect.right <= view.innerWidth - 88), 'independent left and right margins clip the last page');
     results.push(`${width}px: PASS (${pages} pages)`);
     frame.remove();
   }

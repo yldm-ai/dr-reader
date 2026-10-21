@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { fontChoices, fontStack } from '../web/fonts.ts';
 import { ChapterCache } from '../web/chapter-cache.ts';
 import { sameReading } from '../web/settings-state.ts';
+import { pageMargins, pageClickDirection } from '../web/reading-layout.ts';
 
 test('font choices distinguish saved values from labels and preserve missing current fonts', () => {
   const choices = fontChoices(['Microsoft YaHei', '', '宋体', ' 宋体 '], 'Missing Font');
@@ -31,4 +32,16 @@ test('transport object changes do not require reflow, typography changes do', ()
   assert.ok(sameReading(reading, structuredClone(reading)));
   assert.equal(sameReading(reading, { ...reading, fontSize: 21 }), false);
   assert.equal(sameReading(undefined, reading), false);
+});
+test('asymmetric margins preserve a readable region even in a small viewport', () => {
+  assert.deepEqual(pageMargins({ paddingTop: 20, paddingBottom: 80, paddingLeft: 10, paddingRight: 90 }, 800, 600),
+    { top: 20, bottom: 80, left: 10, right: 90 });
+  const clamped = pageMargins({ paddingLeft: 240, paddingRight: 240, paddingTop: 240, paddingBottom: 240 }, 360, 300);
+  assert.ok(360 - clamped.left - clamped.right >= 80 && 300 - clamped.top - clamped.bottom >= 80);
+  assert.deepEqual(pageMargins({ paddingX: 60, paddingY: 30 }, 800, 600), { top: 30, bottom: 30, left: 60, right: 60 });
+});
+test('page click zones leave the center available for reader controls', () => {
+  assert.equal(pageClickDirection(10, 800), -1);
+  assert.equal(pageClickDirection(400, 800), 0);
+  assert.equal(pageClickDirection(790, 800), 1);
 });

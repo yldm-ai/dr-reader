@@ -67,6 +67,26 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                     controller_ = controller;
                                     controller_->get_CoreWebView2(&view_);
                                     controller_->put_Bounds(bounds_);
+                                    EventRegistrationToken accelerator_token{};
+                                    controller_->add_AcceleratorKeyPressed(
+                                        Callback<ICoreWebView2AcceleratorKeyPressedEventHandler>(
+                                            [this](ICoreWebView2Controller *, ICoreWebView2AcceleratorKeyPressedEventArgs *args) -> HRESULT
+                                            {
+                                                UINT key = 0;
+                                                COREWEBVIEW2_KEY_EVENT_KIND kind{};
+                                                COREWEBVIEW2_PHYSICAL_KEY_STATUS status{};
+                                                args->get_VirtualKey(&key);
+                                                args->get_KeyEventKind(&kind);
+                                                args->get_PhysicalKeyStatus(&status);
+                                                if (key == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000) &&
+                                                    (kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN ||
+                                                     kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN))
+                                                {
+                                                    args->put_Handled(TRUE);
+                                                    if (!status.WasKeyDown && on_toggle_fullscreen) on_toggle_fullscreen();
+                                                }
+                                                return S_OK;
+                                            }).Get(), &accelerator_token);
                                     Microsoft::WRL::ComPtr<ICoreWebView2_3> v3;
                                     auto h = view_.As(&v3);
                                     if (FAILED(h))

@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Reader motion regression</title>
+<link rel="stylesheet" href="../web/styles.css">
+<pre id="result">RUNNING</pre>
+<div id="page-surface" class="page-surface" style="width:600px;height:360px;--reading-paper:#fffaf3">
+  <iframe id="book-frame" sandbox="allow-same-origin"></iframe>
+</div>
+<script type="module">
+import { ReaderMotion } from '../web/motion.ts';
+const output = document.getElementById('result');
+const host = document.getElementById('page-surface'), frame = document.getElementById('book-frame');
+const check = (value, message) => { if (!value) throw Error(message); };
+const until = async predicate => {
+  for (let i = 0; i < 150; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
+  throw Error('Motion did not reach the expected state');
+};
+const load = html => new Promise(resolve => { frame.onload = resolve; frame.srcdoc = html; });
+const original = `<style>html{overflow:hidden}body{margin:0;display:flex;width:1200px;height:360px;background:#fffaf3;color:#37352f;font:20px/1.8 'Microsoft YaHei'}section{flex:0 0 600px;box-sizing:border-box;padding:35px}section+section{background:#e8f0f7}h1{font-size:30px}::highlight(test-mark){background:#e8bd6f}</style><section><h1>第一页</h1><p>这是一张正在移出的旧书页。</p><p>平移动画应当完整移动一页的距离。</p></section><section><h1>第二页</h1><p>这是一张从右侧移入的新书页。</p><p>旧页与新页应同时出现。</p></section>`;
+try {
+  await load(original);
+  const motion = new ReaderMotion();
+  const source = frame.contentDocument;
+  const range = source.createRange(); range.selectNodeContents(source.querySelector('p').firstChild);
+  source.defaultView.CSS.highlights.set('test-mark', new source.defaultView.Highlight(range));
+  let updates = 0;
+  let pending = motion.change(host, 'slide', 600, 1, () => { updates++; source.defaultView.scrollTo(600, 0); });
+  await until(() => host.querySelector('.page-motion')?.getAnimations({ subtree: true }).length === 2);
+  let overlay = host.querySelector('.page-motion');
+  let animations = overlay.getAnimations({ subtree: true });
+  animations.forEach(animation => { animation.pause(); animation.currentTime = 300; });
+  const pages = overlay.querySelectorAll('.motion-page');
+  check(pages.length === 2 && pages[0].querySelector('iframe').contentWindow.scrollX === 0 &&
+    pages[1].querySelector('iframe').contentWindow.scrollX === 600, 'motion snapshots must show different page offsets');
+  check(getComputedStyle(pages[0]).opacity === '1' && getComputedStyle(pages[1]).opacity === '1', 'slide must not fade text');
+  check(animations[0].effect.getKeyframes().at(-1).transform === 'translateX(-100%)', 'outgoing page must travel a full page');
+  check(animations[1].effect.getKeyframes()[0].transform === 'translateX(100%)', 'incoming page must start one full page away');
+  check(pages[0].querySelector('iframe').contentWindow.CSS.highlights.get('test-mark')?.size === 1, 'snapshot must preserve highlights');
+  await window.captureMotion?.('slide-forward');
+  animations.forEach(animation => animation.finish()); await pending;
+  check(updates === 1 && !host.querySelector('.page-motion') && frame.style.visibility === '', 'slide must commit once and clean up');
+  pending = motion.change(host, 'turn', 600, -1, () => { updates++; source.defaultView.scrollTo(0, 0); });
+  await until(() => host.querySelector('.motion-sheet')?.getAnimations().length);
+  overlay = host.querySelector('.page-motion'); animations = overlay.getAnimations({ subtree: true });
+  animations.forEach(animation => { animation.pause(); animation.currentTime = 420; });
+  const sheetFrames = overlay.querySelector('.motion-sheet').getAnimations()[0].effect.getKeyframes();
+  check(sheetFrames[0].transform === 'rotateY(-180deg)' && sheetFrames.at(-1).transform === 'rotateY(0deg)', 'backward turn must rotate a hinged sheet through 180 degrees');
+  check(overlay.querySelector('.motion-front iframe') && overlay.querySelector('.motion-back') && overlay.querySelector('.motion-shade'), 'turn needs a front, back and moving shade');
+  await window.captureMotion?.('turn-backward');
+  motion.cancel(); await pending;
+  check(updates === 2 && !host.querySelector('.page-motion') && frame.style.visibility === '', 'canceling a turn must retain the committed page and remove overlays');
+  pending = motion.change(host, 'slide', 600, -1, () => { updates++; source.defaultView.scrollTo(600, 0); });
+  await until(() => host.querySelector('.page-motion')?.getAnimations({ subtree: true }).length === 2);
+  check(host.querySelector('.page-motion').getAnimations({ subtree: true })[0].effect.getKeyframes().at(-1).transform === 'translateX(100%)', 'backward slide must reverse direction');
+  motion.cancel(); await pending;
+  pending = motion.change(host, 'turn', 600, 1, () => load(original.replace('第一页', '下一章')));
+  await until(() => host.querySelector('.motion-sheet')?.getAnimations().length);
+  animations = host.querySelector('.page-motion').getAnimations({ subtree: true });
+  animations.forEach(animation => { animation.pause(); animation.currentTime = 240; });
+  check(host.querySelector('.motion-sheet').getAnimations()[0].effect.getKeyframes().at(-1).transform === 'rotateY(-180deg)', 'forward turn must reverse the backward hinge motion');
+  check(host.querySelector('.page-motion > .motion-page iframe').contentDocument.body.textContent.includes('下一章'), 'cross-chapter snapshot must wait for the new document');
+  await window.captureMotion?.('turn-forward');
+  animations.forEach(animation => animation.finish()); await pending;
+  motion.setAllowed(false);
+  await motion.change(host, 'slide', 600, 1, () => updates++);
+  check(updates === 4 && !host.querySelector('.page-motion'), 'disabled motion must commit immediately');
+  output.textContent = 'PASS: full-distance simultaneous slide, hinged front/back turn, copied highlights, cross-chapter readiness, cancellation and reduced motion';
+  document.documentElement.dataset.result = 'pass';
+} catch (error) { output.textContent = 'FAIL\n' + error.stack; document.documentElement.dataset.result = 'fail'; }
+</script>

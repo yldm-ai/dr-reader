@@ -164,6 +164,19 @@ int main()
                     customized["reading"]["fontSize"] == 24 &&
                     customized["reading"]["animation"] == "turn",
                 "settings patch");
+        auto immersive = dr::patch_settings(defaults, {{"reading", {
+            {"showToolbar", false}, {"showToc", false}, {"showChapterTitle", false},
+            {"showPagination", false}, {"showProgress", false}, {"fullBackground", true}, {"fullWidth", true},
+            {"paddingTop", 0}, {"paddingBottom", 80}, {"paddingLeft", 10}, {"paddingRight", 90}}}});
+        require(!immersive["reading"]["showToolbar"].get<bool>() && immersive["reading"]["fullWidth"] &&
+                    immersive["reading"]["paddingTop"] == 0 && immersive["reading"]["paddingRight"] == 90,
+                "immersive settings and independent margins");
+        auto migrated_margins = dr::normalize_settings({{"reading", {{"paddingX", 62}, {"paddingY", 28}}}});
+        require(migrated_margins["reading"]["paddingLeft"] == 62 && migrated_margins["reading"]["paddingRight"] == 62 &&
+                    migrated_margins["reading"]["paddingTop"] == 28 && migrated_margins["reading"]["paddingBottom"] == 28,
+                "legacy horizontal and vertical margins migrate without losing customization");
+        rejects([&] { dr::patch_settings(defaults, {{"reading", {{"showToolbar", "false"}}}}); },
+                "immersive switches require boolean values");
         auto legacy = dr::normalize_settings(
             {{"shell", "direct2d"}, {"theme", "sepia"}, {"fontSize", 22}, {"mode", "paged"}});
         require(legacy["application"]["shell"] == "direct2d" &&

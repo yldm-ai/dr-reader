@@ -5,10 +5,11 @@ import {
   textIndex,
 } from "./anchors.js";
 import { AnnotationLayer } from "./annotations.js";
-import { ReaderMotion } from "./motion.js";
+import { ReaderMotion } from "./motion.ts";
 import { fontStack } from "./fonts.ts";
 import { readingPalette } from "./reading-palette.ts";
 import { sameReading } from "./settings-state.ts";
+import { pageMargins, pageClickDirection } from "./reading-layout.ts";
 import { ChapterCache } from "./chapter-cache.ts";
 import { icon } from "./icons.ts";
 
@@ -46,9 +47,22 @@ export class Reader {
     $("prev-page").onclick = () => this.turn(-1);
     $("next-page").onclick = () => this.turn(1);
     $("toggle-toc").onclick = () => {
-      $("toc-panel").hidden = !$("toc-panel").hidden;
+      const showToc = $("toc-panel").hidden;
+      if (this.onReadingSetting) this.onReadingSetting({ showToc });
+      else $("toc-panel").hidden = !showToc;
       this.reflow();
     };
+    $("quick-library").onclick = () => $("back-library").click();
+    $("quick-settings").onclick = () => $("reader-settings").click();
+    $("quick-fullscreen").onclick = () => call("fullscreen", { enabled: false }).catch(error => toast(error.message));
+    $("reader-quick-controls").addEventListener("pointerleave", () => this.peekControls());
+    $("reader-quick-controls").addEventListener("focusout", () => this.peekControls());
+    $("reader-view").addEventListener("pointermove", event => { if (event.clientY < 28) this.peekControls(); });
+    $("page-surface").addEventListener("pointerdown", event => this.beginPageTap(event));
+    $("page-surface").addEventListener("click", event => { if (event.target.id === "page-surface") this.pageTap(event, $("page-surface").clientWidth, $("page-surface").getBoundingClientRect().left); });
+    const area = document.querySelector(".reading-area");
+    area.addEventListener("pointerdown", event => { if (event.target === area) this.beginPageTap(event); });
+    area.addEventListener("click", event => { if (event.target === area) this.pageTap(event, area.clientWidth, area.getBoundingClientRect().left); });
     $("add-bookmark").onclick = () => this.bookmark();
     $("reading-progress").onchange = () => {
       if (!this.book) return;
@@ -104,7 +118,7 @@ export class Reader {
       this.saveFromDialog();
     });
     $("annotation-delete").onclick = () => this.deleteFromDialog();
-    this.observer = new ResizeObserver(() => this.reflow());
+    this.observer = new ResizeObserver(() => { this.motion.cancel(); this.reflow(); });
     this.observer.observe($("book-frame"));
   }
 
@@ -309,6 +323,7 @@ export class Reader {
   ) {
     if (!this.book) return;
     clearTimeout(this.saveTimer);
+    clearTimeout(this.tapTimer);
     await this.flush();
     this.hideSelection();
     const generation = ++this.generation;
@@ -342,37 +357,24 @@ export class Reader {
         (match) => `${match}<base href="${escape(base)}">`,
       );
       const frame = $("book-frame");
-      await new Promise((resolve, reject) => {
+      const update = () => new Promise((resolve, reject) => {
+        if (generation !== this.generation) { resolve(); return; }
         const timeout = setTimeout(() => reject(new Error("章节载入超时")), 8000);
-        frame.onload = () => {
-          clearTimeout(timeout);
-          if (generation !== this.generation) {
+        frame.onload = async () => {
+          if (generation !== this.generation) { clearTimeout(timeout); resolve(); return; }
+          try {
+            this.doc = frame.contentDocument;
+            await this.attach();
+            clearTimeout(timeout);
             resolve();
-            return;
-          }
-          this.doc = frame.contentDocument;
-          this.attach();
-          resolve();
+          } catch (error) { clearTimeout(timeout); reject(error); }
         };
-        frame.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error("章节载入失败"));
-        };
-        const update = () => {
-          frame.srcdoc = html;
-        };
-        if (direction)
-          this.motion
-            .change(
-              $("page-surface"),
-              this.settings.animation,
-              this.settings.animationDuration,
-              direction,
-              update,
-            )
-            .then(resolve, reject);
-        else update();
+        frame.onerror = () => { clearTimeout(timeout); reject(new Error("章节载入失败")); };
+        frame.srcdoc = html;
       });
+      if (direction && this.settings.mode === "paged") await this.motion.change($("page-surface"), this.settings.animation,
+        this.settings.animationDuration, direction, update);
+      else await update();
     } catch (error) {
       if (generation !== this.generation) return;
       this.loading = false;
@@ -382,7 +384,7 @@ export class Reader {
     }
   }
 
-  attach() {
+  async attach() {
     const doc = this.doc;
     if (!doc?.body) {
       this.loading = false;
@@ -412,7 +414,7 @@ export class Reader {
         return;
       }
       const link = event.target.closest?.("a[href]");
-      if (!link) return;
+      if (!link) { this.pageTap(event, doc.defaultView.innerWidth); return; }
       event.preventDefault();
       try {
         const target = new URL(link.getAttribute("href"), doc.baseURI);
@@ -430,7 +432,8 @@ export class Reader {
         toast("无法打开这个链接");
       }
     });
-    doc.addEventListener("pointerdown", () => this.hideSelection());
+    doc.addEventListener("pointerdown", event => { this.beginPageTap(event); this.hideSelection(); });
+    doc.addEventListener("pointermove", event => { if (event.clientY < 24) this.peekControls(); });
     doc.addEventListener("wheel", (event) => this.wheel(event), { passive: false });
     doc.addEventListener("touchmove", () => this.hideSelection(), { passive: true });
     doc.addEventListener("selectionchange", () => {
@@ -470,19 +473,15 @@ export class Reader {
     this.annotationLayer = new AnnotationLayer(doc);
     this.refreshAnnotations();
     this.apply(this.settings);
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        if (doc !== this.doc) return;
-        this.measure();
-        this.restore();
-        this.loading = false;
-        $("reader-loading").hidden = true;
-        this.report();
-      }),
-    );
-    doc.fonts?.ready.then(() => {
-      if (doc === this.doc) this.reflow();
-    });
+    await doc.fonts?.ready;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    if (doc !== this.doc) return;
+    this.measure();
+    this.restore();
+    this.loading = false;
+    this.reflowing = false;
+    $("reader-loading").hidden = true;
+    this.report();
   }
 
   refreshAnnotations() {
@@ -515,6 +514,7 @@ export class Reader {
     this.hideSelection();
     this.settings = settings.reading || settings;
     this.motion.setAllowed(this.appSettings.animations);
+    this.syncChrome();
     if (this.appliedDocument === this.doc && sameReading(this.appliedReading, this.settings)) return;
     this.appliedDocument = this.doc;
     this.appliedReading = { ...this.settings };
@@ -524,6 +524,7 @@ export class Reader {
     );
     if (!this.doc || !this.style) return;
     this.reflowing = true;
+    this.layoutViewport = `${this.doc.defaultView.innerWidth}x${this.doc.defaultView.innerHeight}`;
     const reading = this.settings;
     const colors = readingPalette(reading.theme);
     const paged = reading.mode === "paged";
@@ -533,11 +534,64 @@ export class Reader {
     const paragraph = reading.publisherStyles
       ? ""
       : `body p{text-indent:${reading.textIndent}em!important;text-align:${reading.alignment}!important}`;
+    const edges = pageMargins(reading, this.doc.defaultView.innerWidth, this.doc.defaultView.innerHeight);
+    const horizontal = edges.left + edges.right;
+    const vertical = edges.top + edges.bottom;
     const margin = paged
-      ? `padding:0!important;column-count:auto!important;margin:${reading.paddingY}px ${reading.paddingX}px!important;width:calc(var(--dr-page-width,100vw) - ${reading.paddingX * 2}px)!important;height:calc(100vh - ${reading.paddingY * 2}px)!important;column-width:calc(var(--dr-page-width,100vw) - ${reading.paddingX * 2}px)!important;column-gap:${reading.paddingX * 2}px!important;column-fill:auto!important;overflow:visible!important;`
-      : `margin:0!important;padding:${reading.paddingY}px ${reading.paddingX}px 60px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
-    this.style.textContent = `html{background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? "calc(100vh - 90px)" : "85vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:4px}`;
+      ? `padding:0!important;column-count:auto!important;margin:${edges.top}px ${edges.right}px ${edges.bottom}px ${edges.left}px!important;width:calc(var(--dr-page-width,100vw) - ${horizontal}px)!important;height:calc(100vh - ${vertical}px)!important;column-width:calc(var(--dr-page-width,100vw) - ${horizontal}px)!important;column-gap:${horizontal}px!important;column-fill:auto!important;overflow:visible!important;`
+      : `margin:0!important;padding:${edges.top}px ${edges.right}px ${edges.bottom}px ${edges.left}px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
+    this.style.textContent = `html{background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? `calc(100vh - ${vertical}px)` : "100vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:4px}`;
     this.reflow();
+  }
+
+  syncChrome() {
+    const root = $("reader-view");
+    if (!root || !this.settings) return;
+    const r = this.settings;
+    for (const [key, setting] of [["toolbar", "showToolbar"], ["chapterTitle", "showChapterTitle"],
+      ["pagination", "showPagination"], ["progress", "showProgress"]])
+      root.dataset[key] = String(r[setting] !== false);
+    root.dataset.fullBackground = String(Boolean(r.fullBackground));
+    root.dataset.fullWidth = String(Boolean(r.fullWidth));
+    root.style.setProperty("--reading-paper", readingPalette(r.theme).paper);
+    root.style.setProperty("--reading-text", readingPalette(r.theme).text);
+    $("toc-panel").hidden = r.showToc === false;
+    if (r.showToolbar !== false) $("reader-quick-controls").hidden = true;
+  }
+
+  peekControls() {
+    if (this.settings?.showToolbar !== false || !this.book) return;
+    const controls = $("reader-quick-controls");
+    controls.hidden = false;
+    $("quick-fullscreen").hidden = document.body.dataset.fullscreen !== "true";
+    clearTimeout(this.peekTimer);
+    this.peekTimer = setTimeout(() => {
+      if (!controls.contains(document.activeElement) && !controls.matches(":hover")) controls.hidden = true;
+    }, 3000);
+  }
+
+  beginPageTap(event) {
+    clearTimeout(this.tapTimer);
+    this.tapStart = event.button === 0 && event.isPrimary !== false
+      ? { x: event.clientX, y: event.clientY, time: performance.now(), selected: Boolean(this.doc?.getSelection()?.toString()) }
+      : null;
+  }
+
+  pageTap(event, width, offsetX = 0) {
+    const start = this.tapStart;
+    this.tapStart = null;
+    if (!start || this.settings?.mode !== "paged" || this.loading || this.reflowing || event.button !== 0 ||
+        event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.detail > 1 ||
+        Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6 || performance.now() - start.time > 500 ||
+        start.selected || this.doc?.getSelection()?.toString() ||
+        event.target.closest?.("a,button,input,select,textarea,[contenteditable]")) return;
+    const direction = pageClickDirection(event.clientX - offsetX, width);
+    // A second press cancels the pending tap before double-click word selection.
+    const doc = this.doc, generation = this.generation;
+    if (direction) this.tapTimer = setTimeout(() => {
+      if (doc === this.doc && generation === this.generation && !this.doc?.getSelection()?.toString()) this.turn(direction);
+    }, 220);
+    else this.peekControls();
   }
 
   measure() {
@@ -609,7 +663,7 @@ export class Reader {
     const view = this.doc.defaultView;
     if (this.settings.mode === "paged") {
       const page = Math.max(0, Math.min(this.pages - 1,
-        Math.floor((view.scrollX + rect.left - this.settings.paddingX + 1) / Math.max(1, view.innerWidth))));
+        Math.floor((view.scrollX + rect.left - pageMargins(this.settings, view.innerWidth, view.innerHeight).left + 1) / Math.max(1, view.innerWidth))));
       view.scrollTo(page * view.innerWidth, 0);
     } else view.scrollTo(0, view.scrollY + rect.top - 40);
   }
@@ -619,6 +673,9 @@ export class Reader {
     clearTimeout(this.reflowTimer);
     this.reflowTimer = setTimeout(() => {
       if (!this.doc || $("app").hidden) return;
+      if (this.layoutViewport !== `${this.doc.defaultView.innerWidth}x${this.doc.defaultView.innerHeight}`) {
+        this.appliedReading = null; this.apply({ reading: this.settings, application: this.appSettings }); return;
+      }
       this.measure();
       // CSS Highlight ranges track layout automatically; keep their text anchors intact.
       this.restore();
@@ -728,9 +785,8 @@ export class Reader {
         (direction > 0 && view.scrollY < maximum - 2) ||
         (direction < 0 && view.scrollY > 2)
       ) {
-        await this.animatePageChange(direction, () =>
-          view.scrollBy(0, direction * view.innerHeight * 0.85),
-        );
+        view.scrollBy({ top: direction * view.innerHeight * .85,
+          behavior: this.motion.enabled(this.settings.animation) ? "smooth" : "instant" });
         return;
       }
     }
@@ -754,10 +810,13 @@ export class Reader {
   }
 
   key(event) {
+    if (event.key === "F8") { event.preventDefault(); this.onOpenSettings?.(); return; }
+    if (event.altKey && event.key === "Enter") { event.preventDefault(); if (!event.repeat) call("fullscreen").catch(error => toast(error.message)); return; }
     if (event.ctrlKey && event.key.toLowerCase() === "f") {
       event.preventDefault();
       this.tab("search");
       $("toc-panel").hidden = false;
+      this.onReadingSetting?.({showToc: true});
       return;
     }
     if (
@@ -1096,6 +1155,10 @@ export class Reader {
   async close() {
     await this.flush();
     ++this.generation;
+    this.motion.cancel();
+    clearTimeout(this.tapTimer);
+    clearTimeout(this.peekTimer);
+    $("reader-quick-controls").hidden = true;
     this.hideSelection();
     this.annotationLayer?.clear();
     this.annotationLayer = null;

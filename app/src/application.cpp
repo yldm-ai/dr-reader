@@ -100,6 +100,14 @@ void Application::receive(const Json &request)
     auto id = request["id"];
     auto method = request["method"].get<std::string>();
     auto params = request.value("params", Json::object());
+    if (method == "fullscreen")
+    {
+        const bool enabled = params.value("enabled", !window_.fullscreen());
+        window_.set_fullscreen(enabled);
+        webview_.send({{"event", "fullscreen"}, {"enabled", enabled}});
+        webview_.send({{"id", id}, {"result", enabled}});
+        return;
+    }
     if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;
     if (method == "import")
@@ -214,6 +222,14 @@ int Application::run(HINSTANCE instance)
                                       : ShellStyle::Mica, IDI_DR_READER))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
+    window_.on_toggle_fullscreen = [this] {
+        // Dispatch out of the synchronous WebView2 accelerator callback before resizing it.
+        window_.post([this] {
+            window_.set_fullscreen(!window_.fullscreen());
+            webview_.send({{"event", "fullscreen"}, {"enabled", window_.fullscreen()}});
+        });
+    };
+    webview_.on_toggle_fullscreen = window_.on_toggle_fullscreen;
     window_.set_theme(settings["application"].value("theme", std::string("light")));
     webview_.on_message = [this](auto &request) { receive(request); };
     webview_.on_error = [this](const auto &error)

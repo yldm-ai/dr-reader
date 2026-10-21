@@ -26,10 +26,13 @@ class Window
     RECT content_bounds() const;
     void set_style(ShellStyle style);
     void set_theme(const std::string &theme);
+    void set_fullscreen(bool enabled);
+    bool fullscreen() const { return fullscreen_; }
     void set_title(const std::wstring &title);
     void post(std::function<void()> action);
     std::function<void()> on_resize;
     std::function<void()> on_close;
+    std::function<void()> on_toggle_fullscreen;
     bool mica_available() const
     {
         return mica_available_;
@@ -49,6 +52,9 @@ class Window
     HICON small_icon_ = nullptr, large_icon_ = nullptr;
     ShellStyle style_ = ShellStyle::Mica;
     bool mica_available_ = false;
+    bool fullscreen_ = false;
+    WINDOWPLACEMENT windowed_placement_{sizeof(WINDOWPLACEMENT)};
+    LONG_PTR windowed_style_ = 0;
     UINT32 caption_background_ = 0xffffff;
     UINT32 caption_text_ = 0x37352f;
     UINT32 caption_hover_ = 0xf1f1ef;

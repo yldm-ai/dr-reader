@@ -64,6 +64,20 @@ try {
   let rect = animation.popup.getBoundingClientRect();
   check(rect.top >= 0 && rect.bottom <= innerHeight && rect.right <= innerWidth, 'popup extends outside viewport');
   animation.close();
+  // Page curls keep their own, longer duration; only the slider for the chosen effect is active.
+  const turnSlider = document.getElementById('setting-turnDuration');
+  const fadeSlider = document.getElementById('setting-animationDuration');
+  panel.update('reading', { animation: 'turn' });
+  await frame();
+  check(!turnSlider.disabled && fadeSlider.disabled && turnSlider.value === '800',
+    'soft page curls must use the turn duration slider');
+  turnSlider.value = '1500'; turnSlider.dispatchEvent(new Event('input'));
+  await panel.flush();
+  check(native.data.settings.reading.turnDuration === 1500 && native.data.settings.reading.animationDuration === 220,
+    'turn duration must persist without changing the slide/fade duration');
+  panel.update('reading', { animation: 'slide' });
+  await frame();
+  check(turnSlider.disabled && !fadeSlider.disabled, 'slides must use the short animation duration slider');
   document.getElementById('reading-settings').close();
   output.textContent = 'PASS: font search/commit/cancel/persist/reset, selector keyboard and bounds, batched updates, stable dictionary DOM';
   document.documentElement.dataset.result = 'pass';

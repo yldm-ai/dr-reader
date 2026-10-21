@@ -27,6 +27,8 @@ export interface ReadingSettings {
   fullWidth: boolean;
   animation: 'none' | 'slide' | 'fade' | 'turn' | 'turn-hard';
   animationDuration: number;
+  /** Page curls need far longer than slides and fades, so they keep their own duration. */
+  turnDuration: number;
   publisherStyles: boolean;
 }
 /** Reading settings contain primitive values; identity of the transport object is irrelevant. */

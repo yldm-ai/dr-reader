@@ -456,7 +456,7 @@ export class Reader {
       });
       if (retainPage) await this.motion.change($("page-surface"),
         direction && this.settings.mode === "paged" ? this.settings.animation : "none",
-        this.settings.animationDuration, direction, update, true, corner);
+        this.motionDuration(), direction, update, true, corner);
       else await update();
     } catch (error) {
       if (generation !== this.generation) return;
@@ -900,6 +900,13 @@ export class Reader {
       await this.load(next, direction > 0 ? 0 : 1, "", "", "", direction, corner);
   }
 
+  /** Page curls use their own, longer duration; slides and fades keep the short one. */
+  motionDuration() {
+    return this.settings.animation?.startsWith("turn")
+      ? this.settings.turnDuration ?? 800
+      : this.settings.animationDuration;
+  }
+
   async animatePageChange(direction, update, corner = "top") {
     if (!this.settings.animation || this.settings.animation === "none") {
       update();
@@ -908,7 +915,7 @@ export class Reader {
     await this.motion.change(
       $("page-surface"),
       this.settings.animation,
-      this.settings.animationDuration,
+      this.motionDuration(),
       direction,
       update,
       false,

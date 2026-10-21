@@ -8,7 +8,7 @@ export function bootstrapFixture() {
       lineHeight: 1.9, paragraphSpacing: 1, letterSpacing: 0, textIndent: 0, alignment: 'justify',
       width: 760, paddingX: 44, paddingY: 38, paddingTop: 38, paddingBottom: 38, paddingLeft: 44, paddingRight: 44,
       showToolbar: true, showToc: true, showChapterTitle: true, showPagination: true, showProgress: true,
-      fullBackground: false, fullWidth: false, animation: 'none', animationDuration: 220, publisherStyles: false },
+      fullBackground: false, fullWidth: false, animation: 'none', animationDuration: 220, turnDuration: 800,publisherStyles: false },
   };
   const book = { id: 'fixture', title: '阅读与时光', author: '测试作者', addedAt: 1,
     lastRead: 0, progress: 0, chapters: [{ href: 'chapter.html', title: '第一章' }, { href: 'second.html', title: '第二章' }],

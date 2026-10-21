@@ -174,6 +174,10 @@ int main()
             {{"version", 2}, {"reading", {{"fontSize", 26}, {"animation", "turn-bottom"}}}});
         require(legacy_corner["reading"]["animation"] == "turn" && legacy_corner["reading"]["fontSize"] == 26,
                 "saved bottom-corner turns migrate without discarding other settings");
+        require(legacy_corner["reading"]["turnDuration"] == 800 &&
+                    dr::patch_settings(defaults, {{"reading", {{"turnDuration", 5000}}}})["reading"]["turnDuration"] == 2000 &&
+                    dr::patch_settings(defaults, {{"reading", {{"turnDuration", 1234}}}})["reading"]["turnDuration"] == 1234,
+                "page turns default to 800 ms and keep a custom duration within 300-2000 ms");
         auto immersive = dr::patch_settings(defaults, {{"reading", {
             {"showToolbar", false}, {"showToc", false}, {"showChapterTitle", false},
             {"showPagination", false}, {"showProgress", false}, {"fullBackground", true}, {"fullWidth", true},

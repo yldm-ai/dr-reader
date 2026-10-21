@@ -72,14 +72,50 @@ try {
         await app.locator('#setting-mode-trigger').press('Escape');
         await app.locator('[data-close="reading-settings"]').click();
         await capture('reader-dark.png');
+        await app.evaluate(() => {
+          window.chapterGate = new Promise(resolve => { window.releaseChapter = resolve; });
+          const frame = document.getElementById('book-frame');
+          window.chapterSwapChecks = [];
+          window.chapterSwapObserver = new MutationObserver(() => {
+            const snapshot = document.querySelector('.page-motion .motion-page iframe');
+            window.chapterSwapChecks.push(Boolean(snapshot?.contentDocument?.body?.textContent.includes('原创的阅读测试文字') &&
+              getComputedStyle(snapshot.closest('.page-motion')).visibility === 'visible' &&
+              getComputedStyle(frame).visibility === 'hidden'));
+          });
+          window.chapterSwapObserver.observe(frame, { attributes: true, attributeFilter: ['srcdoc'] });
+          const doc = frame.contentDocument, pages = Number(document.getElementById('page-indicator').textContent.split('/')[1]);
+          doc.defaultView.scrollTo((pages - 1) * doc.defaultView.innerWidth, 0);
+        });
+        await app.waitForFunction(() => {
+          const [page, pages] = document.getElementById('page-indicator').textContent.split('/').map(Number);
+          return page === pages;
+        });
+        await app.locator('#next-page').click();
+        await app.waitForFunction(() => window.chapterRequests === 2);
+        if (!await app.evaluate(() => document.getElementById('reader-loading').hidden &&
+          document.getElementById('book-frame').contentDocument.body.textContent.includes('原创的阅读测试文字')))
+          throw Error('cross-chapter fetch must retain the old page without a loading flash');
+        await app.evaluate(() => { window.releaseChapter(); window.chapterGate = null; });
+        await app.waitForFunction(() => document.getElementById('book-frame').srcdoc.includes('second.html') &&
+          document.getElementById('reader-loading').hidden && !document.querySelector('.page-motion'));
+        if (!await app.evaluate(() => window.chapterSwapChecks.length > 0 && window.chapterSwapChecks.every(Boolean)))
+          throw Error('cross-chapter document replacement must stay covered until the new page is ready');
+        await app.evaluate(() => window.chapterSwapObserver.disconnect());
+        await app.locator('#prev-page').click();
+        await app.waitForFunction(() => document.getElementById('book-frame').srcdoc.includes('/chapter.html') &&
+          document.getElementById('reader-loading').hidden && !document.querySelector('.page-motion'));
+        await app.waitForFunction(() => {
+          const [page, pages] = document.getElementById('page-indicator').textContent.split('/').map(Number);
+          return page === pages;
+        });
+        console.log('PASS cross-chapter fetch/replacement without loading flashes and backward last-page restoration');
         const tocPanel = app.locator('#toc-panel');
         await app.locator('#book-frame').hover();
         await tocPanel.waitFor({ state: 'hidden' });
         const expandedWidth = await app.locator('#book-frame').evaluate(el => el.clientWidth);
         const revealWidth = await app.locator('#toc-reveal-zone').evaluate(el => el.getBoundingClientRect().width);
-        const panelWidth = await tocPanel.evaluate(el => el.getBoundingClientRect().width);
-        if (Math.abs(revealWidth * 4 - panelWidth) > 1) throw Error('reveal zone must be a quarter of the sidebar width');
-        await app.locator('#toc-reveal-zone').hover({ position: { x: 8, y: 100 } });
+        if (Math.abs(revealWidth - 8) > 0.1) throw Error('reveal zone must be exactly 8px wide');
+        await app.locator('#toc-reveal-zone').hover({ position: { x: 4, y: 100 } });
         await tocPanel.waitFor({ state: 'visible' });
         await app.locator('.toc-entry').first().hover();
         if (await app.locator('#book-frame').evaluate(el => el.clientWidth) !== expandedWidth)
@@ -116,7 +152,7 @@ try {
         if (!await app.locator('#book-search-input').evaluate(el => document.activeElement === el))
           throw Error('book search must expand the sidebar and receive keyboard focus');
         await app.locator('[data-tab="toc"]').click();
-        console.log('PASS auto-hide sidebar, quarter-width reveal zone, pin persistence, chapter capsule animation and keyboard search');
+        console.log('PASS auto-hide sidebar, 8px reveal zone, pin persistence, chapter capsule animation and keyboard search');
         await app.locator('#reader-app-settings').click();
         await app.locator('[data-setting-theme="application"][data-value="light"]').click();
         await app.waitForFunction(() => document.body.dataset.theme === 'light');

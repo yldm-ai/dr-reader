@@ -884,7 +884,7 @@ body[data-animations="false"] .selection-menu {
   position: absolute;
   z-index: 9;
   inset: 0 auto 0 0;
-  width: calc(var(--toc-panel-width) / 4);
+  width: 8px;
 }
 .toc-header {
   position: sticky;

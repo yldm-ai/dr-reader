@@ -416,8 +416,9 @@ export class Reader {
     this.loading = true;
     this.loadError = "";
     const item = this.book.chapters[this.chapter];
+    const retainPage = Boolean(this.doc?.body);
     $("chapter-label").textContent = item.title;
-    $("reader-loading").hidden = false;
+    $("reader-loading").hidden = retainPage;
     this.activeToc();
     try {
       const url = bookUrl(this.book, item.href);
@@ -443,6 +444,8 @@ export class Reader {
           try {
             this.doc = frame.contentDocument;
             await this.attach();
+            // Let restored pagination/scroll position reach the compositor before uncovering it.
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
             clearTimeout(timeout);
             resolve();
           } catch (error) { clearTimeout(timeout); reject(error); }
@@ -450,8 +453,9 @@ export class Reader {
         frame.onerror = () => { clearTimeout(timeout); reject(new Error("章节载入失败")); };
         frame.srcdoc = html;
       });
-      if (direction && this.settings.mode === "paged") await this.motion.change($("page-surface"), this.settings.animation,
-        this.settings.animationDuration, direction, update);
+      if (retainPage) await this.motion.change($("page-surface"),
+        direction && this.settings.mode === "paged" ? this.settings.animation : "none",
+        this.settings.animationDuration, direction, update, true);
       else await update();
     } catch (error) {
       if (generation !== this.generation) return;

@@ -116,8 +116,9 @@ export class ReaderMotion {
     });
   }
 
-  async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>) {
-    if (!this.enabled(effect)) { await update(); return; }
+  async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false) {
+    const animated = this.enabled(effect);
+    if (!animated && !retainPage) { await update(); return; }
     const frame = element.querySelector<HTMLIFrameElement>('#book-frame');
     if (!frame) { await update(); return; }
     this.cancel();
@@ -135,6 +136,8 @@ export class ReaderMotion {
       frame.style.visibility = 'hidden';
       await commit();
       if (transaction.controller.signal.aborted) return;
+      // Document replacement must stay covered even when turn animations are off.
+      if (!animated) return;
       const newPage = await this.snapshot(frame, overlay, transaction.controller.signal);
       if (transaction.controller.signal.aborted) return;
       const sign = direction < 0 ? -1 : 1;

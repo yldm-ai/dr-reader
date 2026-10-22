@@ -17,7 +17,7 @@ Windows 本地 EPUB 阅读器。C++20 + Win32 / Direct2D / DirectWrite + WebView
 
 ## 构建
 
-需要 Windows 10/11、Visual Studio 2022 或更新版的“使用 C++ 的桌面开发”工具链、Windows SDK、CMake 3.24+、Node.js 22.18+、pnpm 12 和 WebView2 Evergreen Runtime。C++ 依赖由 CMake 下载固定版本，前端依赖由 pnpm 锁文件固定；首次配置需要联网，不需要 vcpkg。
+需要 Windows 10/11、Visual Studio 2022 或更新版的“使用 C++ 的桌面开发”工具链、Windows SDK、CMake 3.25+、Node.js 22.18+、pnpm 12 和 WebView2 Evergreen Runtime。C++ 依赖由 CMake 下载固定版本，前端依赖由 pnpm 锁文件固定；首次配置需要联网，不需要 vcpkg。
 
 ```powershell
 pnpm install --frozen-lockfile

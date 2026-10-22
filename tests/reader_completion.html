@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled application smoke test</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, label) => { if (!value) throw Error(label); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  throw Error('Timed out waiting for bundled application');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js"><\/script>`);
+  frame.srcdoc = html;
+  document.body.append(frame);
+  await until(() => frame.contentDocument.querySelector('.book-card'));
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+
+
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  await until(() => doc.getElementById('book-pages').textContent.includes(' 页'));
+  await until(() => win.nativeProbe.requests.some(item => item.method === 'position'));
+  check(!doc.getElementById('book-pages').hidden, 'whole-book pages remain visible after saving replaces book object');
+  doc.getElementById('reader-settings').click();
+  const change = (id, checked) => {
+    const input = doc.getElementById(id); input.checked = checked;
+    input.dispatchEvent(new win.Event('change', { bubbles: true }));
+  };
+  change('setting-showProgress', false);
+  await until(() => doc.getElementById('reader-view').dataset.progress === 'false');
+  check(win.getComputedStyle(doc.querySelector('.reader-footer')).display !== 'none', 'whole-book pages independent of progress switch');
+  change('setting-showBookPages', false);
+  await until(() => doc.getElementById('reader-view').dataset.bookPages === 'false');
+  check(win.getComputedStyle(doc.querySelector('.reader-footer')).display === 'none', 'both switches off hides footer');
+  change('setting-showBookPages', true);
+  change('setting-showProgress', true);
+  doc.getElementById('reading-settings').close();
+  // Reach the last content page, then turn forward onto the completion page.
+  const slider = doc.getElementById('reading-progress');
+  win.shortFinalChapter = true;
+  slider.value = 999; slider.dispatchEvent(new win.Event('change'));
+  await until(() => doc.getElementById('reader-loading').hidden && doc.getElementById('reader-location').textContent.includes('第 2'));
+  await until(() => { const [page, pages] = doc.getElementById('page-indicator').textContent.split('/').map(Number); return page === pages; });
+  check(doc.getElementById('page-indicator').textContent === '1 / 1', 'short final chapter reproduces stalled progress');
+  check(!doc.getElementById('next-page').disabled, 'last content page permits turning to completion');
+  const fetches = win.chapterRequests;
+  doc.getElementById('next-page').click();
+  await until(() => doc.getElementById('book-frame').contentDocument.getElementById('dr-end'));
+  await until(() => doc.getElementById('reader-percent').textContent === '100%');
+  check(win.chapterRequests === fetches, 'completion is generated locally');
+  const endDoc = doc.getElementById('book-frame').contentDocument;
+  const end = endDoc.getElementById('dr-end'), rect = end.getBoundingClientRect(), view = endDoc.defaultView;
+  check(Math.abs(rect.left + rect.width / 2 - view.innerWidth / 2) < 2 && Math.abs(rect.top + rect.height / 2 - view.innerHeight / 2) < 2, 'completion character centred');
+  check(view.getComputedStyle(end).fontFamily.includes('Microsoft YaHei') && parseFloat(view.getComputedStyle(end).fontSize) >= 64, 'large YaHei completion character');
+  check(doc.getElementById('next-page').disabled, 'completion has no forward page');
+  const pages = doc.getElementById('book-pages').textContent.match(/\d+/g).map(Number);
+  check(pages[0] === pages[1], 'completion is the final whole-book page');
+  await until(() => win.nativeProbe.data.books[0].progress === 1);
+  doc.getElementById('back-library').click();
+  await until(() => doc.getElementById('reader-view').hidden);
+  doc.querySelector('[data-filter="finished"]').click();
+  check(doc.querySelectorAll('.book-card').length === 1, 'finished library includes completed book');
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  check(doc.getElementById('book-frame').contentDocument.getElementById('dr-end'), 'reopening restores completion page');
+  doc.getElementById('prev-page').click();
+  await until(() => !doc.getElementById('book-frame').contentDocument.getElementById('dr-end'));
+  await until(() => doc.getElementById('reader-percent').textContent !== '100%');
+  check(doc.getElementById('book-pages').textContent.includes(' 页'), 'whole-book pages persist after backward navigation');
+  for (const [key, value] of [['layout', 'double'], ['mode', 'scroll']]) {
+    doc.getElementById('reader-settings').click();
+    const control = doc.querySelector(`[data-reading="${key}"][value="${value}"]`);
+    control.checked = true; control.dispatchEvent(new win.Event('change', { bubbles: true }));
+    doc.getElementById('reading-settings').close();
+    await until(() => key === 'layout' ? doc.getElementById('reader-view').dataset.layout === 'double' : doc.getElementById('page-indicator').textContent.includes('%'));
+    doc.getElementById('next-page').click();
+    await until(() => doc.getElementById('book-frame').contentDocument.getElementById('dr-end') && doc.getElementById('reader-percent').textContent === '100%');
+    const end = doc.getElementById('book-frame').contentDocument.getElementById('dr-end');
+    const rect = end.getBoundingClientRect(), view = end.ownerDocument.defaultView;
+    check(Math.abs(rect.left + rect.width / 2 - view.innerWidth / 2) < 2 && Math.abs(rect.top + rect.height / 2 - view.innerHeight / 2) < 2, `${value} completion remains centred`);
+    if (key === 'layout') {
+      doc.getElementById('prev-page').click();
+      await until(() => !doc.getElementById('book-frame').contentDocument.getElementById('dr-end'));
+    }
+  }
+  check(!win.runtimeErrors.length, win.runtimeErrors.join('\n'));
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS reader completion';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

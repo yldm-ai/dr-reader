@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled application smoke test</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, label) => { if (!value) throw Error(label); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  throw Error('Timed out waiting for bundled application');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js"><\/script>`);
+  frame.srcdoc = html;
+  document.body.append(frame);
+  await until(() => frame.contentDocument.querySelector('.book-card'));
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+
+  check(!doc.querySelector('.local-note'), 'remove local library note');
+  const themes = doc.querySelectorAll('[data-setting-theme=application]');
+  check(themes[1].dataset.value === 'dark' && themes[1].textContent.includes('黑暗'), 'dark theme second');
+  check(doc.querySelectorAll('[data-filter]')[2].dataset.filter === 'shelves', 'shelves must be third');
+  doc.querySelector('[data-filter="shelves"]').click();
+  const search = doc.getElementById('library-search');
+  check(search.placeholder === '搜索书架…', 'shelf search label');
+  doc.getElementById('shelf-add').click();
+  doc.getElementById('shelf-name').value = '文学';
+  doc.querySelector('#shelf-books input').checked = true;
+  doc.querySelector('#shelf-books input').dispatchEvent(new win.Event('change', { bubbles: true }));
+  check(win.getComputedStyle(doc.querySelector('#shelf-books input')).width === '18px', 'checkbox size');
+  doc.getElementById('shelf-save').click();
+  await until(() => doc.querySelectorAll('.shelf-card').length === 2);
+  check(win.nativeProbe.data.shelves[0].bookIds[0] === 'fixture', 'save membership');
+  check(doc.getElementById('shelf-grid').lastElementChild.id === 'shelf-add', 'add stays last');
+  search.value = '阅读与时光'; search.dispatchEvent(new win.Event('input'));
+  await until(() => doc.querySelectorAll('.shelf-card').length === 1);
+  check(doc.getElementById('shelf-add'), 'no matches preserves add');
+  search.value = '文'; search.dispatchEvent(new win.Event('input'));
+  await until(() => doc.querySelectorAll('.shelf-card').length === 2);
+  doc.querySelector('.shelf-card').click();
+  check(!doc.getElementById('book-grid').hidden && doc.querySelectorAll('.book-card').length === 1, 'enter shelf');
+  doc.getElementById('shelf-edit').click();
+  doc.querySelector('#shelf-books input').checked = false;
+  doc.getElementById('shelf-save').click();
+  await until(() => doc.querySelectorAll('.book-card').length === 0);
+  check(win.nativeProbe.data.books.length === 1, 'removing membership preserves book');
+  doc.getElementById('shelves-back').click();
+  check(doc.querySelector('.shelf-card small').textContent === '0 本图书', 'empty shelf count');
+  check(!win.runtimeErrors.length, 'runtime errors');
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS shelves';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

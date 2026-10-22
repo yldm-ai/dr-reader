@@ -80,6 +80,60 @@ Json Library::list() const
     }
     return books;
 }
+Json Library::shelves() const
+{
+    const auto path = root_ / "shelves.json";
+    return fs::exists(path) ? Json::parse(read_file(path)) : Json::array();
+}
+Json Library::save_shelves(const Json &shelves)
+{
+    if (!shelves.is_array()) throw std::runtime_error("书架格式无效");
+    Json clean = Json::array();
+    for (const auto &shelf : shelves)
+    {
+        const auto id = shelf.at("id").get<std::string>();
+        const auto name = shelf.at("name").get<std::string>();
+        if (id.empty() || id.size() > 128 || name.empty() || name.size() > 320 ||
+            name.find_first_not_of(" \t\r\n") == std::string::npos || !shelf.at("bookIds").is_array())
+            throw std::runtime_error("书架格式无效");
+        for (const auto &other : clean)
+            if (other.at("id") == id || other.at("name") == name)
+                throw std::runtime_error("书架名称或 ID 重复");
+        Json ids = Json::array();
+        for (const auto &value : shelf.at("bookIds"))
+        {
+            const auto book = value.get<std::string>();
+            if (fs::exists(book_path(book) / "book.json") && std::find(ids.begin(), ids.end(), value) == ids.end())
+                ids.push_back(book);
+        }
+        Json cover = nullptr;
+        if (shelf.contains("cover") && !shelf.at("cover").is_null())
+        {
+            const auto &source = shelf.at("cover");
+            if (source.contains("image"))
+            {
+                const auto image = source.at("image").get<std::string>();
+                const std::string prefix = "data:image/webp;base64,";
+                if (!image.starts_with(prefix) || image.size() > 2 * 1024 * 1024 ||
+                    image.size() <= prefix.size() ||
+                    image.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=", prefix.size()) != std::string::npos)
+                    throw std::runtime_error("封面图片格式无效或过大");
+                cover = {{"image", image}};
+            }
+            else if (source.contains("bookId"))
+            {
+                const auto book = source.at("bookId").get<std::string>();
+                if (std::find(ids.begin(), ids.end(), book) != ids.end())
+                    cover = {{"bookId", book}};
+            }
+        }
+        Json item = {{"id", id}, {"name", name}, {"bookIds", ids}};
+        if (!cover.is_null()) item["cover"] = cover;
+        clean.push_back(item);
+    }
+    write_atomic(root_ / "shelves.json", clean.dump(2));
+    return clean;
+}
 Json Library::import_book(const fs::path &file)
 {
     auto id = content_id(file);
@@ -126,11 +180,12 @@ Json Library::save_position(const std::string &id, const Json &position)
     auto book = get(id);
     auto chapter = position.value("chapter", 0);
     double ratio = position.value("ratio", 0.0);
-    if (chapter < 0 || static_cast<size_t>(chapter) >= book["chapters"].size() || !std::isfinite(ratio))
+    if (chapter < 0 || static_cast<size_t>(chapter) > book["chapters"].size() || !std::isfinite(ratio))
         throw std::runtime_error("无效阅读位置");
     ratio = std::clamp(ratio, 0.0, 1.0);
     book["position"] = {{"chapter", chapter}, {"ratio", ratio}};
-    book["progress"] = (chapter + ratio) / static_cast<double>(book["chapters"].size());
+    book["progress"] = static_cast<size_t>(chapter) == book["chapters"].size() ? 1.0
+        : std::min(0.999, (chapter + ratio) / static_cast<double>(book["chapters"].size()));
     book["lastRead"] = now();
     store(id, book);
     return book;

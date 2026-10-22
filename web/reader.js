@@ -99,7 +99,7 @@ export class Reader {
         (Number($("reading-progress").value) / 1000) *
         this.book.chapters.length;
       const chapter = Math.min(
-        this.book.chapters.length - 1,
+        this.book.chapters.length,
         Math.floor(value),
       );
       this.load(chapter, Math.min(1, value - chapter));
@@ -288,7 +288,7 @@ export class Reader {
 
   activeToc() {
     if (!this.book) return;
-    const href = this.book.chapters[this.chapter].href;
+    const href = this.book.chapters[this.chapter]?.href;
     let active = null;
     for (const button of $("toc-content").querySelectorAll(".toc-entry")) {
       button.classList.toggle(
@@ -360,6 +360,7 @@ export class Reader {
 
   updateMark() {
     if (!this.book) return;
+    $("add-bookmark").disabled = this.atEnd();
     const exists = this.book.bookmarks.some(
       (mark) =>
         mark.chapter === this.chapter &&
@@ -369,7 +370,7 @@ export class Reader {
   }
 
   async bookmark() {
-    if (!this.book) return;
+    if (!this.book || this.atEnd()) return;
     try {
       this.book = await call("bookmark", {
         id: this.book.id,
@@ -444,7 +445,7 @@ export class Reader {
     const generation = ++this.generation;
     this.chapter = Math.max(
       0,
-      Math.min(chapter, this.book.chapters.length - 1),
+      Math.min(chapter, this.book.chapters.length),
     );
     this.ratio = ratio;
     this.anchor = anchor;
@@ -452,14 +453,14 @@ export class Reader {
     this.annotationFocus = annotationId;
     this.loading = true;
     this.loadError = "";
-    const item = this.book.chapters[this.chapter];
+    const item = this.book.chapters[this.chapter] || { title: "完", href: "__dr_end__" };
     const retainPage = Boolean(this.doc?.body);
     $("chapter-label").textContent = item.title;
     $("reader-loading").hidden = retainPage;
     this.activeToc();
     try {
       const url = bookUrl(this.book, item.href);
-      let html = this.chapterCache.get(url);
+      let html = this.atEnd() ? '<!doctype html><html><head><title>完</title></head><body><span id="dr-end">完</span></body></html>' : this.chapterCache.get(url);
       if (html === undefined) {
         const response = await fetch(url);
         if (!response.ok) throw new Error("无法加载章节文件");
@@ -628,7 +629,7 @@ export class Reader {
     const current = (this.annotations || []).filter(
       (annotation) =>
         annotation.chapter === chapter &&
-        annotation.href === this.book.chapters[chapter].href,
+        annotation.href === this.book.chapters[chapter]?.href,
     );
     const index = current.length ? textIndex(this.doc) : null;
     this.annotationTheme = this.settings?.theme;
@@ -706,8 +707,11 @@ export class Reader {
       ? `padding:0!important;${columns}margin:${edges.top}px ${edges.right}px ${edges.bottom}px ${edges.left}px!important;width:calc(var(--dr-page-width,100vw) - ${horizontal}px)!important;height:calc(100vh - ${vertical}px)!important;column-gap:${horizontal}px!important;column-fill:auto!important;overflow:visible!important;`
       : `margin:0!important;padding:${edges.top}px ${edges.right}px ${edges.bottom}px ${edges.left}px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
     this.style.textContent = `html{background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? `calc(100vh - ${vertical}px)` : "100vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:1px}`;
+    if (this.atEnd()) this.style.textContent += `html{height:100%!important;overflow:hidden!important}body{display:flex!important;align-items:center!important;justify-content:center!important;margin:0!important;padding:0!important;width:100vw!important;height:100vh!important;columns:auto!important;user-select:none!important}#dr-end{font-family:"Microsoft YaHei","微软雅黑",sans-serif!important;font-size:clamp(64px,12vmin,120px)!important;font-weight:400!important;line-height:1!important;letter-spacing:0!important}`;
     this.reflow();
   }
+
+  atEnd() { return Boolean(this.book && this.chapter === this.book.chapters.length); }
 
   syncChrome() {
     const root = $("reader-view");
@@ -720,6 +724,8 @@ export class Reader {
     for (const [key, setting] of [["toolbar", "showToolbar"], ["chapterTitle", "showChapterTitle"],
       ["pagination", "showPagination"], ["progress", "showProgress"]])
       root.dataset[key] = String(r[setting] !== false);
+    root.dataset.bookPages = String(r.showBookPages !== false && r.mode === "paged");
+    this.reportBookPages();
     root.dataset.fullBackground = String(Boolean(r.fullBackground));
     root.dataset.fullWidth = String(Boolean(r.fullWidth));
     root.style.setProperty("--reading-paper", readingPalette(r.theme).paper);
@@ -898,9 +904,9 @@ export class Reader {
     if (!stats || !this.doc) return;
     const view = this.doc.defaultView;
     const layout = `${view.innerWidth}x${view.innerHeight}|${JSON.stringify(this.settings)}`;
-    if (stats.layout !== layout) { stats.layout = layout; stats.exact.clear(); }
+    if (stats.layout !== layout) { stats.layout = layout; stats.exact.clear(); stats.exact.set(this.book.chapters.length, 1); }
     // A spread is two book pages; the whole-book count stays in printed pages.
-    stats.exact.set(this.chapter, this.pages * (this.isDouble() ? 2 : 1));
+    stats.exact.set(this.chapter, this.atEnd() ? 1 : this.pages * (this.isDouble() ? 2 : 1));
     stats.chars[this.chapter] ??= chapterTextLength(this.doc.body.innerHTML);
   }
 
@@ -916,26 +922,28 @@ export class Reader {
 
   /** Chapter text lengths come from the engine's search text, without loading the chapters. */
   async loadBookStats(book) {
-    const stats = { book, chars: [], exact: new Map(), layout: "" };
+    const stats = { bookId: book.id, chars: Array(book.chapters.length).fill(undefined).concat(0), exact: new Map([[book.chapters.length, 1]]), layout: "" };
     this.bookStats = stats;
     try {
       const { chars } = await call("book.stats", { id: book.id });
       if (this.bookStats !== stats || !Array.isArray(chars)) return;
       chars.forEach((length, index) => { stats.chars[index] ??= length; });
       this.reportBookPages();
-    } catch { /* Without lengths the whole-book position simply stays hidden. */ }
+    } catch {
+      if (this.bookStats === stats) { stats.failed = true; this.reportBookPages(); }
+    }
   }
 
   reportBookPages() {
     const element = $("book-pages");
     if (!element) return;
     const stats = this.bookStats;
-    const show = this.settings?.showBookPages !== false && this.settings?.mode === "paged" && stats?.book === this.book;
+    const show = this.settings?.showBookPages !== false && this.settings?.mode === "paged" && Boolean(stats && this.book && stats.bookId === this.book.id);
     const double = this.isDouble();
     const value = show ? bookPages({ chars: stats.chars, exact: stats.exact, chapter: this.chapter,
       page: this.page * (double ? 2 : 1), fallbackPerPage: this.fallbackPerPage() / (double ? 2 : 1) }) : null;
-    element.hidden = !value;
-    if (!value) return;
+    element.hidden = !show;
+    if (!value) { element.textContent = stats?.failed ? "全书页码暂不可用" : "全书页码统计中…"; return; }
     element.textContent = `全书 ${value.current} / ${value.estimated ? "约 " : ""}${value.total} 页`;
     element.dataset.tooltip = value.estimated ? "未读章节按当前排版估算，读过的章节会更准确" : "按当前排版统计";
   }
@@ -1024,19 +1032,20 @@ export class Reader {
         view.scrollY /
           Math.max(1, doc.documentElement.scrollHeight - view.innerHeight),
       );
-    const progress =
-      (this.chapter + this.ratio) / this.book.chapters.length;
+    if (this.atEnd()) this.ratio = 1;
+    const progress = this.atEnd() ? 1 : Math.min(.999,
+      (this.chapter + this.ratio) / this.book.chapters.length);
     $("page-indicator").textContent =
       this.settings.mode === "paged"
         ? `${this.page + 1} / ${this.pages}`
         : `本节 ${Math.round(this.ratio * 100)}%`;
     $("reader-location").textContent =
-      `第 ${this.chapter + 1} / ${this.book.chapters.length} 节`;
-    $("reader-percent").textContent = `${Math.round(progress * 100)}%`;
+      this.atEnd() ? "全书完" : `第 ${this.chapter + 1} / ${this.book.chapters.length} 节`;
+    $("reader-percent").textContent = `${this.atEnd() ? 100 : Math.min(99, Math.round(progress * 100))}%`;
     $("reading-progress").value = Math.round(progress * 1000);
     $("prev-page").disabled = this.chapter === 0 && this.ratio <= 0;
     $("next-page").disabled =
-      this.chapter === this.book.chapters.length - 1 && this.ratio >= 0.999;
+      this.atEnd();
     this.updateMark();
     this.reportBookPages();
     clearTimeout(this.saveTimer);
@@ -1140,7 +1149,7 @@ export class Reader {
       }
     }
     const next = this.chapter + direction;
-    if (next >= 0 && next < this.book.chapters.length)
+    if (next >= 0 && next <= this.book.chapters.length)
       await this.load(next, direction > 0 ? 0 : 1, "", "", "", direction, corner);
   }
 
@@ -1485,7 +1494,7 @@ export class Reader {
     const annotation = {
       id: values.id || "",
       chapter: this.chapter,
-      href: this.book.chapters[this.chapter].href,
+      href: this.book.chapters[this.chapter]?.href,
       start: values.start,
       end: values.end,
       quote: values.quote,

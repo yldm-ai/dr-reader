@@ -16,7 +16,8 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
+  for (const name of ['reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
+    if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -29,6 +30,21 @@ try {
       await writeFile(resolve(directory, `${name}.html`), await page.content());
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));
       if (!passed || errors.length) throw Error(`${name}: ${await page.locator('#result').textContent()}\n${errors.join('\n')}`);
+      if (name === 'reader_completion') await page.locator('iframe').screenshot({ path: resolve(directory, 'reader-completion.png') });
+      if (name === 'shelves') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        await app.locator('#shelf-add').click();
+        await app.locator('#shelf-name').fill('本地封面');
+        await app.locator('#shelf-cover-file').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: Buffer.from(await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 240; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#668078'; ctx.fillRect(0, 0, 160, 240); return canvas.toDataURL('image/png').split(',')[1]; }), 'base64') });
+        await app.waitForFunction(() => document.querySelector('#shelf-cover-preview img')?.src.startsWith('data:image/webp'), null, { timeout: 10000 });
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'shelf-editor.png') });
+        const cancelWidth = await app.locator('#shelf-cancel').evaluate(el => el.getBoundingClientRect().width);
+        if (cancelWidth > 100) throw Error('shelf cancel must be compact');
+        await app.locator('#shelf-save').click();
+        await app.waitForFunction(() => window.nativeProbe.data.shelves.length === 2);
+        if (!await app.evaluate(() => window.nativeProbe.data.shelves[1].cover.image.startsWith('data:image/webp;base64,'))) throw Error('uploaded cover must persist');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'shelf-cards.png') });
+      }
       if (name === 'production_smoke') {
         const app = page.frames().find(frame => frame.parentFrame());
         await app.locator('#setting-fontFamily-trigger').click();
@@ -307,8 +323,6 @@ try {
           throw Error('focused library search must not draw a square outline inside its rounded field');
         await capture('library-search-focus.png');
         await app.locator('#library-search').blur();
-        const coverHeight = await app.locator('.continue-cover').evaluate(el => el.getBoundingClientRect().height);
-        if (coverHeight > 80) throw Error('continue reading cover expanded beyond its compact card');
         // Exercise immersive mode through the shipped controls, then recover without a toolbar.
         await app.locator('.book-card').first().click();
         await app.locator('#reader-loading').waitFor({ state: 'hidden' });
@@ -332,9 +346,9 @@ try {
           const toc = document.getElementById('toggle-toc'), title = document.getElementById('reader-book-title');
           return toc.closest('.toolbar-start') && toc.getBoundingClientRect().right <= title.getBoundingClientRect().left &&
             toc.querySelector('.material-icon') && /^《.+》$/.test(title.textContent) &&
-            !document.querySelector(':is(.sidebar, #library-view, #book-context-menu) .material-icon') &&
+            !document.querySelector('.sidebar .material-icon, #library-view [data-icon] .material-icon:not(#shelves-back .material-icon), #book-context-menu .material-icon') &&
             document.querySelectorAll(':is(.sidebar, #library-view) .fluent-icon').length > 8;
-        })) throw Error('sidebar toggle must sit before the 《title》 and the library home must keep Fluent icons');
+        })) throw Error('sidebar toggle must sit before the 《title》 and library navigation must keep Fluent icons');
         // Hover tips are self-drawn: no native title survives, and hovering shows the custom tip.
         if (await app.locator('[title]:not(iframe)').count()) throw Error('native title tooltips must be replaced by self-drawn tips');
         await app.locator('#reader-search').hover();
@@ -555,7 +569,7 @@ try {
         await app.locator('#book-title-tooltip').waitFor({ state: 'visible' });
         if (await app.locator('#book-title-tooltip').textContent() !== fullTitle) throw Error('tooltip must show the full book title');
         await capture('library-title-tooltip.png');
-        await app.locator('.library-footer').hover();
+        await app.locator('.library-header').hover();
         await app.locator('#book-title-tooltip').waitFor({ state: 'hidden' });
         await app.locator('.book-card h3').evaluate((el, title) => { el.textContent = title; }, originalTitle);
         if (await app.locator('.book-remove').count()) throw Error('delete must only appear in the context menu');
@@ -586,7 +600,7 @@ try {
         await app.locator('.book-card').waitFor({ state: 'detached' });
         if (!await app.evaluate(() => window.nativeProbe.data.books.length === 0 &&
           document.getElementById('count-all').textContent === '0' &&
-          !document.getElementById('empty-state').hidden && document.getElementById('continue-section').hidden))
+          !document.getElementById('empty-state').hidden))
           throw Error('delete must persist and refresh counts, empty state and continue reading');
         console.log('PASS centered covers, title ellipsis and tooltip, context menu, deletion confirmation, cancellation and empty library');
       }

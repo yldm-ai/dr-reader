@@ -9,6 +9,8 @@ class Library
   public:
     explicit Library(fs::path root);
     Json list() const;
+    Json shelves() const;
+    Json save_shelves(const Json &shelves);
     Json import_book(const fs::path &archive);
     void remove_book(const std::string &id);
     Json get(const std::string &id) const;

@@ -22,7 +22,7 @@ export class SettingsPanel {
  const groups=[['appearance','palette','外观'],['selection','highlighter','选词与查词'],['about','info','关于']];
  const group=(id,title,rows)=>`<section id="app-section-${id}" class="app-section" aria-labelledby="app-section-${id}-title"><h2 id="app-section-${id}-title">${title}</h2><div class="app-card">${rows}</div></section>`;
  const label=(text,hint='',id='')=>`<span class="app-row-label"${id?` id="${id}"`:''}>${text}${hint?`<small>${hint}</small>`:''}</span>`;
- const application=group('appearance','外观',`<div class="app-row app-row-stack">${label('界面主题','书库、工具栏和设置的配色；阅读页面在阅读设置中单独选择')}${themes('application')}</div>
+ const application=group('appearance','外观',`<div class="app-row app-row-stack">${label('界面主题','书库、工具栏和设置的配色；阅读页面在阅读设置中单独选择')}${themes('application',[['light','明亮'],['dark','黑暗'],['sepia','纸张']])}</div>
  <label class="app-row checkbox-row">${label('界面动画','同时遵循系统的减少动态效果偏好')}<input id="app-animations" type="checkbox"></label>
  <label class="app-row checkbox-row">${label('开书动画','打开书籍时播放动画，独立于界面动画')}<input id="app-book-opening-enabled" type="checkbox"></label>
  <div class="app-row">${label('开书动画样式','正文就绪后结束动画','app-book-opening-label')}<select id="app-book-opening" aria-labelledby="app-book-opening-label"><option value="circles">彩色圆环</option><option value="book">翻开书本</option><option value="cover">封面展开右移</option><option value="none">无</option></select></div>
@@ -62,7 +62,7 @@ export class SettingsPanel {
  document.querySelectorAll('[data-reading]').forEach(input=>{const update=()=>{if(!input.checkValidity())return;let value=input.type==='checkbox'?input.checked:['range','number'].includes(input.type)||input.dataset.reading==='fontWeight'?Number(input.value):input.value;if(input.dataset.reading==='fontFamily'&&!value.trim())return;this.update('reading',{[input.dataset.reading]:value});};const event=input.type==='range'||input.type==='number'?'input':'change';input.addEventListener(event,update);});
  document.querySelectorAll('select[data-reading]').forEach(input=>this.selectControls.set(input.dataset.reading,new SelectControl(input,input.dataset.reading==='fontFamily')));
  $('reading-fullscreen').onclick=()=>call('fullscreen').catch(error=>toast(error.message));
- $('immersive-reading').onclick=()=>this.update('reading',{showToolbar:false,showToc:false,showChapterTitle:false,showPagination:false,showProgress:false,fullBackground:true,fullWidth:true});
+ $('immersive-reading').onclick=()=>this.update('reading',{showToolbar:false,showToc:false,showChapterTitle:false,showPagination:false,showProgress:false,showBookPages:false,fullBackground:true,fullWidth:true});
  $('restore-reader-chrome').onclick=()=>this.update('reading',{showToolbar:true,showToc:true,showChapterTitle:true,showPagination:true,showProgress:true});
  $('dictionary-form').onsubmit=e=>{e.preventDefault();this.saveDictionary();};$('dictionary-cancel').onclick=()=>this.clearDictionary();$('reset-reading').onclick=()=>this.update('reading',structuredClone(this.defaults.reading));this.applyPreviewTheme();
  }

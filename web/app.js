@@ -6,6 +6,7 @@ import { createLibraryOverlays } from "./library-overlays.js";
 import { Tooltips } from "./tooltip.ts";
 import { BookOpening } from "./book-opening.ts";
 import { SelectControl } from "./select-control.ts";
+import { Shelves } from "./shelves.js";
 import { readingPalette } from "./reading-palette.ts";
 
 hydrate();
@@ -18,6 +19,7 @@ let filter = "all";
 let author = "";
 let listMode = false;
 let pendingRemoval = null;
+const shelves = new Shelves(() => books, render);
 const libraryOverlays = createLibraryOverlays(book => {
   pendingRemoval = book;
   $("delete-book-title").textContent = `删除《${book.title}》？`;
@@ -64,9 +66,17 @@ function cover(book, className = "cover-image") {
 
 function render() {
   libraryOverlays.dismiss();
-  const query = $("library-search").value.toLocaleLowerCase();
+  const browsingShelves = filter === "shelves";
+  $("library-search").placeholder = browsingShelves && !shelves.selected ? "搜索书架…" : "搜索书名、作者…";
+  $("library-search").setAttribute("aria-label", browsingShelves && !shelves.selected ? "搜索书架" : "搜索书库");
+  document.querySelector(".toolbar-right").hidden = browsingShelves && !shelves.selected;
+  $("shelf-grid").hidden = !browsingShelves || Boolean(shelves.selected);
+  $("shelf-actions").hidden = !browsingShelves || !shelves.selected;
+  $("book-grid").hidden = browsingShelves && !shelves.selected;
+  const query = $("library-search").value.trim().toLocaleLowerCase();
   const visible = books.filter(
     (book) =>
+      (!browsingShelves || !shelves.selected || shelves.selected.bookIds.includes(book.id)) &&
       (!author || book.author === author) &&
       (!query ||
         `${book.title} ${book.author}`
@@ -77,7 +87,7 @@ function render() {
         : filter === "unread"
           ? !book.lastRead
           : filter === "finished"
-            ? book.progress >= 0.99
+            ? book.progress >= 1
             : true),
   );
   const sort = $("sort").value;
@@ -95,13 +105,20 @@ function render() {
     recent: "最近阅读",
     unread: "尚未开始",
     finished: "已经读完",
+    shelves: "分类书架",
   };
-  $("library-heading").firstChild.textContent = author || titles[filter];
+  $("library-heading").firstChild.textContent = author || (browsingShelves && shelves.selected ? shelves.selected.name : titles[filter]);
   $("heading-count").textContent = visible.length;
   $("count-all").textContent = books.length;
   $("count-recent").textContent = books.filter((book) => book.lastRead).length;
-  $("library-total").textContent = `${books.length} 本图书`;
+  $("count-finished").textContent = books.filter((book) => book.progress >= 1).length;
+  $("count-unread").textContent = books.filter((book) => !book.lastRead).length;
 
+  if (browsingShelves && !shelves.selected) {
+    shelves.render(query);
+    $("empty-state").hidden = true;
+    return;
+  }
   const grid = $("book-grid");
   const cards = document.createDocumentFragment();
   grid.classList.toggle("list-mode", listMode);
@@ -111,13 +128,25 @@ function render() {
     const card = document.createElement("button");
     card.className = "book-card";
     card.setAttribute("aria-label", `阅读 ${book.title}`);
-    card.innerHTML = `<div class="cover-wrap">${cover(book)}</div><h3>${escape(book.title)}</h3><div class="book-author">${escape(book.author)}</div><div class="book-status">${book.lastRead ? `<span class="progress-track"><i style="width:${Math.round(book.progress * 100)}%"></i></span><span>已读 ${Math.round(book.progress * 100)}%</span>` : '<span class="new-label">未读</span><span>EPUB</span>'}</div>`;
+    card.innerHTML = `<div class="cover-wrap">${cover(book)}</div><h3>${escape(book.title)}</h3><div class="book-author">${escape(book.author)}</div><div class="book-status">${book.lastRead ? `<span class="progress-track"><i style="width:${(book.progress >= 1 ? 100 : Math.min(99, Math.round(book.progress * 100)))}%"></i></span><span>已读 ${(book.progress >= 1 ? 100 : Math.min(99, Math.round(book.progress * 100)))}%</span>` : '<span class="new-label">未读</span><span>EPUB</span>'}</div>`;
     card.onclick = () => openBook(book.id, card.querySelector(".cover-image"));
     libraryOverlays.bind(card, book);
     item.append(card);
     cards.append(item);
   }
+  if (filter === "all" && !author) {
+    const item = document.createElement("div");
+    item.className = "book-item";
+    const add = document.createElement("button");
+    add.id = "book-add";
+    add.className = "shelf-card shelf-add book-add";
+    add.innerHTML = '<div class="cover-wrap"><span data-icon="plus"></span></div><strong>添加新书</strong><small>选择 EPUB 文件</small>';
+    add.onclick = importBooks;
+    item.append(add);
+    cards.append(item);
+  }
   grid.replaceChildren(cards);
+  if ($("book-add")) hydrate($("book-add"));
 
   $("empty-state").hidden = visible.length > 0;
   if (!visible.length) {
@@ -249,6 +278,8 @@ for (const id of ["import-side", "import-empty"])
 $("library-nav").onclick = (event) => {
   const target = event.target.closest("[data-filter]");
   if (!target) return;
+  shelves.selected = null;
+  $("library-search").value = "";
   filter = target.dataset.filter;
   author = "";
   setNavigation();
@@ -258,6 +289,10 @@ $("authors-toggle").onclick = () => {
   $("authors").hidden = !$("authors").hidden;
 };
 let searchTimer;
+$("library-search").oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(render, 120);
+};
 $("library-search").onkeydown = (event) => {
   if (event.key !== "Enter") return;
   event.preventDefault();
@@ -330,6 +365,7 @@ busy(true, "正在打开本地书库…");
 try {
   const data = await call("bootstrap");
   books = data.books;
+  shelves.items = data.shelves || [];
   settingsPanel.configure(data);
   render();
   if (data.importErrors?.length) toast(data.importErrors.join("\n"));

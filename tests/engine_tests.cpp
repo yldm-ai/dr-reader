@@ -111,9 +111,27 @@ int main()
         auto html = dr::read_file(root / "library" / "books" / id / "content" / "OPS" / "text.dr-0.xhtml");
         require(html.find("text.dr-1.xhtml#end") != std::string::npos, "cross-flow link remap");
         require(library.import_book(epub)["id"] == id && library.list().size() == 1, "duplicate import");
+        require(library.shelves().empty(), "new library has no shelves");
+        const auto shelves = dr::Json::array({{{"id", "test-shelf"}, {"name", "文学"}, {"bookIds", dr::Json::array({id})}}});
+        require(library.save_shelves(shelves) == shelves, "save shelf membership");
+        rejects([&] { library.save_shelves(dr::Json::array({shelves[0], shelves[0]})); }, "reject duplicate shelves");
+        require(library.shelves() == shelves, "invalid save preserves shelves");
+        auto covered_shelves = shelves;
+        covered_shelves[0]["cover"] = {{"bookId", id}};
+        require(library.save_shelves(covered_shelves) == covered_shelves, "book cover persists");
+        covered_shelves[0]["cover"] = {{"image", "data:image/webp;base64,UklGRg=="}};
+        require(library.save_shelves(covered_shelves) == covered_shelves, "uploaded cover persists");
+        covered_shelves[0]["cover"] = {{"image", "file:///private.png"}};
+        rejects([&] { library.save_shelves(covered_shelves); }, "reject invalid cover source");
+        library.save_shelves(shelves);
+        require(library.save_position(id, {{"chapter", 1}, {"ratio", 1}})["progress"] < 1, "content end precedes completion page");
+        require(library.save_position(id, {{"chapter", 2}, {"ratio", 1}})["progress"] == 1, "completion page reaches 100 percent");
+        require(dr::Library(root / "library").get(id)["position"]["chapter"] == 2, "completion survives restart");
+        rejects([&] { library.save_position(id, {{"chapter", 3}, {"ratio", 0}}); }, "reject position beyond completion");
         library.save_position(id, {{"chapter", 1}, {"ratio", 0.4}});
         {
             dr::Library reopened(root / "library");
+            require(reopened.shelves() == shelves, "shelves survive restart");
             require(reopened.get(id)["position"]["chapter"] == 1, "progress survives restart");
             require(reopened.search(id, "结尾").size() == 1, "C++ search");
             // Chapters are parsed as HTML: <title/> would swallow the document as title text.

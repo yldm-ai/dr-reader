@@ -163,6 +163,7 @@ void Application::receive(const Json &request)
                     }
                     result = {{"books", library_.list()},
                               {"settings", library_.settings()},
+                              {"shelves", library_.shelves()},
                               {"dataPath", utf8(library_.root())},
                               {"fonts",installed_fonts()},
                               {"defaults",default_settings()},
@@ -172,6 +173,8 @@ void Application::receive(const Json &request)
                 }
                 else if (method == "list")
                     result = library_.list();
+                else if (method == "shelves.save")
+                    result = library_.save_shelves(params.at("shelves"));
                 else if (method == "book.delete")
                 {
                     library_.remove_book(params.at("id"));

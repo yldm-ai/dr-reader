@@ -39,11 +39,14 @@
               >0</span
             >
           </button>
+          <button class="nav-item" data-filter="shelves">
+            <span data-icon="library"></span>分类书架
+          </button>
           <button class="nav-item" data-filter="unread">
-            <span data-icon="unread"></span>尚未开始
+            <span data-icon="unread"></span>尚未开始<span class="count" id="count-unread">0</span>
           </button>
           <button class="nav-item" data-filter="finished">
-            <span data-icon="check"></span>已经读完
+            <span data-icon="check"></span>已经读完<span class="count" id="count-finished">0</span>
           </button>
         </nav>
         <div class="nav-label separated">浏览分类</div>
@@ -55,11 +58,6 @@
         </button>
         <div id="authors" class="author-list" hidden></div>
         <div class="sidebar-bottom">
-          <div class="local-note">
-            <span class="status-dot"></span>本地书库<small
-              >你的书，留在你的电脑里</small
-            >
-          </div>
           <button id="open-settings" class="nav-item">
             <span data-icon="settings"></span>设置与外观
           </button>
@@ -112,6 +110,11 @@
             </div>
           </div>
         </div>
+        <div id="shelf-actions" class="shelf-actions" hidden>
+          <button id="shelves-back" class="text-button" data-icon-set="material"><span data-icon="arrow-left"></span>全部书架</button>
+          <button id="shelf-edit" class="text-button">编辑书架与图书</button>
+        </div>
+        <div id="shelf-grid" class="shelf-grid" hidden></div>
         <div id="book-grid" class="book-grid"></div>
         <div id="empty-state" class="empty-state" hidden>
           <span data-icon="book"></span>
@@ -119,11 +122,6 @@
           <p>添加一本 EPUB，建立属于自己的书架。</p>
           <button id="import-empty" class="primary">选择 EPUB 文件</button>
         </div>
-        <footer class="library-footer">
-          <span id="library-total">0 本图书</span
-          ><span>一本书，一段不被打扰的时光。</span><span>EPUB · 本地阅读</span>
-        </footer>
-
       </main>
       <main id="reader-view" class="reader-view" hidden>
         <header id="reader-toolbar" class="reader-toolbar">
@@ -323,6 +321,28 @@
       </form>
     </dialog>
 
+    <dialog id="shelf-dialog" class="annotation-dialog" aria-labelledby="shelf-dialog-title">
+      <form id="shelf-form">
+        <div class="annotation-header"><h2 id="shelf-dialog-title">添加书架</h2></div>
+        <label class="shelf-name-label">书架名称<input id="shelf-name" required maxlength="80" placeholder="例如：文学、历史、想读的书" /></label>
+        <div class="shelf-cover-editor">
+          <div id="shelf-cover-preview" aria-label="书架封面预览"></div>
+          <div class="shelf-cover-controls">
+            <label for="shelf-cover-source">书架封面</label>
+            <select id="shelf-cover-source" aria-label="选择书架封面"></select>
+            <button id="shelf-cover-upload" class="text-button" type="button"><span data-icon="plus"></span>上传本地图片</button>
+            <input id="shelf-cover-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden />
+          </div>
+        </div>
+        <p>选择放入书架的图书（可多选）</p>
+        <div id="shelf-books" class="shelf-books"></div>
+        <p id="shelf-error" role="alert"></p>
+        <div class="annotation-actions">
+          <span></span><button id="shelf-cancel" type="button" class="text-button">取消</button>
+          <button id="shelf-save" type="submit" class="primary">保存书架</button>
+        </div>
+      </form>
+    </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
     <div id="busy" class="busy" hidden>
       <span class="spinner"></span><span id="busy-label">正在处理电子书…</span>

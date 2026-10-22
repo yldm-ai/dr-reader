@@ -26,6 +26,7 @@ export function installNativeMock(data = bootstrapFixture()) {
     postMessage({ id, method, params }) {
       requests.push({ method, params });
       let result = true;
+      if (method === 'shelves.save') { data.shelves = structuredClone(params.shelves); result = structuredClone(data.shelves); }
       if (method === 'bootstrap') result = structuredClone(data);
       data.annotations ||= [];
       if (method === 'annotations') result = structuredClone(data.annotations);
@@ -40,6 +41,8 @@ export function installNativeMock(data = bootstrapFixture()) {
       if (method === 'position') {
         data.books[0].position = params.position;
         data.books[0].lastRead = 1;
+        data.books[0].progress = params.position.chapter === data.books[0].chapters.length ? 1 :
+          Math.min(.999, (params.position.chapter + params.position.ratio) / data.books[0].chapters.length);
         result = structuredClone(data.books[0]);
       }
       if (method === 'fullscreen') {

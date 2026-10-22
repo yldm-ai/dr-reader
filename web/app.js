@@ -1,5 +1,5 @@
 import { call, bookUrl, $, escape, toast, busy } from "./bridge.js";
-import { icon, hydrate } from "./icons.ts";
+import { hydrate } from "./icons.ts";
 import { Reader } from "./reader.js";
 import { SettingsPanel } from "./settings.js";
 import { createLibraryOverlays } from "./library-overlays.js";
@@ -7,6 +7,7 @@ import { Tooltips } from "./tooltip.ts";
 import { BookOpening } from "./book-opening.ts";
 
 hydrate();
+new SelectControl($("sort"));
 const tooltips = new Tooltips();
 
 let books = [];
@@ -127,16 +128,6 @@ function render() {
       : "添加一本 EPUB，建立属于自己的书架。";
   }
 
-  const latest = books
-    .filter((book) => book.lastRead && book.progress < 0.99)
-    .sort((a, b) => b.lastRead - a.lastRead)[0];
-  $("continue-section").hidden =
-    !latest || filter !== "all" || !!query || !!author;
-  if (latest) {
-    $("continue-book").innerHTML = `${cover(latest, "continue-cover")}<div class="continue-info"><strong>${escape(latest.title)}</strong><small>${escape(latest.author)} · ${escape(latest.chapters[latest.position?.chapter || 0]?.title || "")}</small><div class="continue-progress"><span class="progress-track"><i style="width:${Math.round(latest.progress * 100)}%"></i></span><span>${Math.round(latest.progress * 100)}%</span></div></div><span class="continue-action">继续阅读 ${icon("arrow-right", "fluent")}</span>`;
-    $("continue-book").onclick = () => openBook(latest.id);
-  }
-
   const authors = $("authors");
   const authorCounts = new Map();
   for (const book of books) authorCounts.set(book.author, (authorCounts.get(book.author) || 0) + 1);
@@ -240,7 +231,7 @@ async function returnLibrary() {
   render();
 }
 
-for (const id of ["import-side", "import-main", "import-empty"])
+for (const id of ["import-side", "import-empty"])
   $(id).onclick = importBooks;
 $("library-nav").onclick = (event) => {
   const target = event.target.closest("[data-filter]");
@@ -254,9 +245,11 @@ $("authors-toggle").onclick = () => {
   $("authors").hidden = !$("authors").hidden;
 };
 let searchTimer;
-$("library-search").oninput = () => {
+$("library-search").onkeydown = (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(render, 80);
+  render();
 };
 $("sort").onchange = render;
 $("grid-view").onclick = () => {

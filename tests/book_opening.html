@@ -1,0 +1,44 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../web/styles.css">
+<pre id="result">RUNNING</pre>
+<div id="busy" class="busy"><span class="spinner"></span><span>正在打开电子书…</span></div>
+<script type="module">
+import { BookOpening } from '../web/book-opening.ts';
+window.BookOpening = BookOpening;
+const host = document.getElementById('busy');
+const check = (value, message) => { if (!value) throw Error(message); };
+try {
+  const opening = new BookOpening(host, true);
+  const canvas = host.querySelector('canvas');
+  check(canvas && getComputedStyle(host.querySelector('.spinner')).display === 'none', 'circles must replace the opening spinner');
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const rect = canvas.getBoundingClientRect();
+  check(rect.width <= innerWidth && rect.height <= innerHeight && rect.width === rect.height,
+    'opening must fit the window and keep its circles round');
+  check(Math.abs(canvas.width - rect.width * devicePixelRatio) <= 1, 'canvas must follow display pixel density');
+  const ctx = canvas.getContext('2d');
+  const pixel = ctx.getImageData(canvas.width / 2, canvas.height / 2, 1, 1).data;
+  check(Math.abs(pixel[0] - 143) < 5 && Math.abs(pixel[1] - 117) < 5 && Math.abs(pixel[2] - 223) < 5,
+    'overlapping fills must retain the reference purple inner circle');
+  check(ctx.getImageData(0, 0, 1, 1).data[3] === 0, 'scene corners must remain transparent');
+  await window.captureOpening?.('book-opening-expand');
+  await new Promise(resolve => setTimeout(resolve, 900));
+  const finished = opening.finish();
+  await new Promise(resolve => setTimeout(resolve, 180));
+  await window.captureOpening?.('book-opening-collapse');
+  await finished;
+  check(!host.querySelector('canvas') && !host.classList.contains('book-opening-active'), 'finishing must release canvas and animation state');
+  const cancelled = new BookOpening(host, true);
+  const cancelledDone = cancelled.finish();
+  cancelled.cancel(); await cancelledDone;
+  check(!host.querySelector('canvas'), 'cancelling during loading must release the animation');
+  await new BookOpening(host, false).finish();
+  check(!host.querySelector('canvas'), 'disabled animations must not create a canvas or delay opening');
+  document.getElementById('result').textContent = 'PASS';
+  document.documentElement.dataset.result = 'pass';
+} catch (error) {
+  document.getElementById('result').textContent = 'FAIL\n' + error.stack;
+  document.documentElement.dataset.result = 'fail';
+}
+</script>

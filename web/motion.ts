@@ -15,7 +15,6 @@ type Transition = {
 export class ReaderMotion {
   private allowed = true;
   private active: Transition | null = null;
-  private opening: Animation | null = null;
   private readonly strip = new PageStrip();
   private stripKey = '';
   private revision = 0;
@@ -55,18 +54,11 @@ export class ReaderMotion {
   }
   cancel() {
     this.revision++;
-    this.opening?.cancel(); this.opening = null;
     this.strip.reset();
     if (this.active) {
       this.active.controller.abort();
       this.cleanup(this.active);
     }
-  }
-  open(element: HTMLElement) {
-    if (!this.enabled('open')) return;
-    this.cancel();
-    this.opening = element.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }],
-      { duration: 240, easing: 'cubic-bezier(.1,.9,.2,1)' });
   }
   private snapshot(source: HTMLIFrameElement, parent: HTMLElement, signal: AbortSignal): Promise<HTMLDivElement> {
     const doc = source.contentDocument;
@@ -305,7 +297,6 @@ export class ReaderMotion {
       await this.strip.readyForTurn(element, frame, key);
     if (revision !== this.revision || key !== this.stripKey) return;
     if (resident) {
-      this.opening?.cancel(); this.opening = null;
       if (this.active) { this.active.controller.abort(); this.cleanup(this.active); }
       await this.strip.turn(frame, effect, direction, duration, update);
       return;

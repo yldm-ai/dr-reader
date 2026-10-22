@@ -99,3 +99,7 @@ webview-profile/              WebView2 用户数据
 书籍脚本被移除并在 sandbox iframe 内禁用；原生消息只接受应用主页的请求。资源从本地虚拟主机提供，不启动 HTTP 服务器。细节见 [架构说明](docs/architecture.md)。
 
 第三方依赖见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 致谢
+
+感谢 [xianyukang/MyKeymap](https://github.com/xianyukang/MyKeymap)。本项目的开书动画参考了其 `examples/SoundControlAnimation/main.cpp` 中的五层彩色圆环效果，并使用 Canvas 2D 在应用内重现展开、旋转和缩小淡出动画。

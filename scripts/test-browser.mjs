@@ -16,11 +16,12 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'production_smoke']) {
+  for (const name of ['reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     if (name === 'reader_motion') await page.exposeFunction('captureMotion', label => page.locator('#page-surface').screenshot({ path: resolve(directory, `${label}.png`) }));
+    if (name === 'book_opening') await page.exposeFunction('captureOpening', label => page.screenshot({ path: resolve(directory, `${label}.png`) }));
     try {
       await page.goto(`http://127.0.0.1:${port}/tests/${name}.html`);
       await page.waitForSelector('html[data-result]', { timeout: 18000, state: 'attached' });
@@ -466,6 +467,13 @@ try {
         await page.reload();
         await page.waitForSelector('html[data-result]', { timeout: 18000, state: 'attached' });
         if (await page.locator('html').getAttribute('data-result') !== 'pass') throw Error(`narrow settings: ${await page.locator('#result').textContent()}`);
+      }
+      if (name === 'book_opening') {
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        if (!await page.evaluate(async () => {
+          await new window.BookOpening(document.getElementById('busy'), true).finish();
+          return !document.querySelector('.book-opening');
+        })) throw Error('reduced motion must skip the opening circles');
       }
       if (errors.length) throw Error(`${name}: ${errors.join('\n')}`);
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));

@@ -42,6 +42,22 @@ try {
   doc.querySelector('.book-card').click();
   await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
   check(win.chapterRequests === 1, 'reopening an immutable cached chapter must avoid another fetch');
+  doc.getElementById('reader-app-settings').click();
+  const animations = doc.getElementById('app-animations');
+  animations.checked = true; animations.dispatchEvent(new win.Event('change'));
+  await until(() => win.nativeProbe.data.settings.application.animations === true);
+  doc.getElementById('application-settings').close();
+  doc.getElementById('back-library').click();
+  await until(() => doc.getElementById('reader-view').hidden);
+  doc.querySelector('.book-card').click();
+  check(doc.querySelector('.book-opening'), 'opening a book with animations enabled must start the circles immediately');
+  await until(() => doc.getElementById('busy').hidden);
+  check(!doc.querySelector('.book-opening') && !doc.getElementById('reader-view').hidden,
+    'opening must collapse and release its overlay when the chapter is ready');
+  doc.getElementById('reader-app-settings').click();
+  animations.checked = false; animations.dispatchEvent(new win.Event('change'));
+  await until(() => win.nativeProbe.data.settings.application.animations === false);
+  doc.getElementById('application-settings').close();
   doc.getElementById('reader-settings').click();
   check(!win.runtimeErrors.length, `Runtime errors: ${win.runtimeErrors.join('; ')}`);
   output.textContent = 'PASS: production bundle bootstrap, Fluent icons, book open/reopen/cache, pagination, font selection and persistence';

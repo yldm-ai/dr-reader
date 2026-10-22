@@ -2024,6 +2024,13 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
+.busy.book-opening-active .spinner { display: none; }
+.book-opening {
+  width: min(600px, 80vw, 70vh);
+  height: min(600px, 80vw, 70vh);
+  flex: 0 0 auto;
+  filter: drop-shadow(0 4px 5px #0008);
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);

@@ -250,7 +250,6 @@ export class Reader {
       this.book = null;
       throw new Error(this.loadError || "章节没有完成载入");
     }
-    this.motion.open($("reader-view"));
     if (book.warnings?.length)
       toast(
         `这本书有 ${book.warnings.length} 条兼容性提示，可查看本地 book.json。`,

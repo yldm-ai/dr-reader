@@ -4,6 +4,7 @@ import { Reader } from "./reader.js";
 import { SettingsPanel } from "./settings.js";
 import { createLibraryOverlays } from "./library-overlays.js";
 import { Tooltips } from "./tooltip.ts";
+import { BookOpening } from "./book-opening.ts";
 
 hydrate();
 const tooltips = new Tooltips();
@@ -175,16 +176,21 @@ function setNavigation() {
 async function openBook(id) {
   libraryOverlays.dismiss();
   busy(true, "正在打开电子书…");
+  const opening = new BookOpening($("busy"), settings?.application.animations !== false);
   try {
     const book = await call("open", { id });
     $("library-view").hidden = true;
     document.querySelector(".sidebar").hidden = true;
     $("reader-view").hidden = false;
     await reader.open(book, settings);
+    await opening.finish();
   } catch (error) {
+    opening.cancel();
+    await returnLibrary();
     toast(`打开图书失败：${error.message}`);
     console.error(error);
   } finally {
+    opening.cancel();
     busy(false);
   }
 }

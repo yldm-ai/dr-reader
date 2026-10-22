@@ -28,6 +28,7 @@ export function installNativeMock(data = bootstrapFixture()) {
       let result = true;
       if (method === 'shelves.save') { data.shelves = structuredClone(params.shelves); result = structuredClone(data.shelves); }
       if (method === 'bootstrap') result = structuredClone(data);
+      if (method === 'import') result = { books: structuredClone(data.books), errors: data.importErrors || [] };
       data.annotations ||= [];
       if (method === 'annotations') result = structuredClone(data.annotations);
       if (method === 'annotation.save') {

@@ -9,7 +9,7 @@ interface ReadingPalette {
   dark: boolean;
 }
 // One palette for EPUB documents, theme swatches and the typography preview.
-const palettes: Record<ReadingTheme, ReadingPalette> = {
+const palettes: Record<Exclude<ReadingTheme, 'system'>, ReadingPalette> = {
   light: { paper: '#ffffff', text: '#37352f', link: '#2f6f9f', selection: '#2f6f9f33', dark: false },
   dark: { paper: '#191919', text: '#cfcfcd', link: '#86b4dc', selection: '#86b4dc55', dark: true },
   sepia: { paper: '#fffaf3', text: '#4a4036', link: '#845e43', selection: '#845e4333', dark: false },
@@ -19,8 +19,12 @@ const palettes: Record<ReadingTheme, ReadingPalette> = {
 };
 /** Reading themes in the order the drawer shows them. */
 export const readingThemes: [ReadingTheme, string][] = [
-  ['light', '明亮'], ['dark', '黑暗'], ['sepia', '纸张'], ['green', '豆绿'], ['gray', '雾灰'], ['night', '夜蓝'],
+  ['system', '跟随系统'], ['light', '明亮'], ['dark', '黑暗'], ['sepia', '纸张'], ['green', '豆绿'], ['gray', '雾灰'], ['night', '夜蓝'],
 ];
+export function resolveTheme(theme: string): Exclude<ReadingTheme, 'system'> {
+  if (theme === 'system') return globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return theme as Exclude<ReadingTheme, 'system'>;
+}
 export function readingPalette(theme: string): ReadingPalette {
-  return palettes[theme as ReadingTheme] ?? palettes.light;
+  return palettes[resolveTheme(theme)] ?? palettes.light;
 }

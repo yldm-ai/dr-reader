@@ -237,7 +237,8 @@
             </div>
           </section>
         </div>
-        <footer class="reader-footer">
+        <div id="footer-reveal-zone" class="footer-reveal-zone" aria-hidden="true" hidden></div>
+        <footer class="reader-footer" aria-label="底部阅读信息栏">
           <span id="reader-location"></span
           ><span id="book-pages" class="book-pages" hidden></span
           ><input
@@ -343,7 +344,7 @@
         </div>
       </form>
     </dialog>
-    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" popover="manual" hidden></div>
     <div id="busy" class="busy" hidden>
       <span class="spinner"></span><span id="busy-label">正在处理电子书…</span>
     </div>

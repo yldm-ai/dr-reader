@@ -221,8 +221,23 @@ int main()
             require(again.list("book").size() == 2, "migrated database reopens");
         }
         auto defaults = dr::default_settings();
-        require(defaults["application"]["shell"] == "mica" && defaults["reading"]["mode"] == "paged",
+        require(defaults["application"]["shell"] == "direct2d" && defaults["reading"]["mode"] == "paged",
                 "settings defaults");
+        require(defaults["application"]["theme"] == "system" && defaults["reading"]["theme"] == "system",
+                "both themes default to following the system");
+        require(defaults["reading"]["fontFamily"] == "Microsoft YaHei UI" && defaults["reading"]["fontSize"] == 18 &&
+                    defaults["reading"]["layout"] == "double" && defaults["reading"]["animation"] == "turn" &&
+                    defaults["reading"]["animationDuration"] == 500 && defaults["reading"]["turnDuration"] == 500 &&
+                    defaults["reading"]["publisherStyles"] == true && defaults["reading"]["showChapterTitle"] == false &&
+                    defaults["reading"]["showPagination"] == false,
+                "defaults capture current reading preferences");
+        require(defaults["reading"]["autoHideProgress"] == false &&
+                    dr::patch_settings(defaults, {{"reading", {{"autoHideProgress", true}}}})["reading"]["autoHideProgress"] == true,
+                "footer auto hide defaults off and can persist");
+        rejects([&] { dr::patch_settings(defaults, {{"reading", {{"autoHideProgress", "yes"}}}}); }, "footer auto hide requires boolean");
+        require(dr::normalize_settings(defaults) == defaults, "system themes survive settings normalization");
+        require(dr::patch_settings(defaults, {{"reading", {{"theme", "dark"}}}})["application"]["theme"] == "system",
+                "fixed reading theme keeps application system preference");
         require(!defaults["reading"]["tocPinned"].get<bool>(), "sidebar defaults to auto-hide");
         auto pinned_settings = library.save_settings({{"reading", {{"tocPinned", true}}}});
         require(pinned_settings["reading"]["tocPinned"].get<bool>() &&
@@ -264,10 +279,10 @@ int main()
             {{"version", 2}, {"reading", {{"fontSize", 26}, {"animation", "turn-bottom"}}}});
         require(legacy_corner["reading"]["animation"] == "turn" && legacy_corner["reading"]["fontSize"] == 26,
                 "saved bottom-corner turns migrate without discarding other settings");
-        require(legacy_corner["reading"]["turnDuration"] == 800 &&
+        require(legacy_corner["reading"]["turnDuration"] == 500 &&
                     dr::patch_settings(defaults, {{"reading", {{"turnDuration", 5000}}}})["reading"]["turnDuration"] == 2000 &&
                     dr::patch_settings(defaults, {{"reading", {{"turnDuration", 1234}}}})["reading"]["turnDuration"] == 1234,
-                "page turns default to 800 ms and keep a custom duration within 300-2000 ms");
+                "page turns default to 500 ms and keep a custom duration within 300-2000 ms");
         require(defaults["application"]["highlightColors"].size() == 5 &&
                     dr::patch_settings(defaults, {{"application", {{"highlightColors", {"#ABCDEF", "#fbf3db"}}}}})
                             ["application"]["highlightColors"][0] == "#abcdef" &&

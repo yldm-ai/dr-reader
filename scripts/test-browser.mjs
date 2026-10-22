@@ -16,7 +16,7 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
+  for (const name of ['footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
     if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors = [];
@@ -30,6 +30,212 @@ try {
       await writeFile(resolve(directory, `${name}.html`), await page.content());
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));
       if (!passed || errors.length) throw Error(`${name}: ${await page.locator('#result').textContent()}\n${errors.join('\n')}`);
+      if (name === 'footer_auto_hide') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        const footer = app.locator('.reader-footer');
+        const zone = app.locator('#footer-reveal-zone');
+        const hidden = () => app.waitForFunction(() => getComputedStyle(document.querySelector('.reader-footer')).opacity === '0');
+        const shown = () => app.waitForFunction(() => getComputedStyle(document.querySelector('.reader-footer')).opacity === '1');
+        await app.locator('#reader-search').hover();
+        await hidden();
+        const frameSize = await app.locator('#book-frame').boundingBox();
+        await zone.hover(); await shown();
+        if (Math.abs((await app.locator('#book-frame').boundingBox()).height - frameSize.height) > 1) throw Error('revealing footer must not repaginate book');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'footer-auto-revealed.png') });
+        const book = await (await app.$('#book-frame')).contentFrame();
+        await book.locator('body').hover({ position: { x: 150, y: 150 } });
+        await hidden();
+        await app.locator('#reader-settings').click();
+        await page.keyboard.press('Escape');
+        await app.locator('#reader-settings').focus();
+        await page.keyboard.press('Tab');
+        // Focus the slider through keyboard navigation from the final toolbar button.
+        await app.locator('#reading-progress').focus();
+        await shown();
+        await app.locator('#reader-search').focus();
+        await hidden();
+        await app.locator('#reader-settings').click();
+        const set = async (key, value) => {
+          await app.evaluate(({ key, value }) => {
+            const input = document.getElementById(`setting-${key}`); input.checked = value;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }, { key, value });
+          await app.waitForFunction(({ key, value }) => window.nativeProbe.data.settings.reading[key] === value, { key, value });
+        };
+        await set('showProgress', false); await set('showBookPages', false);
+        if (!await app.locator('#setting-autoHideProgress').isDisabled()) throw Error('auto hide must be disabled without footer content');
+        if (await zone.isVisible()) throw Error('disabled footer must not leave reveal zone');
+        await set('showBookPages', true);
+        if (await app.locator('#setting-autoHideProgress').isDisabled()) throw Error('whole-book pages support footer auto hide');
+        await set('showProgress', true);
+        await app.locator('[data-close="reading-settings"]').click();
+        await app.locator('#back-library').click();
+        await app.locator('.book-card').first().click();
+        await app.locator('#reader-loading').waitFor({ state: 'hidden' });
+        await hidden();
+        if (await app.locator('#reader-view').getAttribute('data-footer-auto-hide') !== 'true') throw Error('auto hide preference must survive reopening');
+        await app.locator('#reader-settings').click();
+        await set('autoHideProgress', false);
+        await app.locator('[data-close="reading-settings"]').click();
+        await shown();
+        if (await zone.isVisible()) throw Error('fixed footer must not leave reveal zone');
+      }
+      if (name === 'notifications') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        const toast = app.locator('#toast');
+        await toast.hover();
+        for (const scheme of ['light', 'dark']) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await app.waitForFunction(theme => document.body.dataset.theme === theme, scheme);
+          const shape = await toast.evaluate(el => {
+            const box = el.getBoundingClientRect(), style = getComputedStyle(el);
+            return { width: box.width, height: box.height, font: style.fontSize, bg: style.backgroundColor,
+              ink: style.color, topmost: el.matches(':popover-open'), focus: document.activeElement.id };
+          });
+          if (shape.width > 240 || shape.height > 44 || shape.font !== '13px' || !shape.topmost) throw Error('notification must be compact');
+          if (shape.bg !== (scheme === 'dark' ? 'rgb(37, 37, 37)' : 'rgb(255, 255, 255)')) throw Error('notification must follow system theme');
+          if (shape.focus === 'toast' || shape.focus === 'toast-close') throw Error('notification must not steal focus');
+          await page.locator('iframe').screenshot({ path: resolve(directory, `notification-${scheme}.png`) });
+        }
+        await app.locator('.toast-close').click();
+        await toast.waitFor({ state: 'hidden' });
+        await app.locator('#open-settings').click();
+        const errorMessage = '无法保存设置：这是一条用于检查长消息换行和暗色提示的测试文字。'.repeat(20);
+        await app.evaluate(message => {
+          window.nativeProbe.data.importErrors = [message];
+          document.getElementById('import-side').click();
+        }, errorMessage);
+        await toast.waitFor({ state: 'visible' });
+        if (await toast.getAttribute('data-kind') !== 'error') throw Error('error must use an error notification');
+        if (!await app.locator('#application-settings').evaluate(el => el.open)) throw Error('notification must preserve open modal');
+        await toast.hover();
+        if (!await toast.evaluate(el => {
+          const box = el.getBoundingClientRect(), text = el.querySelector('.toast-message');
+          const hit = document.elementFromPoint(box.left + 12, box.top + box.height / 2);
+          return box.width <= 440 && box.height <= 150 && box.right <= innerWidth && el.contains(hit) &&
+            text.scrollHeight > text.clientHeight;
+        })) throw Error('long errors must be bounded, scrollable and above modal');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'notification-modal-error.png') });
+        await page.locator('iframe').evaluate(el => { el.style.width = '360px'; el.style.height = '640px'; });
+        await app.waitForFunction(() => innerWidth === 360);
+        if (!await toast.evaluate(el => { const box = el.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.width <= 328; }))
+          throw Error('notification must fit narrow windows');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'notification-narrow.png') });
+        await page.locator('iframe').evaluate(el => { el.style.width = '1200px'; el.style.height = '800px'; });
+        await app.waitForFunction(() => innerWidth === 1200);
+        await app.locator('.toast-close').click();
+        await app.locator('#application-settings-close').click();
+        await app.evaluate(() => { window.nativeProbe.data.importErrors = []; });
+        await app.locator('#import-side').click();
+        await toast.waitFor({ state: 'visible' });
+        await toast.hover();
+        await page.waitForTimeout(2800);
+        if (!await toast.isVisible()) throw Error('hover must pause notification timeout');
+        await app.locator('.library-header').hover();
+        await toast.waitFor({ state: 'hidden', timeout: 4500 });
+      }
+      if (name === 'settings_interactions') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        const trigger = app.locator('#app-book-opening-trigger');
+        const popup = app.locator('#app-book-opening-popup');
+        const openingSwitch = app.locator('#app-book-opening-enabled');
+        const label = app.locator('label:has(> #app-book-opening-enabled) .app-row-label');
+        await trigger.click();
+        await popup.waitFor({ state: 'visible' });
+        await label.click();
+        await popup.waitFor({ state: 'hidden' });
+        if (!await openingSwitch.isChecked()) throw Error('dismissing dropdown must not toggle opening switch');
+        await label.click();
+        await app.waitForFunction(() => !window.nativeProbe.data.settings.application.bookOpeningEnabled);
+        await label.click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.application.bookOpeningEnabled);
+        for (let i = 0; i < 2; i++) {
+          await trigger.click();
+          await popup.waitFor({ state: 'visible' });
+          await trigger.click();
+          await popup.waitFor({ state: 'hidden' });
+        }
+        await trigger.click();
+        await popup.waitFor({ state: 'visible' });
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'settings-soft-focus.png') });
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await app.waitForFunction(() => document.body.dataset.theme === 'dark');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'settings-soft-focus-dark.png') });
+        await page.emulateMedia({ colorScheme: 'light' });
+        await app.locator('#application-settings-close').click();
+        if (!await app.locator('#application-settings').evaluate(el => el.open)) throw Error('outside close button must only dismiss dropdown first');
+        const dialog = app.locator('#application-settings');
+        const heading = app.locator('#application-settings-title');
+        const original = await dialog.boundingBox(), handle = await heading.boundingBox();
+        await page.mouse.move(handle.x + 30, handle.y + handle.height / 2);
+        const cursorBefore = await heading.evaluate(el => getComputedStyle(el).cursor);
+        await page.mouse.down();
+        await page.mouse.move(handle.x + 110, handle.y + handle.height / 2 + 40, { steps: 8 });
+        const cursorDuring = await dialog.evaluate(el => getComputedStyle(el).cursor);
+        await page.mouse.up();
+        const moved = await dialog.boundingBox();
+        if (Math.abs(moved.x - original.x - 80) > 1 || Math.abs(moved.y - original.y - 40) > 1 || cursorBefore !== cursorDuring)
+          throw Error('settings title drag must move dialog and retain cursor');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'application-settings-dragged.png') });
+        const edgeHandle = await heading.boundingBox();
+        await page.mouse.move(edgeHandle.x + 30, edgeHandle.y + 10);
+        await page.mouse.down();
+        await page.mouse.move(1390, 990, { steps: 5 });
+        await page.mouse.up();
+        if (!await dialog.evaluate(el => {
+          const rect = el.getBoundingClientRect();
+          return el.open && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+        })) throw Error('dragging beyond edge must stay on screen and not dismiss dialog');
+        await app.locator('#application-settings-close').click();
+        await app.locator('#open-settings').click();
+        const reopened = await dialog.boundingBox();
+        if (Math.abs(reopened.x - original.x) > 1 || Math.abs(reopened.y - original.y) > 1) throw Error('settings must reopen centred');
+        await app.locator('#application-settings-close').click();
+        await app.locator('.book-card').first().click();
+        await app.locator('#reader-loading').waitFor({ state: 'hidden' });
+        await app.locator('#reader-settings').click();
+        for (const key of ['fontFamily', 'fontWeight', 'animation']) {
+          const trigger = app.locator(`#setting-${key}-trigger`), popup = app.locator(`#setting-${key}-popup`);
+          await trigger.scrollIntoViewIfNeeded();
+          const before = await app.locator(`#setting-${key}`).inputValue();
+          await trigger.click(); await popup.waitFor({ state: 'visible' });
+          await trigger.click(); await popup.waitFor({ state: 'hidden' });
+          if (await app.locator(`#setting-${key}`).inputValue() !== before) throw Error(`${key} dismissal changed saved value`);
+        }
+        await app.locator('[data-close="reading-settings"]').click();
+        await app.locator('#back-library').click();
+        await app.locator('#sort-trigger').click();
+        const imports = await app.evaluate(() => window.nativeProbe.requests.filter(item => item.method === 'import').length);
+        await app.locator('#book-add').click();
+        if (await app.evaluate(() => window.nativeProbe.requests.filter(item => item.method === 'import').length) !== imports)
+          throw Error('sort dismissal must not import a book');
+      }
+      if (name === 'system_theme') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        for (const scheme of ['light', 'dark', 'light']) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await app.waitForFunction(theme => document.body.dataset.theme === theme, scheme);
+          await app.waitForFunction(color => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === color,
+            scheme === 'dark' ? 'rgb(25, 25, 25)' : 'rgb(255, 255, 255)');
+          if (!await app.evaluate(() => window.nativeProbe.data.settings.application.theme === 'system' && window.nativeProbe.data.settings.reading.theme === 'system'))
+            throw Error('OS changes must preserve system preferences');
+        }
+        await app.locator('#reader-settings').click();
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('type-preview')).backgroundColor === 'rgb(25, 25, 25)');
+        await app.locator('[data-setting-theme="reading"][data-value="sepia"]').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'sepia');
+        await page.emulateMedia({ colorScheme: 'light' });
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(255, 250, 243)');
+        await app.locator('[data-close="reading-settings"]').click();
+        await app.locator('#reader-app-settings').click();
+        await app.locator('[data-setting-theme="application"][data-value="dark"]').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.application.theme === 'dark');
+        for (const scheme of ['dark', 'light']) await page.emulateMedia({ colorScheme: scheme });
+        if (await app.locator('body').getAttribute('data-theme') !== 'dark') throw Error('manual theme must override system');
+        await app.locator('[data-setting-theme="application"][data-value="system"]').click();
+        await app.waitForFunction(() => document.body.dataset.theme === 'light');
+      }
       if (name === 'reader_completion') await page.locator('iframe').screenshot({ path: resolve(directory, 'reader-completion.png') });
       if (name === 'shelves') {
         const app = page.frames().find(frame => frame.parentFrame());
@@ -549,7 +755,7 @@ try {
         const fullTitle = '庄子——中华经典名著全本全注全译丛书（中华书局）· 完整书名悬浮提示';
         await app.locator('.book-card h3').evaluate((el, title) => { el.textContent = title; }, fullTitle);
         for (const [width, height] of [[180, 270], [270, 180]]) {
-          const centered = await app.locator('.cover-wrap').evaluate(async (wrap, [width, height]) => {
+          const centered = await app.locator('.book-card .cover-wrap').evaluate(async (wrap, [width, height]) => {
             const image = document.createElement('img');
             image.className = 'cover-image';
             image.src = 'data:image/svg+xml,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="#526b7c"/></svg>`);

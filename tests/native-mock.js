@@ -1,5 +1,10 @@
-import { installNativeMock } from './frontend-fixtures.js';
-window.nativeProbe = installNativeMock();
+import { bootstrapFixture, installNativeMock } from './frontend-fixtures.js';
+const fixture = bootstrapFixture();
+if (new URL(import.meta.url).searchParams.has('system')) {
+  fixture.settings.application.theme = 'system';
+  fixture.settings.reading.theme = 'system';
+}
+window.nativeProbe = installNativeMock(fixture);
 window.runtimeErrors = [];
 window.addEventListener('error', event => window.runtimeErrors.push(event.message));
 window.addEventListener('unhandledrejection', event => window.runtimeErrors.push(String(event.reason)));

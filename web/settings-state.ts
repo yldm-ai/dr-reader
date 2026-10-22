@@ -1,5 +1,5 @@
 /** Application chrome themes. */
-export type Theme = 'light' | 'sepia' | 'dark';
+export type Theme = 'system' | 'light' | 'sepia' | 'dark';
 /** Reading papers offer more choices than the application chrome. */
 export type ReadingTheme = Theme | 'green' | 'gray' | 'night';
 export interface ReadingSettings {
@@ -28,6 +28,7 @@ export interface ReadingSettings {
   showChapterTitle: boolean;
   showPagination: boolean;
   showProgress: boolean;
+  autoHideProgress: boolean;
   fullBackground: boolean;
   fullWidth: boolean;
   animation: 'none' | 'slide' | 'cover' | 'fade' | 'turn' | 'turn-hard';

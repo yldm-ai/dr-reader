@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled application smoke test</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, label) => { if (!value) throw Error(label); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  throw Error('Timed out waiting for bundled application');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js?system"><\/script>`);
+  frame.srcdoc = html;
+  document.body.append(frame);
+  await until(() => frame.contentDocument.querySelector('.book-card'));
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+
+
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  doc.getElementById('reader-settings').click();
+  const toggle = doc.getElementById('setting-autoHideProgress');
+  check(!toggle.disabled && !toggle.checked, 'auto hide defaults off and can be enabled with footer');
+  toggle.checked = true; toggle.dispatchEvent(new win.Event('change'));
+  await until(() => doc.getElementById('reader-view').dataset.footerAutoHide === 'true');
+  doc.getElementById('reading-settings').close();
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS footer auto hide setup';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

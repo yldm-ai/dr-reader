@@ -36,15 +36,15 @@ try {
   doc.querySelector('#shelf-books input').dispatchEvent(new win.Event('change', { bubbles: true }));
   check(win.getComputedStyle(doc.querySelector('#shelf-books input')).width === '18px', 'checkbox size');
   doc.getElementById('shelf-save').click();
-  await until(() => doc.querySelectorAll('.shelf-card').length === 2);
+  await until(() => doc.querySelectorAll('#shelf-grid .shelf-card').length === 2);
   check(win.nativeProbe.data.shelves[0].bookIds[0] === 'fixture', 'save membership');
   check(doc.getElementById('shelf-grid').lastElementChild.id === 'shelf-add', 'add stays last');
   search.value = '阅读与时光'; search.dispatchEvent(new win.Event('input'));
-  await until(() => doc.querySelectorAll('.shelf-card').length === 1);
+  await until(() => doc.querySelectorAll('#shelf-grid .shelf-card').length === 1);
   check(doc.getElementById('shelf-add'), 'no matches preserves add');
   search.value = '文'; search.dispatchEvent(new win.Event('input'));
-  await until(() => doc.querySelectorAll('.shelf-card').length === 2);
-  doc.querySelector('.shelf-card').click();
+  await until(() => doc.querySelectorAll('#shelf-grid .shelf-card').length === 2);
+  doc.querySelector('#shelf-grid .shelf-card').click();
   check(!doc.getElementById('book-grid').hidden && doc.querySelectorAll('.book-card').length === 1, 'enter shelf');
   doc.getElementById('shelf-edit').click();
   doc.querySelector('#shelf-books input').checked = false;
@@ -52,7 +52,7 @@ try {
   await until(() => doc.querySelectorAll('.book-card').length === 0);
   check(win.nativeProbe.data.books.length === 1, 'removing membership preserves book');
   doc.getElementById('shelves-back').click();
-  check(doc.querySelector('.shelf-card small').textContent === '0 本图书', 'empty shelf count');
+  check(doc.querySelector('#shelf-grid .shelf-card small').textContent === '0 本图书', 'empty shelf count');
   check(!win.runtimeErrors.length, 'runtime errors');
   document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS shelves';
 } catch (error) {

@@ -1,3 +1,5 @@
+import { icon } from './icons.ts';
+
 let sequence = 0;
 const pending = new Map();
 if (window.chrome?.webview)
@@ -38,11 +40,52 @@ export function escape(value) {
   );
 }
 let toastTimer;
-export function toast(message) {
-  $("toast").textContent = message;
-  $("toast").hidden = false;
+let toastRevision = 0;
+export function toast(message, kind = "info") {
+  const revision = ++toastRevision;
+  const element = $("toast");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => ($("toast").hidden = true), 5000);
+  const dismiss = () => {
+    if (revision !== toastRevision) return;
+    clearTimeout(toastTimer);
+    if (element.matches(':popover-open')) element.hidePopover();
+    element.hidden = true;
+  };
+  // A popover outside a modal remains inert; place it inside the active modal.
+  const modal = document.activeElement?.closest('dialog:modal') || [...document.querySelectorAll('dialog:modal')].at(-1);
+  const host = modal || document.body;
+  if (element.parentElement !== host) {
+    if (element.matches(':popover-open')) element.hidePopover();
+    host.append(element);
+  }
+  modal?.addEventListener('close', dismiss, { once: true });
+  element.dataset.kind = kind;
+  element.innerHTML = `<span class="toast-icon" aria-hidden="true">${icon(kind === "success" ? "check" : "info")}</span><span class="toast-message"></span><button type="button" class="toast-close" aria-label="关闭提示">${icon("close")}</button>`;
+  element.querySelector('.toast-message').textContent = String(message);
+  element.querySelector('.toast-close').onclick = dismiss;
+  element.hidden = false;
+  // Manual popover keeps notifications above modal settings without taking focus.
+  if (!element.matches(':popover-open')) element.showPopover();
+  let remaining = kind === "error" ? 6000 : kind === "success" ? 2600 : 3600;
+  let started;
+  const resume = () => {
+    if (revision !== toastRevision) return;
+    clearTimeout(toastTimer);
+    if (element.matches(':hover') || element.contains(document.activeElement)) return;
+    started = performance.now();
+    toastTimer = setTimeout(dismiss, remaining);
+  };
+  const pause = () => {
+    if (revision !== toastRevision) return;
+    clearTimeout(toastTimer);
+    if (started !== undefined) remaining = Math.max(0, remaining - (performance.now() - started));
+    started = undefined;
+  };
+  element.onpointerenter = pause;
+  element.onpointerleave = resume;
+  element.onfocusin = pause;
+  element.onfocusout = () => queueMicrotask(resume);
+  resume();
 }
 export function busy(value, label = "正在处理电子书…") {
   $("busy-label").textContent = label;

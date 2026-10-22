@@ -7,7 +7,7 @@ import { Tooltips } from "./tooltip.ts";
 import { BookOpening } from "./book-opening.ts";
 import { SelectControl } from "./select-control.ts";
 import { Shelves } from "./shelves.js";
-import { readingPalette } from "./reading-palette.ts";
+import { readingPalette, resolveTheme } from "./reading-palette.ts";
 
 hydrate();
 new SelectControl($("sort"));
@@ -31,14 +31,22 @@ const reader = new Reader((book) => {
   if (index >= 0) books[index] = book;
 });
 
-const settingsPanel = new SettingsPanel((value) => {
-  settings = value;
-  document.body.dataset.theme = value.application.theme;
-  document.body.dataset.animations = String(value.application.animations);
-  reader.apply(value);
-  if (value.application.theme === "dark")
-    document.documentElement.style.setProperty("color-scheme", "dark");
-  else document.documentElement.style.removeProperty("color-scheme");
+function applySettings(value) {
+  settings = {
+    ...value,
+    application: { ...value.application, theme: resolveTheme(value.application.theme) },
+    reading: { ...value.reading, theme: resolveTheme(value.reading.theme) },
+  };
+  document.body.dataset.theme = settings.application.theme;
+  document.body.dataset.animations = String(settings.application.animations);
+  reader.apply(settings);
+  document.documentElement.style.setProperty("color-scheme", settings.application.theme === "dark" ? "dark" : "light");
+}
+const settingsPanel = new SettingsPanel(applySettings);
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!settingsPanel.value) return;
+  settingsPanel.sync();
+  applySettings(settingsPanel.value);
 });
 reader.onReadingSetting = patch => settingsPanel.update("reading", patch);
 reader.onApplicationSetting = patch => settingsPanel.update("application", patch);
@@ -220,7 +228,7 @@ async function openBook(id, coverElement = null) {
   } catch (error) {
     opening.cancel();
     await returnLibrary();
-    toast(`打开图书失败：${error.message}`);
+    toast(`打开图书失败：${error.message}`, "error");
     console.error(error);
   } finally {
     opening.cancel();
@@ -242,9 +250,9 @@ $("delete-book-confirm").onclick = async () => {
       setNavigation();
     }
     render();
-    toast("图书已从书库删除");
+    toast("图书已从书库删除", "success");
   } catch (error) {
-    toast(`删除图书失败：${error.message}`);
+    toast(`删除图书失败：${error.message}`, "error");
   } finally {
     busy(false);
   }
@@ -256,10 +264,10 @@ async function importBooks() {
     const result = await call("import");
     books = result.books;
     render();
-    if (result.errors.length) toast(result.errors.join("\n"));
-    else toast("书库已更新");
+    if (result.errors.length) toast(result.errors.join("\n"), "error");
+    else toast("书库已更新", "success");
   } catch (error) {
-    toast(error.message);
+    toast(error.message, "error");
   } finally {
     busy(false);
   }
@@ -321,7 +329,7 @@ document.addEventListener("keydown", (event) => {
   // Alt+Enter hides or restores the title bar; F11 toggles fullscreen.
   if ((event.altKey && event.key === "Enter") || event.key === "F11") {
     event.preventDefault();
-    if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message));
+    if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message, "error"));
     return;
   }
   if (event.key === "F8" && reader.book && !settingsPanel.applicationOpen) {
@@ -336,7 +344,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && document.body.dataset.fullscreen === "true" && !document.querySelector("dialog[open]")) {
-    event.preventDefault(); call("fullscreen", { enabled: false }).catch(error => toast(error.message)); return;
+    event.preventDefault(); call("fullscreen", { enabled: false }).catch(error => toast(error.message, "error")); return;
   }
   const editing = ["INPUT", "SELECT", "TEXTAREA"].includes(
     event.target.tagName,
@@ -368,9 +376,9 @@ try {
   shelves.items = data.shelves || [];
   settingsPanel.configure(data);
   render();
-  if (data.importErrors?.length) toast(data.importErrors.join("\n"));
+  if (data.importErrors?.length) toast(data.importErrors.join("\n"), "error");
 } catch (error) {
-  toast(error.message);
+  toast(error.message, "error");
 } finally {
   busy(false);
 }

@@ -1,3 +1,4 @@
+import { dismissPopoverOnOutsidePointer } from './popover-dismiss.ts';
 import { NOTION_COLORS, normalizeColor } from './highlight-colors.ts';
 
 type Hsv = { h: number; s: number; v: number };
@@ -63,9 +64,7 @@ export class ColorPicker {
     root.querySelector<HTMLButtonElement>('.cp-cancel')!.onclick = () => this.close();
     root.querySelector<HTMLButtonElement>('.cp-apply')!.onclick = () => this.apply();
     root.addEventListener('keydown', event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); this.close(); } });
-    document.addEventListener('pointerdown', event => {
-      if (this.isOpen && !root.contains(event.target as Node)) this.close(false);
-    }, true);
+    dismissPopoverOnOutsidePointer(root, () => this.close(false));
   }
 
   get isOpen(): boolean { return this.root.matches(':popover-open'); }

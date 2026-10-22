@@ -1,3 +1,4 @@
+import { dismissPopoverOnOutsidePointer } from './popover-dismiss.ts';
 import { icon } from './icons.ts';
 import { OverlayScrollbar } from './scrollbar.ts';
 import type { Choice } from './fonts.ts';
@@ -48,6 +49,7 @@ export class SelectControl {
     this.button.setAttribute('aria-controls', `${select.id}-options`);
     // Explicit invocation also works in WebView2 without CSS anchor positioning.
     this.button.onclick = () => this.isOpen ? this.close() : this.open();
+    dismissPopoverOnOutsidePointer(this.popup, () => this.close(false));
     this.popup.addEventListener('toggle', () => {
       this.button.setAttribute('aria-expanded', String(this.isOpen));
       if (!this.isOpen) {

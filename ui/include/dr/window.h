@@ -46,6 +46,7 @@ class Window
     }
 
   private:
+    bool follow_system_theme_ = false;
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
     LRESULT message(UINT, WPARAM, LPARAM);
     void paint();

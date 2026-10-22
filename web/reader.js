@@ -37,6 +37,7 @@ export class Reader {
     this.editingAnnotation = null;
     this.attachTocHover();
     this.attachTocAutoHide();
+    this.attachFooterAutoHide();
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".reading-area")) this.beginPageTap(event);
@@ -72,7 +73,7 @@ export class Reader {
     new OverlayScrollbar($("toc-scroll"), $("toc-panel"));
     $("collapse-toolbar").onclick = () => this.setToolbarVisible(false);
     $("expand-toolbar").onclick = () => this.setToolbarVisible(true);
-    $("reader-fullscreen").onclick = () => call("fullscreen").catch(error => toast(error.message));
+    $("reader-fullscreen").onclick = () => call("fullscreen").catch(error => toast(error.message, "error"));
     $("prev-page").onclick = () => this.turn(-1);
     $("next-page").onclick = () => this.turn(1);
     $("toggle-toc").onclick = () => {
@@ -218,6 +219,39 @@ export class Reader {
     if (expanded) this.updateTocIndicator();
   }
 
+  attachFooterAutoHide() {
+    const footer = document.querySelector('.reader-footer');
+    const zone = $('footer-reveal-zone');
+    for (const element of [footer, zone]) {
+      element.addEventListener('pointerenter', () => this.setFooterExpanded(true));
+      element.addEventListener('pointerleave', () => this.scheduleFooterHide());
+    }
+    footer.addEventListener('focusout', () => this.scheduleFooterHide());
+    footer.addEventListener('pointerdown', () => { this.footerDragging = true; });
+    for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, () => {
+      if (!this.footerDragging) return;
+      this.footerDragging = false;
+      this.scheduleFooterHide();
+    }, true);
+    window.addEventListener('blur', () => { this.footerDragging = false; this.scheduleFooterHide(); });
+  }
+
+  setFooterExpanded(expanded) {
+    clearTimeout(this.footerHideTimer);
+    this.footerHideTimer = null;
+    document.querySelector('.reader-footer').dataset.expanded = String(expanded);
+  }
+
+  scheduleFooterHide() {
+    if (this.footerHideTimer || !this.settings?.autoHideProgress) return;
+    this.footerHideTimer = setTimeout(() => {
+      this.footerHideTimer = null;
+      const footer = document.querySelector('.reader-footer');
+      if (!this.footerDragging && !footer.matches(':hover') && !footer.querySelector(':focus-visible') && !$('footer-reveal-zone').matches(':hover'))
+        this.setFooterExpanded(false);
+    }, 450);
+  }
+
   async open(book, settings) {
     await this.flush();
     this.book = book;
@@ -238,7 +272,7 @@ export class Reader {
       this.annotations = await call("annotations", { id: book.id });
     } catch (error) {
       this.annotations = [];
-      toast(error.message);
+      toast(error.message, "error");
     }
     this.notes();
     this.loadBookStats(book);
@@ -382,9 +416,9 @@ export class Reader {
       });
       this.marks();
       this.onUpdate(this.book);
-      toast("书签已更新");
+      toast("书签已更新", "success");
     } catch (error) {
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -503,7 +537,7 @@ export class Reader {
       this.loading = false;
       this.loadError = error.message;
       $("reader-loading").hidden = true;
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -725,6 +759,10 @@ export class Reader {
       ["pagination", "showPagination"], ["progress", "showProgress"]])
       root.dataset[key] = String(r[setting] !== false);
     root.dataset.bookPages = String(r.showBookPages !== false && r.mode === "paged");
+    const footerAutoHide = Boolean(r.autoHideProgress && (r.showProgress !== false || root.dataset.bookPages === 'true'));
+    if (root.dataset.footerAutoHide !== String(footerAutoHide)) this.setFooterExpanded(false);
+    root.dataset.footerAutoHide = String(footerAutoHide);
+    $('footer-reveal-zone').hidden = !footerAutoHide;
     this.reportBookPages();
     root.dataset.fullBackground = String(Boolean(r.fullBackground));
     root.dataset.fullWidth = String(Boolean(r.fullWidth));
@@ -1062,7 +1100,7 @@ export class Reader {
       if (this.book?.id === id) this.book = book;
       this.onUpdate(book);
     } catch (error) {
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -1113,7 +1151,7 @@ export class Reader {
             this.motion?.setSpeed(Math.min(10, 1 + Math.max(0, backlog.count - 1) * .6));
         }
       }
-    }).catch((error) => toast(error.message));
+    }).catch((error) => toast(error.message, "error"));
     return this.turnQueue;
   }
 
@@ -1193,7 +1231,7 @@ export class Reader {
     if (event.key === "F8") { event.preventDefault(); this.onOpenSettings?.(); return; }
     if ((event.altKey && event.key === "Enter") || event.key === "F11") {
       event.preventDefault();
-      if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message));
+      if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message, "error"));
       return;
     }
     if (event.ctrlKey && event.key.toLowerCase() === "f") {
@@ -1377,7 +1415,7 @@ export class Reader {
       if (existing.note) await this.saveAnnotation({ ...existing, style: "note" });
       else await this.removeAnnotation(existing);
       this.doc?.getSelection()?.removeAllRanges();
-    } catch (error) { toast(error.message); }
+    } catch (error) { toast(error.message, "error"); }
   }
 
   /** Deletes the note; a passage that was only kept for its note disappears with it. */
@@ -1388,8 +1426,8 @@ export class Reader {
       if (existing.style === "note") await this.removeAnnotation(existing);
       else await this.saveAnnotation({ ...existing, note: "" });
       this.doc?.getSelection()?.removeAllRanges();
-      toast("笔记已删除");
-    } catch (error) { toast(error.message); }
+      toast("笔记已删除", "success");
+    } catch (error) { toast(error.message, "error"); }
   }
 
   /** Resting on a noted passage (or its tip) shows the note after a short pause. */
@@ -1455,9 +1493,9 @@ export class Reader {
         style,
       });
       this.doc.getSelection()?.removeAllRanges();
-      if (style !== "underline") toast("已添加高亮");
+      if (style !== "underline") toast("已添加高亮", "success");
     } catch (error) {
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -1610,9 +1648,9 @@ export class Reader {
       this.doc.getSelection()?.removeAllRanges();
       this.selection = null;
       $("annotation-dialog").close();
-      toast("笔记已保存");
+      toast("笔记已保存", "success");
     } catch (error) {
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -1635,8 +1673,8 @@ export class Reader {
       await this.removeAnnotation(existing);
       $("annotation-dialog").close("cancel");
       this.selection = null;
-      if (existing.style !== "underline") toast("标注已删除");
-    } catch (error) { toast(error.message); }
+      if (existing.style !== "underline") toast("标注已删除", "success");
+    } catch (error) { toast(error.message, "error"); }
   }
 
   async copySelection() {
@@ -1645,9 +1683,9 @@ export class Reader {
       await call("copy", { text: this.selection.text });
       this.hideSelection();
       this.doc.getSelection()?.removeAllRanges();
-      toast("已复制选中文字");
+      toast("已复制选中文字", "success");
     } catch (error) {
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -1695,7 +1733,7 @@ export class Reader {
       await call("lookup", { dictionaryId: dictionary.id, text });
       this.hideSelection();
     } catch (error) {
-      toast(error.message);
+      toast(error.message, "error");
     }
   }
 
@@ -1752,6 +1790,8 @@ export class Reader {
     this.motion.cancel();
     clearTimeout(this.tapTimer);
     clearTimeout(this.peekTimer);
+    this.footerDragging = false;
+    this.setFooterExpanded(false);
     this.showCorners("");
     this.hideSelection();
     this.hideNotePeek();

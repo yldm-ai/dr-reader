@@ -106,8 +106,13 @@ void Window::set_style(ShellStyle style)
 }
 void Window::set_theme(const std::string &theme)
 {
+    follow_system_theme_ = theme == "system";
+    DWORD light = 1, size = sizeof(light);
+    if (follow_system_theme_)
+        RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &size);
     // Match the web application's --bg, --text and --hover in styles.css.
-    const bool dark = theme == "dark";
+    const bool dark = theme == "dark" || (follow_system_theme_ && light == 0);
     const bool sepia = theme == "sepia";
     caption_background_ = dark ? 0x191919 : sepia ? 0xf5f1eb : 0xffffff;
     caption_text_ = dark ? 0xe6e6e5 : sepia ? 0x4a4036 : 0x37352f;
@@ -372,6 +377,10 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     }
     switch (m)
     {
+    case WM_SETTINGCHANGE:
+    case WM_THEMECHANGED:
+        if (follow_system_theme_) set_theme("system");
+        break;
     case WM_SYSKEYDOWN:
         if (w == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000))
         {

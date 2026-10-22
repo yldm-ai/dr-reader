@@ -78,9 +78,11 @@ export class ColorPicker {
     this.root.showPopover();
     this.render();
     const rect = anchor.getBoundingClientRect(), box = this.root.getBoundingClientRect();
-    const below = rect.bottom + 8 + box.height <= innerHeight - 8;
+    const parent = anchor.closest('.mark-palette, .annotation-dialog') ?? anchor;
+    const top = parent.getBoundingClientRect().bottom + 1;
     this.root.style.left = `${Math.round(Math.max(8, Math.min(rect.left + rect.width / 2 - box.width / 2, innerWidth - box.width - 8)))}px`;
-    this.root.style.top = `${Math.round(below ? rect.bottom + 8 : Math.max(8, rect.top - box.height - 8))}px`;
+    this.root.style.top = `${top}px`;
+    this.root.style.maxHeight = `${Math.max(0, innerHeight - top - 8)}px`;
     this.area.focus({ preventScroll: true });
   }
 

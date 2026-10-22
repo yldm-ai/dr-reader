@@ -9,7 +9,7 @@ const symbols = [
   'add', 'arrow_back', 'arrow_forward', 'arrow_upward', 'auto_stories', 'bookmark', 'bookmark-fill',
   'check', 'chevron_right', 'close', 'content_copy', 'cookie', 'crop_portrait', 'delete', 'dictionary', 'edit', 'edit_note',
   'format_align_center', 'format_align_justify', 'format_align_left', 'format_underlined',
-  'fullscreen', 'fullscreen_exit', 'grid_view', 'info', 'ink_highlighter', 'keep', 'keyboard_arrow_down', 'keyboard_double_arrow_down', 'keyboard_double_arrow_up', 'library_books', 'lightbulb-fill',
+  'fullscreen', 'fullscreen_exit', 'grid_view', 'info', 'ink_highlighter', 'keep', 'keyboard_arrow_down', 'keyboard_double_arrow_down', 'keyboard_double_arrow_up', 'library_books',
   'menu_book', 'menu_open', 'palette', 'play_arrow', 'remove', 'schedule', 'search', 'speaker_notes_off', 'text_fields',
   'tune', 'two_pager', 'view_day', 'view_list',
 ];

@@ -14,6 +14,8 @@ try {
   check(canvas && getComputedStyle(host.querySelector('.spinner')).display === 'none', 'circles must replace the opening spinner');
   await new Promise(resolve => setTimeout(resolve, 200));
   const rect = canvas.getBoundingClientRect();
+  check(Math.abs(rect.width - Math.min(300, innerWidth * .4, innerHeight * .35)) < 1,
+    'the circle scene must have half its original radius at every viewport size');
   check(rect.width <= innerWidth && rect.height <= innerHeight && rect.width === rect.height,
     'opening must fit the window and keep its circles round');
   check(Math.abs(canvas.width - rect.width * devicePixelRatio) <= 1, 'canvas must follow display pixel density');
@@ -35,6 +37,62 @@ try {
   check(!host.querySelector('canvas'), 'cancelling during loading must release the animation');
   await new BookOpening(host, false).finish();
   check(!host.querySelector('canvas'), 'disabled animations must not create a canvas or delay opening');
+  const book = new BookOpening(host, true, 'book');
+  const scene = host.querySelector('.book-opening-book');
+  check(scene && scene.querySelectorAll('.opening-book-turn').length === 7, 'book opening must animate its cover and six paper layers');
+  check(getComputedStyle(host).backgroundColor.startsWith('rgb(') && getComputedStyle(host).backdropFilter === 'none',
+    'opening animations must fully cover the loading document');
+  const turns = scene.getAnimations({ subtree: true });
+  check(turns.every(animation => animation.effect.getTiming().duration <= 900), 'paper turns must be faster');
+  for (const animation of turns) { animation.pause(); animation.currentTime = 500; }
+  await window.captureOpening?.('book-opening-pages');
+  const bookDone = book.finish();
+  const fade = host.getAnimations()[0];
+  check(fade?.effect.getTiming().duration === 450 && turns.some(animation => animation.playState !== 'finished'),
+    'the ready document must interrupt the paper turns immediately with a short fade');
+  fade.pause(); fade.currentTime = 225;
+  check(Number(getComputedStyle(host).opacity) > .1 && Number(getComputedStyle(host).opacity) < .9,
+    'the book and loading backdrop must fade together');
+  await window.captureOpening?.('book-opening-fade');
+  fade.finish(); await bookDone;
+  check(!host.querySelector('.book-opening') && !host.classList.contains('book-opening-active'), 'book completion must release the whole scene');
+  const abortedBook = new BookOpening(host, true, 'book');
+  const abortedDone = abortedBook.finish(); abortedBook.cancel(); await abortedDone;
+  check(!host.querySelector('.book-opening') && host.getAnimations().length === 0, 'cancelled books must release pages and fade animations');
+
+  const cover = new BookOpening(host, true, 'cover', {
+    title: '阅读与时光', author: 'DR Reader', ratio: 2 / 3,
+    image: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#506b7c"/><path d="M24 32H176M24 268H176" stroke="#d7c8a2"/><text x="100" y="143" fill="#fffaf3" font-size="22" text-anchor="middle">阅读与时光</text><text x="100" y="175" fill="#d7c8a2" font-size="10" text-anchor="middle">DR READER</text></svg>'),
+    rect: { left: 120, top: 160, width: 90, height: 140 },
+  });
+  const coverScene = host.querySelector('.book-opening-cover');
+  const card = coverScene.querySelector('.opening-cover-card');
+  await card.querySelector('img').decode();
+  const intro = card.getAnimations()[0];
+  intro.pause(); intro.currentTime = 0;
+  check(Math.abs(card.getBoundingClientRect().height - 140) < 1, 'the cover must start from its library size');
+  intro.finish();
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  check(Math.abs(card.getBoundingClientRect().height - innerHeight) < 1 && card.getBoundingClientRect().top === 0,
+    'the enlarged cover must fill the page height');
+  check(host.querySelector('.book-opening-cover'), 'the full-height cover must wait for the document to be ready');
+  await window.captureOpening?.('book-opening-cover-full');
+  const coverDone = cover.finish();
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  const exit = card.getAnimations().find(animation => animation.effect.getTiming().duration === 700);
+  check(exit, 'the ready cover must slide to the right');
+  const reveal = coverScene.querySelector('.opening-cover-backdrop').getAnimations()[0];
+  exit.pause(); exit.currentTime = 350; reveal.pause(); reveal.currentTime = 350;
+  await window.captureOpening?.('book-opening-cover-slide');
+  exit.currentTime = 699;
+  check(card.getBoundingClientRect().left > innerWidth, 'the cover must travel completely beyond the right edge');
+  exit.finish(); reveal.finish(); await coverDone;
+  check(!host.querySelector('.book-opening') && !host.style.backgroundColor, 'cover completion must release scene and backdrop overrides');
+  const cancelledCover = new BookOpening(host, true, 'cover');
+  const cancelledCoverDone = cancelledCover.finish(); cancelledCover.cancel(); await cancelledCoverDone;
+  check(!host.querySelector('.book-opening'), 'a cancelled cover must not block loading');
+  for (const effect of ['none', 'book', 'cover']) await new BookOpening(host, effect === 'none', effect).finish();
+  check(!host.querySelector('.book-opening'), 'none and disabled effects must not delay loading');
   document.getElementById('result').textContent = 'PASS';
   document.documentElement.dataset.result = 'pass';
 } catch (error) {

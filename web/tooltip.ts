@@ -32,7 +32,6 @@ export class Tooltips {
     }, true);
     for (const type of ['pointerdown', 'keydown', 'wheel', 'scroll'])
       root.addEventListener(type, () => this.hide(), { capture: true, passive: true });
-    window.addEventListener('blur', () => this.hide());
   }
 
   private adopt(scope: Element): void {

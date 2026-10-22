@@ -1,8 +1,4 @@
 import { paint } from "./highlight-colors.ts";
-import { materialPaths } from "./material-icons.ts";
-
-const TIP_PATH = materialPaths["lightbulb-fill"];
-
 export class AnnotationLayer {
   constructor(doc, callbacks = {}) {
     this.doc = doc;
@@ -52,12 +48,14 @@ export class AnnotationLayer {
     if (!this.notes?.length) return;
     const doc = this.doc;
     const view = doc.defaultView;
+    const pixelRatio = view.devicePixelRatio || 1;
+    const snap = (value) => Math.round(value * pixelRatio) / pixelRatio;
     if (!doc.getElementById("dr-note-tip-style")) {
       const style = doc.createElement("style");
       style.id = "dr-note-tip-style";
       style.textContent = `.dr-note-tips{position:absolute!important;left:0!important;top:0!important;width:0!important;height:0!important;margin:0!important;padding:0!important;border:0!important}
-.dr-note-tip{position:absolute!important;display:block!important;width:14px!important;height:14px!important;margin:0!important;padding:0!important;color:var(--dr-tip,#dfab01)!important;cursor:pointer!important;user-select:none!important;-webkit-user-select:none!important;opacity:.92}
-.dr-note-tip:hover{opacity:1}.dr-note-tip svg{display:block!important;width:14px!important;height:14px!important;fill:currentColor!important}`;
+.dr-note-tip{position:absolute!important;display:block!important;width:14px!important;height:14px!important;margin:0!important;padding:0!important;color:var(--dr-tip,#dfab01)!important;cursor:pointer!important;user-select:none!important;-webkit-user-select:none!important;opacity:1!important}
+.dr-note-tip::before{content:"\\e8bd"!important;display:block!important;width:14px!important;height:14px!important;font:normal 400 14px/14px "Segoe Fluent Icons","Segoe MDL2 Assets"!important;letter-spacing:0!important;text-indent:0!important;text-transform:none!important;text-align:center!important}`;
       doc.head.append(style);
     }
     const layer = doc.createElement("div");
@@ -71,9 +69,8 @@ export class AnnotationLayer {
       tip.className = "dr-note-tip";
       tip.dataset.id = note.id;
       tip.style.setProperty("--dr-tip", note.ink);
-      tip.style.left = `${end.right + view.scrollX - 3}px`;
-      tip.style.top = `${end.top + view.scrollY - 9}px`;
-      tip.innerHTML = `<svg viewBox="0 -960 960 960"><path d="${TIP_PATH}"/></svg>`;
+      tip.style.left = `${snap(end.right + view.scrollX - 3)}px`;
+      tip.style.top = `${snap(end.top + view.scrollY - 9)}px`;
       layer.append(tip);
     }
     doc.documentElement.append(layer);

@@ -5,6 +5,8 @@ import { SettingsPanel } from "./settings.js";
 import { createLibraryOverlays } from "./library-overlays.js";
 import { Tooltips } from "./tooltip.ts";
 import { BookOpening } from "./book-opening.ts";
+import { SelectControl } from "./select-control.ts";
+import { readingPalette } from "./reading-palette.ts";
 
 hydrate();
 new SelectControl($("sort"));
@@ -110,7 +112,7 @@ function render() {
     card.className = "book-card";
     card.setAttribute("aria-label", `阅读 ${book.title}`);
     card.innerHTML = `<div class="cover-wrap">${cover(book)}</div><h3>${escape(book.title)}</h3><div class="book-author">${escape(book.author)}</div><div class="book-status">${book.lastRead ? `<span class="progress-track"><i style="width:${Math.round(book.progress * 100)}%"></i></span><span>已读 ${Math.round(book.progress * 100)}%</span>` : '<span class="new-label">未读</span><span>EPUB</span>'}</div>`;
-    card.onclick = () => openBook(book.id);
+    card.onclick = () => openBook(book.id, card.querySelector(".cover-image"));
     libraryOverlays.bind(card, book);
     item.append(card);
     cards.append(item);
@@ -164,10 +166,21 @@ function setNavigation() {
   }
 }
 
-async function openBook(id) {
+async function openBook(id, coverElement = null) {
   libraryOverlays.dismiss();
+  const selected = books.find(book => book.id === id);
+  const paper = readingPalette(settings?.reading.theme || "light");
+  $("busy").style.setProperty("--opening-background", paper.paper);
+  $("busy").style.setProperty("--opening-ink", paper.text);
   busy(true, "正在打开电子书…");
-  const opening = new BookOpening($("busy"), settings?.application.animations !== false);
+  const rect = coverElement?.getBoundingClientRect();
+  const opening = new BookOpening($("busy"), settings?.application.bookOpeningEnabled ?? settings?.application.animations ?? true, settings?.application.bookOpeningAnimation, {
+    title: selected?.title, author: selected?.author,
+    image: selected?.cover ? bookUrl(selected, selected.cover) : undefined,
+    ratio: coverElement instanceof HTMLImageElement && coverElement.naturalHeight
+      ? coverElement.naturalWidth / coverElement.naturalHeight : rect?.height ? rect.width / rect.height : undefined,
+    rect: rect?.width && rect?.height ? rect : undefined,
+  });
   try {
     const book = await call("open", { id });
     $("library-view").hidden = true;
@@ -279,6 +292,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "F8" && reader.book && !settingsPanel.applicationOpen) {
     event.preventDefault(); settingsPanel.open("reading"); return;
   }
+  if (event.defaultPrevented) return;
   if (settingsPanel.applicationOpen) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -286,7 +300,6 @@ document.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if (event.defaultPrevented) return;
   if (event.key === "Escape" && document.body.dataset.fullscreen === "true" && !document.querySelector("dialog[open]")) {
     event.preventDefault(); call("fullscreen", { enabled: false }).catch(error => toast(error.message)); return;
   }
@@ -301,7 +314,7 @@ document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key.toLowerCase() === "k") {
     event.preventDefault();
     if (!$("reader-view").hidden)
-      returnLibrary().then(() => $("library-search").focus());
+      reader.openSearch();
     else $("library-search").focus();
     return;
   }
@@ -309,7 +322,6 @@ document.addEventListener("keydown", (event) => {
   if (!$("reader-view").hidden) {
     if (event.key === "Escape") {
       event.preventDefault();
-      returnLibrary();
     } else reader.key(event);
   }
 });

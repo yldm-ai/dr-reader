@@ -9,10 +9,10 @@ const fluent: Record<string, number> = {
   grid: 0xe74c, list: 0xea37, 'arrow-up': 0xe74a,
   'arrow-left': 0xe72b, 'arrow-right': 0xe72a, type: 0xe8d2,
   close: 0xe711, play: 0xe768, edit: 0xe70f, delete: 0xe74d, pin: 0xe718,
-  copy: 0xe8c8, note: 0xe70b, underline: 0xe8dc, dictionary: 0xe82d,
+  copy: 0xe8c8, note: 0xe70b, underline: 0xe8dc, dictionary: 0xe82d, tip: 0xe8bd, highlighter: 0xe7e6,
 };
-// Settings and author keep their Fluent glyphs everywhere.
-const alwaysFluent = new Set(['settings', 'user']);
+// Settings, author and note tips keep their Fluent glyphs everywhere.
+const alwaysFluent = new Set(['settings', 'user', 'tip']);
 
 // The reader and settings use Material Symbols Rounded paths (see material-icons.ts).
 const material: Record<string, string> = {
@@ -25,7 +25,7 @@ const material: Record<string, string> = {
   palette: 'palette', highlighter: 'ink_highlighter', info: 'info',
   'page-single': 'crop_portrait', 'page-double': 'two_pager',
   pin: 'keep', copy: 'content_copy', note: 'edit_note', underline: 'format_underlined',
-  tip: 'lightbulb-fill', 'note-off': 'speaker_notes_off',
+  'note-off': 'speaker_notes_off',
   dictionary: 'dictionary', fullscreen: 'fullscreen', 'fullscreen-exit': 'fullscreen_exit',
   paged: 'auto_stories', scroll: 'view_day', 'align-justify': 'format_align_justify',
   'align-left': 'format_align_left', 'align-center': 'format_align_center',

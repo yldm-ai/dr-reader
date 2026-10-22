@@ -4,6 +4,14 @@ const DASHES = [[5.220933, 7.637425, 16.478701, 9.103556], [11.014548, 19.651566
   [19.647832, 8.928204, 12.615934, 8.221933], [12.017927, 5.387895, 5.152818, 10.709955],
   [8.295024, 4.254566, 11.99812, 12.444237]];
 
+interface OpeningCover {
+  image?: string;
+  title?: string;
+  author?: string;
+  ratio?: number;
+  rect?: { left: number; top: number; width: number; height: number };
+}
+
 /** UIAnimation's accelerate/decelerate profile, with a constant-speed middle if needed. */
 function transition(time: number, acceleration: number, deceleration: number): number {
   const t = Math.max(0, Math.min(1, time));
@@ -15,6 +23,12 @@ function transition(time: number, acceleration: number, deceleration: number): n
 
 /** Five overlapping circles from the supplied SoundControlAnimation, drawn in the app's layer. */
 export class BookOpening {
+  private cover?: HTMLDivElement;
+  private coverIntro?: Animation;
+  private book?: HTMLDivElement;
+  private sheets: Animation[] = [];
+  private fade?: Animation;
+  private finishing = false;
   private canvas?: HTMLCanvasElement;
   private context?: CanvasRenderingContext2D;
   private resize?: ResizeObserver;
@@ -26,9 +40,11 @@ export class BookOpening {
   private reduced = matchMedia('(prefers-reduced-motion: reduce)');
   private stopOnReduced = () => { if (this.reduced.matches) this.cancel(); };
 
-  constructor(private host: HTMLElement, enabled: boolean) {
+  constructor(private host: HTMLElement, enabled: boolean, effect = 'circles', cover: OpeningCover = {}) {
     this.completion = new Promise(resolve => { this.resolve = resolve; });
-    if (!enabled || this.reduced.matches) { this.resolve?.(); return; }
+    if (!enabled || effect === 'none' || this.reduced.matches) { this.resolve?.(); return; }
+    if (effect === 'cover') { this.openCover(cover); return; }
+    if (effect === 'book') { this.openBook(); return; }
     const canvas = document.createElement('canvas');
     canvas.className = 'book-opening';
     canvas.setAttribute('aria-hidden', 'true');
@@ -47,6 +63,14 @@ export class BookOpening {
 
   /** Let the fill expand even for cached books, then collapse when the chapter is ready. */
   finish(): Promise<void> {
+    if (this.cover && !this.finishing) {
+      this.finishing = true;
+      void this.slideCover(this.cover);
+    }
+    if (this.book && !this.finishing) {
+      this.finishing = true;
+      void this.fadeBook(this.book);
+    }
     if (this.canvas && this.endingAt === undefined)
       this.endingAt = Math.max(performance.now(), this.started + 900);
     return this.completion;
@@ -58,8 +82,112 @@ export class BookOpening {
     this.reduced.removeEventListener('change', this.stopOnReduced);
     this.canvas?.remove();
     this.canvas = undefined;
-    this.host.classList.remove('book-opening-active');
+    for (const animation of this.sheets) animation.cancel();
+    this.sheets = [];
+    this.fade?.cancel();
+    this.book?.remove();
+    this.book = undefined;
+    this.cover?.remove();
+    this.cover = undefined;
+    this.host.style.removeProperty('background-color');
+    this.host.style.removeProperty('opacity');
+    this.host.classList.remove('book-opening-active', 'book-opening-cover-active');
     this.resolve?.();
+  }
+
+  /** Layered cover and paper turns inspired by missarray's CodePen oQmgzW. */
+  private openBook(): void {
+    const book = document.createElement('div');
+    book.className = 'book-opening book-opening-book';
+    book.setAttribute('aria-hidden', 'true');
+    book.innerHTML = `<div class="opening-book-scene"><span class="opening-book-cover"></span>
+      <span class="opening-book-paper"></span>
+      ${Array.from({ length: 6 }, () => '<span class="opening-book-paper opening-book-turn"></span>').join('')}
+      <span class="opening-book-cover opening-book-turn"></span></div>`;
+    this.book = book;
+    this.host.classList.add('book-opening-active');
+    this.host.prepend(book);
+    this.reduced.addEventListener('change', this.stopOnReduced);
+    const angles = [180, 180, 180, -150, -30, -55, -180];
+    const delays = [0, 60, 120, 180, 240, 280, 0];
+    book.querySelectorAll<HTMLElement>('.opening-book-turn').forEach((sheet, index) => {
+      const animation = sheet.animate([
+        { transform: 'rotateY(0deg)', zIndex: 2 },
+        { transform: `rotateY(${angles[index] * .3}deg)`, zIndex: 20, offset: .3 },
+        { transform: `rotateY(${angles[index]}deg)`, zIndex: index === 6 ? 1 : 20 },
+      ], { duration: index < 3 || index === 6 ? 900 : 700, delay: delays[index], fill: 'both', easing: 'ease' });
+      // Cancellation is also possible before finish() is called (failed loading/reduced motion).
+      void animation.finished.catch(() => {});
+      this.sheets.push(animation);
+    });
+  }
+
+  private async fadeBook(book: HTMLDivElement): Promise<void> {
+    if (this.book !== book) return;
+    // The ready document can interrupt the paper turns; keep moving while fading out.
+    this.fade = this.host.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: 450, easing: 'ease-in-out', fill: 'forwards',
+    });
+    await this.fade.finished.catch(() => {});
+    if (this.book === book) this.cancel();
+  }
+
+  private openCover(source: OpeningCover): void {
+    const root = document.createElement('div');
+    root.className = 'book-opening book-opening-cover';
+    root.setAttribute('aria-hidden', 'true');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'opening-cover-backdrop';
+    const card = document.createElement('div');
+    card.className = 'opening-cover-card';
+    const title = document.createElement('strong');
+    title.textContent = source.title || 'DR Reader';
+    const author = document.createElement('small');
+    author.textContent = source.author || '';
+    card.append(title, author);
+    if (source.image) {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.src = source.image;
+      image.addEventListener('error', () => image.remove(), { once: true });
+      card.append(image);
+    }
+    root.append(backdrop, card);
+    this.cover = root;
+    this.host.classList.add('book-opening-active', 'book-opening-cover-active');
+    this.host.prepend(root);
+    this.reduced.addEventListener('change', this.stopOnReduced);
+    const height = innerHeight, width = height * (source.ratio || 2 / 3);
+    const left = (innerWidth - width) / 2;
+    card.style.width = `${width}px`;
+    card.style.left = `${left}px`;
+    const from = source.rect;
+    const transform = from
+      ? `translate(${from.left - left}px, ${from.top}px) scale(${from.width / width}, ${from.height / height})`
+      : 'translateY(18px) scale(.88)';
+    this.coverIntro = card.animate([{ transform, opacity: from ? 1 : 0 }, { transform: 'none', opacity: 1 }], {
+      duration: 600, easing: 'cubic-bezier(.16, 1, .3, 1)', fill: 'forwards',
+    });
+    void this.coverIntro.finished.catch(() => {});
+    this.sheets.push(this.coverIntro);
+  }
+
+  private async slideCover(root: HTMLDivElement): Promise<void> {
+    await this.coverIntro?.finished.catch(() => {});
+    if (this.cover !== root) return;
+    const card = root.querySelector<HTMLElement>('.opening-cover-card')!;
+    const distance = innerWidth / 2 + card.offsetWidth / 2 + 32;
+    const slide = card.animate([{ transform: 'none' }, { transform: `translateX(${distance}px)` }], {
+      duration: 700, easing: 'cubic-bezier(.65, 0, .35, 1)', fill: 'forwards',
+    });
+    this.host.style.backgroundColor = 'transparent';
+    const backdrop = root.querySelector('.opening-cover-backdrop')!;
+    const reveal = backdrop.animate([{ opacity: 1 }, { opacity: 0 }], {
+      delay: 100, duration: 600, easing: 'ease-in-out', fill: 'forwards',
+    });
+    this.sheets.push(slide, reveal);
+    await Promise.all([slide.finished.catch(() => {}), reveal.finished.catch(() => {})]);
+    if (this.cover === root) this.cancel();
   }
 
   private fit(): void {
@@ -74,6 +202,7 @@ export class BookOpening {
     const elapsed = (now - this.started) / 1000;
     const closing = this.endingAt !== undefined && now >= this.endingAt;
     const exit = closing ? 1 - transition((now - this.endingAt!) / 650, .3, .7) : 1;
+    if (closing) this.host.style.opacity = String(exit);
     if (exit <= 0) { this.cancel(); return; }
     const fill = .4 + .6 * transition(elapsed / .45, .2, .8);
     const angle = elapsed * 6 * transition(elapsed / 10, .2, .8);

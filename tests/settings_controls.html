@@ -86,6 +86,25 @@ try {
   await frame();
   check(turnSlider.disabled && !fadeSlider.disabled, 'slides must use the short animation duration slider');
   document.getElementById('reading-settings').close();
+  const opening = panel.selectControls.get('bookOpeningAnimation');
+  check(opening.button.disabled && opening.button.textContent.includes('彩色圆环'), 'opening choice must default to circles and follow the animation switch');
+  panel.update('application', { animations: true });
+  await frame();
+  check(opening.button.disabled, 'interface animations must not enable book opening');
+  const openingSwitch = document.getElementById('app-book-opening-enabled');
+  openingSwitch.checked = true; openingSwitch.dispatchEvent(new Event('change'));
+  panel.update('application', { animations: false });
+  await frame();
+  check(!opening.button.disabled && !panel.value.application.animations,
+    'the independent opening switch must work with interface animations disabled');
+  const openingSelect = document.getElementById('app-book-opening');
+  openingSelect.value = 'book'; openingSelect.dispatchEvent(new Event('change'));
+  await panel.flush();
+  check(native.data.settings.application.bookOpeningEnabled === true &&
+    native.data.settings.application.bookOpeningAnimation === 'book' && opening.button.textContent.includes('翻开书本'),
+    'book opening choice must persist and update its visible label');
+  panel.configure({ ...data, settings: structuredClone(native.data.settings) });
+  check(opening.select.value === 'book', 'reloaded settings must preserve the selected book opening');
   output.textContent = 'PASS: font search/commit/cancel/persist/reset, selector keyboard and bounds, batched updates, stable dictionary DOM';
   document.documentElement.dataset.result = 'pass';
 } catch (error) {

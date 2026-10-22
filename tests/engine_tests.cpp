@@ -222,6 +222,26 @@ int main()
                     customized["reading"]["fontSize"] == 24 &&
                     customized["reading"]["animation"] == "turn",
                 "settings patch");
+        require(defaults["application"]["bookOpeningAnimation"] == "circles" &&
+                    dr::patch_settings(defaults, {{"application", {{"bookOpeningAnimation", "book"}}}})
+                        ["application"]["bookOpeningAnimation"] == "book",
+                "opening animation choice defaults and persistence");
+        require(dr::patch_settings(defaults, {{"application", {{"bookOpeningAnimation", "cover"}}}})
+                    ["application"]["bookOpeningAnimation"] == "cover",
+                "full height cover opening choice persists");
+        rejects([&] { dr::patch_settings(defaults, {{"application", {{"bookOpeningAnimation", "invalid"}}}}); },
+                "reject invalid opening animation choices");
+        auto opening_only = dr::patch_settings(defaults, {{"application", {{"animations", false}, {"bookOpeningEnabled", true}}}});
+        require(!opening_only["application"]["animations"].get<bool>() &&
+                    opening_only["application"]["bookOpeningEnabled"].get<bool>(),
+                "book opening has an independent enable switch");
+        require(!dr::normalize_settings({{"application", {{"animations", false}}}})
+                     ["application"]["bookOpeningEnabled"].get<bool>(),
+                "old settings preserve disabled opening animations during migration");
+        require(dr::normalize_settings(opening_only)["application"]["bookOpeningEnabled"].get<bool>(),
+                "explicit independent opening preference survives normalization");
+        rejects([&] { dr::patch_settings(defaults, {{"application", {{"bookOpeningEnabled", "false"}}}}); },
+                "reject invalid opening enable switches");
         auto legacy_corner = dr::normalize_settings(
             {{"version", 2}, {"reading", {{"fontSize", 26}, {"animation", "turn-bottom"}}}});
         require(legacy_corner["reading"]["animation"] == "turn" && legacy_corner["reading"]["fontSize"] == 26,

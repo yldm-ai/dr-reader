@@ -257,24 +257,23 @@
     </div>
 
     <div id="selection-menu" class="selection-menu" hidden>
-      <div class="selection-preview" id="selection-preview"></div>
       <div class="selection-tools">
         <!-- Each mark keeps one colour in front of its button; the dot opens the recent colours.
              A pressed button means the passage already carries that mark: pressing again removes it. -->
         <div class="mark-group" id="selection-highlight-group">
           <button id="highlight-color" class="mark-color" type="button" data-style="highlight" title="高亮颜色" aria-label="选择高亮颜色" aria-haspopup="true"></button>
-          <button id="selection-highlight" class="selection-action mark-action" type="button" aria-pressed="false"><span data-icon="highlighter"></span>高亮</button>
+          <button id="selection-highlight" class="selection-action mark-action" type="button" aria-pressed="false"><span data-icon="highlighter" data-icon-set="fluent"></span><span class="selection-action-label">高亮</span></button>
         </div>
         <div class="mark-group" id="selection-underline-group">
           <button id="underline-color" class="mark-color" type="button" data-style="underline" title="下划线颜色" aria-label="选择下划线颜色" aria-haspopup="true"></button>
-          <button id="selection-underline" class="selection-action mark-action" type="button" aria-pressed="false"><span data-icon="underline"></span>下划线</button>
+          <button id="selection-underline" class="selection-action mark-action" type="button" aria-pressed="false"><span data-icon="underline" data-icon-set="fluent"></span><span class="selection-action-label">下划线</span></button>
         </div>
         <span class="selection-divider"></span>
-        <button id="selection-note" class="selection-action"><span data-icon="note"></span><span id="selection-note-label">记笔记</span></button>
-        <button id="selection-note-delete" class="selection-action danger-button" hidden><span data-icon="note-off"></span>删除笔记</button>
-        <button id="selection-copy" class="selection-action"><span data-icon="copy"></span>复制</button>
-        <button id="selection-search" class="selection-action"><span data-icon="search"></span>书内搜索</button>
-        <button id="selection-dictionary" class="selection-action dictionary-action">查词 <span data-icon="chevron"></span></button>
+        <button id="selection-note" class="selection-action"><span data-icon="edit" data-icon-set="fluent"></span><span id="selection-note-label" class="selection-action-label">记笔记</span></button>
+        <button id="selection-note-delete" class="selection-action danger-button" hidden><span data-icon="delete" data-icon-set="fluent"></span><span class="selection-action-label">删除笔记</span></button>
+        <button id="selection-copy" class="selection-action"><span data-icon="copy" data-icon-set="fluent"></span><span class="selection-action-label">复制</span></button>
+        <button id="selection-search" class="selection-action"><span data-icon="search" data-icon-set="fluent"></span><span class="selection-action-label">书内搜索</span></button>
+        <button id="selection-dictionary" class="selection-action dictionary-action"><span class="selection-action-label">查词</span><span data-icon="chevron"></span></button>
       </div>
       <!-- The five most recent colours, then the custom colour picker. -->
       <div id="mark-palette" class="mark-palette" role="group" aria-label="标注颜色" hidden>
@@ -286,14 +285,14 @@
       <div class="note-peek-text" id="note-peek-text"></div>
     </div>
 
-    <dialog id="annotation-dialog" class="annotation-dialog">
+    <dialog id="annotation-dialog" class="annotation-dialog" aria-labelledby="annotation-title">
       <form id="annotation-form" method="dialog">
         <div class="annotation-header">
-          <div><span class="eyebrow">ANNOTATION</span><h2 id="annotation-title">记笔记</h2></div>
+          <h2 id="annotation-title">记笔记</h2>
           <button value="cancel" class="icon-button" aria-label="关闭笔记"><span data-icon="close"></span></button>
         </div>
         <blockquote id="annotation-quote"></blockquote>
-        <label class="annotation-note-label">笔记<textarea id="annotation-note" rows="6" maxlength="32768" placeholder="写下此刻的想法…"></textarea></label>
+        <label class="annotation-note-label">笔记<textarea id="annotation-note" rows="4" maxlength="32768" placeholder="写下此刻的想法…"></textarea></label>
         <div class="annotation-style-row">
           <span>颜色</span>
           <div id="annotation-swatches" class="annotation-colors swatch-row"></div>

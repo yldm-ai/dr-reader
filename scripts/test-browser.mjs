@@ -74,7 +74,7 @@ try {
         if (!await app.evaluate(() => {
           const close = document.getElementById('application-settings-close').getBoundingClientRect();
           const scroll = document.getElementById('application-settings-scroll').getBoundingClientRect();
-          const track = document.querySelector('.app-settings-main .overlay-scrollbar')?.getBoundingClientRect();
+          const track = document.querySelector('.app-settings-main > .overlay-scrollbar')?.getBoundingClientRect();
           return close.bottom <= scroll.top && (!track || close.bottom <= track.top);
         })) throw Error('the close button must not cover the scrolling groups or their scrollbar');
         await app.locator('#application-settings-close').click();
@@ -123,6 +123,27 @@ try {
         await app.locator('#highlight-color').click();
         await app.locator('#selection-note').click();
         await app.locator('#annotation-note').fill('这是一条原创的测试笔记。');
+        const editor = app.locator('#annotation-dialog');
+        const editorStyle = await editor.evaluate(element => ({
+          width: element.offsetWidth,
+          titleSize: getComputedStyle(element.querySelector('h2')).fontSize,
+          blur: getComputedStyle(element, '::backdrop').backdropFilter,
+          english: element.textContent.includes('ANNOTATION'),
+        }));
+        if (editorStyle.width > 420 || editorStyle.titleSize !== '15px' || editorStyle.blur !== 'none' || editorStyle.english)
+          throw Error(`note editor must be compact with a plain Chinese title and no backdrop blur: ${JSON.stringify(editorStyle)}`);
+        await capture('note-editor-compact.png');
+        const initialEditor = await editor.boundingBox();
+        const handle = await app.locator('#annotation-dialog .annotation-header').boundingBox();
+        await page.mouse.move(handle.x + 90, handle.y + handle.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(handle.x + 190, handle.y + handle.height / 2 - 60, { steps: 8 });
+        await page.mouse.up();
+        const movedEditor = await editor.boundingBox();
+        if (Math.abs(movedEditor.x - initialEditor.x - 100) > 1 || Math.abs(movedEditor.y - initialEditor.y + 60) > 1 ||
+            await app.locator('#annotation-note').inputValue() !== '这是一条原创的测试笔记。')
+          throw Error('dragging the title bar must move the note editor and preserve its draft');
+        await capture('note-editor-dragged.png');
         await app.locator('#annotation-save').click();
         const tip = await app.waitForFunction(() => document.getElementById('book-frame').contentDocument
           .querySelector('.dr-note-tip')?.getBoundingClientRect().toJSON());
@@ -133,6 +154,20 @@ try {
         await app.locator('#note-peek').waitFor({ state: 'visible' });
         if (await app.locator('#note-peek-text').textContent() !== '这是一条原创的测试笔记。') throw Error('hovering a noted passage must show its note');
         await capture('note-peek.png');
+        const noteBook = await (await app.$('#book-frame')).contentFrame();
+        const notePage = await app.locator('#page-indicator').textContent();
+        await noteBook.locator('.dr-note-tip').click();
+        await app.locator('#annotation-dialog').waitFor({ state: 'visible' });
+        if (await app.locator('#note-peek').isVisible() ||
+            await app.locator('#annotation-note').inputValue() !== '这是一条原创的测试笔记。' ||
+            await app.locator('#page-indicator').textContent() !== notePage)
+          throw Error('one click on a note icon must dismiss its preview and open the correct editor without turning');
+        await app.locator('[aria-label="关闭笔记"]').click();
+        await page.mouse.move(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
+        await app.locator('#note-peek').waitFor({ state: 'visible' });
+        await page.mouse.click(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
+        if (await app.locator('#note-peek').isVisible() || await app.locator('#selection-menu').isVisible())
+          throw Error('clicking a noted passage with its preview open must only dismiss the preview');
         await page.mouse.click(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
         await app.locator('#selection-menu').waitFor({ state: 'visible' });
         if (await app.locator('#selection-highlight').getAttribute('aria-pressed') !== 'true' ||
@@ -227,6 +262,15 @@ try {
         await app.locator('#book-search-input').waitFor({ state: 'visible' });
         if (!await app.locator('#book-search-input').evaluate(el => document.activeElement === el))
           throw Error('book search must expand the sidebar and receive keyboard focus');
+        const searchPage = await app.locator('#page-indicator').textContent();
+        const searchBook = await (await app.$('#book-frame')).contentFrame();
+        const searchWidth = await searchBook.evaluate(() => innerWidth);
+        await searchBook.locator('html').click({ position: { x: searchWidth - 5, y: 200 } });
+        await tocPanel.waitFor({ state: 'hidden' });
+        await page.waitForTimeout(300);
+        if (await app.locator('#page-indicator').textContent() !== searchPage)
+          throw Error('clicking the page must dismiss the search sidebar without turning');
+        await app.locator('#book-frame').press('Control+f');
         await app.locator('[data-tab="toc"]').click();
         console.log('PASS auto-hide sidebar, 8px reveal zone, pin persistence, chapter capsule animation and keyboard search');
         await app.locator('#reader-app-settings').click();
@@ -369,6 +413,90 @@ try {
         await book.locator('html').click({ position: { x: size.width - 5, y: size.height * .5 } });
         await page.waitForTimeout(300);
         if (await pageNumber() !== beforeTap) throw Error('clicking to dismiss a selection also turned the page');
+        // Escape dismisses one colour/menu layer at a time and always keeps the book open.
+        const selectPassage = async () => {
+          await book.locator('p').first().evaluate(element => {
+            const range = document.createRange(); range.selectNodeContents(element);
+            getSelection().removeAllRanges(); getSelection().addRange(range);
+            element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+          });
+          await app.locator('#selection-menu').waitFor({ state: 'visible' });
+        };
+        await selectPassage();
+        await app.locator('#highlight-color').click();
+        const plus = await app.locator('#highlight-swatches .color-custom').evaluate(element => {
+          return ['::before', '::after'].every(pseudo => {
+            const style = getComputedStyle(element, pseudo);
+            const matrix = new DOMMatrix(style.transform);
+            return Math.abs(parseFloat(style.left) + matrix.e + parseFloat(style.width) / 2 - element.clientWidth / 2) < .1 &&
+              Math.abs(parseFloat(style.top) + matrix.f + parseFloat(style.height) / 2 - element.clientHeight / 2) < .1;
+          });
+        });
+        if (!plus) throw Error('custom colour plus must be centred in its button');
+        await app.locator('#highlight-swatches .color-custom').click();
+        await app.locator('.color-picker:popover-open').waitFor();
+        await app.locator('.color-picker').evaluate(element => Promise.all(element.getAnimations().map(animation => animation.finished)));
+        const gaps = await app.evaluate(() => {
+          const menu = document.getElementById('selection-menu').getBoundingClientRect();
+          const palette = document.getElementById('mark-palette').getBoundingClientRect();
+          const picker = document.querySelector('.color-picker:popover-open').getBoundingClientRect();
+          return [palette.top - menu.bottom, picker.top - palette.bottom];
+        });
+        if (gaps.some(gap => Math.abs(gap - 1) > .1)) throw Error(`nested colour popups must leave a 1px gap: ${gaps}`);
+        const otherWindow = await browser.newPage();
+        await otherWindow.bringToFront();
+        await app.evaluate(() => window.dispatchEvent(new Event('blur')));
+        await page.bringToFront();
+        await otherWindow.close();
+        if (!await app.locator('.color-picker:popover-open').count() ||
+            !await app.locator('#mark-palette').isVisible() || !await app.locator('#selection-menu').isVisible())
+          throw Error('losing window focus must preserve every colour/menu layer');
+        await page.keyboard.press('Escape');
+        if (await app.locator('.color-picker:popover-open').count() ||
+            !await app.locator('#mark-palette').isVisible() || !await app.locator('#selection-menu').isVisible())
+          throw Error('first Escape must dismiss only the custom colour picker');
+        await page.keyboard.press('Escape');
+        if (await app.locator('#mark-palette').isVisible() || !await app.locator('#selection-menu').isVisible())
+          throw Error('second Escape must dismiss only the colour palette');
+        await page.keyboard.press('Escape');
+        if (await app.locator('#selection-menu').isVisible()) throw Error('third Escape must dismiss the selection menu');
+        await page.keyboard.press('Escape');
+        await book.locator('html').press('Escape');
+        if (!await app.locator('#reader-view').isVisible()) throw Error('Escape must never close the book');
+        await selectPassage();
+        await app.locator('#highlight-color').click();
+        const balanced = await app.locator('#mark-palette').evaluate(element => {
+          const outer = element.getBoundingClientRect();
+          const row = element.querySelector('.swatch-row').getBoundingClientRect();
+          return Math.abs((row.top - outer.top) - (outer.bottom - row.bottom)) < .1;
+        });
+        if (!balanced) throw Error('colour palette must have equal top and bottom spacing');
+        await app.locator('#highlight-swatches .color-custom').click();
+        const beforeDismiss = await pageNumber();
+        await book.locator('html').click({ position: { x: size.width - 5, y: size.height * .5 } });
+        await page.waitForTimeout(300);
+        if (await pageNumber() !== beforeDismiss || await app.locator('.color-picker:popover-open').count() ||
+            await app.locator('#mark-palette').isVisible() || await app.locator('#selection-menu').isVisible())
+          throw Error('clicking the page must close every colour/menu layer without turning');
+        // The same guard applies when only the manual colour popover remains, with no text selection.
+        await selectPassage();
+        await app.locator('#highlight-color').click();
+        await app.locator('#highlight-swatches .color-custom').click();
+        await book.evaluate(() => getSelection().removeAllRanges());
+        await book.locator('html').click({ position: { x: size.width - 5, y: size.height * .5 } });
+        await page.waitForTimeout(300);
+        if (await pageNumber() !== beforeDismiss || await app.locator('.color-picker:popover-open').count())
+          throw Error('closing a colour popover without a selection must also consume the page click');
+        await selectPassage();
+        await app.locator('#selection-note').click();
+        await app.locator('#annotation-swatches .color-custom').click();
+        await page.keyboard.press('Escape');
+        if (await app.locator('.color-picker:popover-open').count() ||
+            !await app.locator('#annotation-dialog').evaluate(element => element.open))
+          throw Error('Escape must dismiss the custom colour picker before the note dialog');
+        await page.keyboard.press('Escape');
+        if (await app.locator('#annotation-dialog').evaluate(element => element.open)) throw Error('next Escape must dismiss the note dialog');
+        await book.evaluate(() => getSelection().removeAllRanges());
         await page.keyboard.press('F8');
         await app.locator('#reading-settings').waitFor({ state: 'visible' });
         await app.locator('[data-close="reading-settings"]').click();
@@ -471,9 +599,10 @@ try {
       if (name === 'book_opening') {
         await page.emulateMedia({ reducedMotion: 'reduce' });
         if (!await page.evaluate(async () => {
-          await new window.BookOpening(document.getElementById('busy'), true).finish();
+          for (const effect of ['circles', 'book', 'cover'])
+            await new window.BookOpening(document.getElementById('busy'), true, effect).finish();
           return !document.querySelector('.book-opening');
-        })) throw Error('reduced motion must skip the opening circles');
+        })) throw Error('reduced motion must skip both opening effects');
       }
       if (errors.length) throw Error(`${name}: ${errors.join('\n')}`);
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));

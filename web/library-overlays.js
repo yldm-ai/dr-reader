@@ -91,7 +91,6 @@ export function createLibraryOverlays(onRemove) {
   });
   document.addEventListener("scroll", dismiss, true);
   window.addEventListener("resize", dismiss);
-  window.addEventListener("blur", dismiss);
 
   return {
     dismiss,
@@ -107,7 +106,7 @@ export function createLibraryOverlays(onRemove) {
       title.onpointerenter = () => showTitle(card, title);
       title.onpointerleave = hideTitle;
       card.onfocus = () => showTitle(card, title, true);
-      card.onblur = hideTitle;
+      card.onblur = () => { if (document.hasFocus()) hideTitle(); };
       card.addEventListener("pointerdown", hideTitle);
     },
   };

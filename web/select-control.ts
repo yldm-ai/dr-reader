@@ -98,7 +98,7 @@ export class SelectControl {
     });
     select.addEventListener('change', () => this.sync());
     this.popup.addEventListener('focusout', () => queueMicrotask(() => {
-      if (this.isOpen && !wrapper.contains(document.activeElement)) this.close(false);
+      if (document.hasFocus() && this.isOpen && !wrapper.contains(document.activeElement)) this.close(false);
     }));
     this.observer = new ResizeObserver(() => { if (this.isOpen) this.position(); });
     this.observer.observe(this.button);

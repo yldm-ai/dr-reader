@@ -39,6 +39,7 @@ export class Reader {
     this.attachTocAutoHide();
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
+      if (event.target.closest(".reading-area")) this.beginPageTap(event);
       // The custom colour picker belongs to the menu that opened it.
       if (!event.target.closest("#selection-menu, .color-picker")) this.hideSelection();
       if (!event.target.closest("#note-peek")) this.hideNotePeek();
@@ -49,7 +50,6 @@ export class Reader {
       this.hideNotePeek();
     }, true);
     window.addEventListener("resize", () => this.hideSelection());
-    window.addEventListener("blur", () => this.hideSelection());
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && this.dismissSelection()) {
         event.preventDefault();
@@ -88,10 +88,9 @@ export class Reader {
     $("corner-library").onclick = () => $("back-library").click();
     $("reader-view").addEventListener("pointermove", event => this.trackCorners(event.clientX, event.clientY));
     $("reader-view").addEventListener("pointerleave", () => this.trackCorners(-1, -1));
-    $("page-surface").addEventListener("pointerdown", event => this.beginPageTap(event));
     $("page-surface").addEventListener("click", event => { if (event.target.id === "page-surface") this.pageTap(event, $("page-surface").clientWidth, $("page-surface").getBoundingClientRect().left); });
     const area = document.querySelector(".reading-area");
-    area.addEventListener("pointerdown", event => { if (event.target === area) this.beginPageTap(event); });
+    area.addEventListener("click", event => this.consumeDismissedTap(event), true);
     area.addEventListener("click", event => { if (event.target === area) this.pageTap(event, area.clientWidth, area.getBoundingClientRect().left); });
     $("add-bookmark").onclick = () => this.bookmark();
     $("reading-progress").onchange = () => {
@@ -155,6 +154,7 @@ export class Reader {
       this.saveFromDialog();
     });
     $("annotation-delete").onclick = () => this.deleteFromDialog();
+    this.attachAnnotationDrag();
     this.observer = new ResizeObserver(() => { this.motion.cancel(); this.reflow(); this.updateTocIndicator(); });
     this.observer.observe($("book-frame"));
   }
@@ -183,7 +183,6 @@ export class Reader {
       else { this.settings = { ...this.settings, tocPinned }; this.syncChrome(); }
       if (!tocPinned && !panel.matches(":hover")) this.scheduleTocHide();
     };
-    window.addEventListener("blur", () => this.setTocExpanded(false));
     document.addEventListener("pointermove", event => this.trackTocPointer(event.clientX, event.clientY));
   }
 
@@ -470,11 +469,13 @@ export class Reader {
       if (generation !== this.generation) return;
       const base = bookUrl(this.book, item.href);
       // Books imported before the engine wrote HTML-safe chapters still contain e.g. <title/>.
+      const initialPaper = readingPalette(this.settings?.theme || "light");
       html = htmlFromXhtml(html).replace(
         /<head(?:\s[^>]*)?>/i,
-        (match) => `${match}<base href="${escape(base)}">`,
+        (match) => `${match}<style id="dr-loading-paper">html,body{background:${initialPaper.paper}!important;color:${initialPaper.text}!important}</style><base href="${escape(base)}">`,
       );
       const frame = $("book-frame");
+      frame.style.backgroundColor = initialPaper.paper;
       const update = () => new Promise((resolve, reject) => {
         if (generation !== this.generation) { resolve(); return; }
         const timeout = setTimeout(() => reject(new Error("章节载入超时")), 8000);
@@ -525,6 +526,7 @@ export class Reader {
         svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
     }
     doc.addEventListener("click", (event) => {
+      if (this.consumeDismissedTap(event)) return;
       // A note tip opens its note for editing.
       const tip = event.target.closest?.(".dr-note-tip");
       const tipped = tip && this.annotationLayer?.ranges.get(tip.dataset.id);
@@ -575,6 +577,7 @@ export class Reader {
       if (doc.getSelection()?.isCollapsed && !this.selection?.pinned) this.hideSelection();
     });
     doc.addEventListener("mouseup", (event) => {
+      if (this.tapDismissed) return;
       if (event.target.closest?.("a")) return;
       this.selectionTimer = setTimeout(() => this.readSelection(), 0);
     });
@@ -798,9 +801,42 @@ export class Reader {
 
   beginPageTap(event) {
     clearTimeout(this.tapTimer);
+    const tip = event.target.closest?.(".dr-note-tip");
+    const editsNote = Boolean(tip && this.annotationLayer?.ranges.has(tip.dataset.id));
+    const dismissed = event.button === 0 && event.isPrimary !== false && this.dismissPagePopups();
+    // A note icon is an explicit edit action, even when its hover preview is open.
+    this.tapDismissed = dismissed && !editsNote;
+    if (dismissed || editsNote) {
+      event.preventDefault();
+      this.tapStart = null;
+      return;
+    }
     this.tapStart = event.button === 0 && event.isPrimary !== false
       ? { x: event.clientX, y: event.clientY, time: performance.now(), selected: Boolean(this.doc?.getSelection()?.toString()) }
       : null;
+  }
+
+  /** A press on the page closes the whole floating stack and consumes that click. */
+  dismissPagePopups() {
+    const panel = $("toc-panel");
+    const sidebarOpen = !this.settings?.tocPinned && !panel.hidden && panel.dataset.expanded === "true";
+    const open = this.colorPicker?.isOpen || !$("selection-menu").hidden ||
+      !$("mark-palette").hidden || !$("note-peek").hidden || sidebarOpen;
+    if (!open) return false;
+    this.colorPicker?.close(false);
+    this.hideSelection();
+    this.hideNotePeek();
+    if (sidebarOpen) this.setTocExpanded(false);
+    this.doc?.getSelection()?.removeAllRanges();
+    return true;
+  }
+
+  consumeDismissedTap(event) {
+    if (!this.tapDismissed) return false;
+    this.tapDismissed = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return true;
   }
 
   pageTap(event, width, offsetX = 0) {
@@ -1170,6 +1206,21 @@ export class Reader {
   }
 
   dismissSelection() {
+    if (this.colorPicker?.isOpen) {
+      this.colorPicker.close();
+      return true;
+    }
+    // Let the active dialog handle Escape before touching the menu underneath it.
+    if (document.querySelector("dialog[open]")) return false;
+    if (!$("mark-palette").hidden) {
+      $("mark-palette").hidden = true;
+      this.paletteStyle = "";
+      return true;
+    }
+    if (!$("note-peek").hidden) {
+      this.hideNotePeek();
+      return true;
+    }
     if ($("selection-menu").hidden) return false;
     this.hideSelection();
     this.doc?.getSelection()?.removeAllRanges();
@@ -1223,8 +1274,6 @@ export class Reader {
       ) || [];
     $("selection-dictionary").hidden =
       !actions.dictionary || !dictionaries.length;
-    $("selection-preview").textContent =
-      text.length > 48 ? `${text.slice(0, 48)}…` : text;
     const menu = $("selection-menu");
     menu.hidden = false;
     const width = menu.offsetWidth;
@@ -1285,11 +1334,12 @@ export class Reader {
     palette.querySelectorAll("[data-color]").forEach((button) =>
       button.classList.toggle("selected", button.dataset.color === current));
     palette.hidden = false;
-    // Below the dot, inside the menu, so the selection stays alive while choosing.
-    const menu = $("selection-menu").getBoundingClientRect();
+    // Absolute offsets start inside the menu border; leave 1px between the two borders.
+    const menuElement = $("selection-menu");
+    const menu = menuElement.getBoundingClientRect();
     const rect = dot.getBoundingClientRect();
     palette.style.left = `${Math.max(4, rect.left - menu.left - 8)}px`;
-    palette.style.top = `${rect.bottom - menu.top + 6}px`;
+    palette.style.top = `${menu.height + 1 - menuElement.clientTop}px`;
   }
 
   /** Applies the mark in the picked colour; the colour becomes that mark's default. */
@@ -1351,7 +1401,7 @@ export class Reader {
     $("note-peek-text").textContent = note.note;
     peek.style.setProperty("--note-ink", note.ink);
     peek.hidden = false;
-    peek.scrollTop = 0;
+    $("note-peek-text").scrollTop = 0;
     const width = peek.offsetWidth;
     const height = peek.offsetHeight;
     const left = Math.max(12, Math.min(rect.left, innerWidth - width - 12));
@@ -1426,7 +1476,7 @@ export class Reader {
       const swatch = dark ? paint(color, "#191919", true).fill : color;
       return `<button type="button" class="color-dot" data-color="${color}" style="--swatch:${swatch}" title="${color}" aria-label="高亮颜色 ${color}"></button>`;
     }).join("");
-    const custom = `<button type="button" class="color-dot color-custom" title="自定义颜色" aria-label="自定义颜色">${icon("plus")}</button>`;
+    const custom = `<button type="button" class="color-dot color-custom" title="自定义颜色" aria-label="自定义颜色"></button>`;
     for (const id of ["highlight-swatches", "annotation-swatches"]) if ($(id)) $(id).innerHTML = dots + custom;
     this.syncDialogColors();
   }
@@ -1459,6 +1509,41 @@ export class Reader {
     return saved;
   }
 
+  attachAnnotationDrag() {
+    const dialog = $("annotation-dialog");
+    const header = dialog.querySelector(".annotation-header");
+    let drag = null;
+    const position = (left, top) => {
+      dialog.style.inset = "auto";
+      dialog.style.margin = "0";
+      dialog.style.left = `${Math.max(8, Math.min(left, innerWidth - dialog.offsetWidth - 8))}px`;
+      dialog.style.top = `${Math.max(8, Math.min(top, innerHeight - dialog.offsetHeight - 8))}px`;
+    };
+    const finish = () => {
+      if (drag && header.hasPointerCapture(drag.id)) header.releasePointerCapture(drag.id);
+      drag = null;
+      delete dialog.dataset.dragging;
+    };
+    header.addEventListener("pointerdown", event => {
+      if (event.button !== 0 || event.target.closest("button")) return;
+      event.preventDefault();
+      this.colorPicker.close(false);
+      const rect = dialog.getBoundingClientRect();
+      drag = { id: event.pointerId, x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+      header.setPointerCapture(event.pointerId);
+      dialog.dataset.dragging = "true";
+    });
+    header.addEventListener("pointermove", event => {
+      if (!drag || event.pointerId !== drag.id) return;
+      position(drag.left + event.clientX - drag.x, drag.top + event.clientY - drag.y);
+    });
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) header.addEventListener(type, finish);
+    dialog.addEventListener("close", () => { finish(); this.colorPicker.close(false); });
+    window.addEventListener("resize", () => {
+      if (dialog.open && dialog.style.left) position(parseFloat(dialog.style.left), parseFloat(dialog.style.top));
+    });
+  }
+
   openAnnotationDialog() {
     if (!this.selection) return;
     this.editingAnnotation =
@@ -1477,7 +1562,9 @@ export class Reader {
       : "记笔记";
     this.syncDialogColors();
     $("selection-menu").hidden = true;
-    $("annotation-dialog").showModal();
+    const dialog = $("annotation-dialog");
+    for (const property of ["inset", "margin", "left", "top"]) dialog.style.removeProperty(property);
+    dialog.showModal();
     setTimeout(() => $("annotation-note").focus(), 0);
   }
 

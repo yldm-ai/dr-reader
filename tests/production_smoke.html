@@ -6,7 +6,7 @@
 const output = document.getElementById('result');
 const check = (value, label) => { if (!value) throw Error(label); };
 const until = async predicate => {
-  for (let i = 0; i < 150; i++) {
+  for (let i = 0; i < 300; i++) {
     if (predicate()) return;
     await new Promise(resolve => setTimeout(resolve, 30));
   }
@@ -44,19 +44,41 @@ try {
   check(win.chapterRequests === 1, 'reopening an immutable cached chapter must avoid another fetch');
   doc.getElementById('reader-app-settings').click();
   const animations = doc.getElementById('app-animations');
-  animations.checked = true; animations.dispatchEvent(new win.Event('change'));
-  await until(() => win.nativeProbe.data.settings.application.animations === true);
+  const openingSwitch = doc.getElementById('app-book-opening-enabled');
+  openingSwitch.checked = true; openingSwitch.dispatchEvent(new win.Event('change'));
+  await until(() => win.nativeProbe.data.settings.application.bookOpeningEnabled === true);
+  check(win.nativeProbe.data.settings.application.animations === false,
+    'opening animation must work independently of disabled interface animations');
+  const openingChoice = doc.getElementById('app-book-opening');
+  openingChoice.value = 'book'; openingChoice.dispatchEvent(new win.Event('change'));
+  await until(() => win.nativeProbe.data.settings.application.bookOpeningAnimation === 'book');
   doc.getElementById('application-settings').close();
   doc.getElementById('back-library').click();
   await until(() => doc.getElementById('reader-view').hidden);
   doc.querySelector('.book-card').click();
   check(doc.querySelector('.book-opening'), 'opening a book with animations enabled must start the circles immediately');
+  check(doc.querySelector('.book-opening-book'), 'the selected book effect must start immediately in the production bundle');
   await until(() => doc.getElementById('busy').hidden);
   check(!doc.querySelector('.book-opening') && !doc.getElementById('reader-view').hidden,
     'opening must collapse and release its overlay when the chapter is ready');
+  check(content.querySelector('#dr-loading-paper'), 'the first chapter must receive its reading paper before layout');
+  doc.getElementById('reader-app-settings').click();
+  openingChoice.value = 'cover'; openingChoice.dispatchEvent(new win.Event('change'));
+  await until(() => win.nativeProbe.data.settings.application.bookOpeningAnimation === 'cover');
+  doc.getElementById('application-settings').close();
+  doc.getElementById('back-library').click();
+  await until(() => doc.getElementById('reader-view').hidden);
+  doc.querySelector('.book-card').click();
+  check(doc.querySelector('.book-opening-cover strong').textContent === '阅读与时光',
+    'the selected cover animation must use the current book title when its image is missing');
+  await until(() => doc.getElementById('busy').hidden);
+  check(!doc.querySelector('.book-opening') && !doc.getElementById('reader-view').hidden,
+    'cover opening must release its overlay and reveal the reader');
   doc.getElementById('reader-app-settings').click();
   animations.checked = false; animations.dispatchEvent(new win.Event('change'));
+  openingSwitch.checked = false; openingSwitch.dispatchEvent(new win.Event('change'));
   await until(() => win.nativeProbe.data.settings.application.animations === false);
+  await until(() => win.nativeProbe.data.settings.application.bookOpeningEnabled === false);
   doc.getElementById('application-settings').close();
   doc.getElementById('reader-settings').click();
   check(!win.runtimeErrors.length, `Runtime errors: ${win.runtimeErrors.join('; ')}`);

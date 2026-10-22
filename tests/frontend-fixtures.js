@@ -1,7 +1,7 @@
 export function bootstrapFixture() {
   const settings = {
     version: 2,
-    application: { theme: 'light', shell: 'direct2d', animations: false,
+    application: { theme: 'light', shell: 'direct2d', animations: false, bookOpeningEnabled: false, bookOpeningAnimation: 'circles',
       selectionActions: { highlight: true, underline: true, note: true, copy: true, search: true, dictionary: true },
       dictionaries: [{ id: 'one', name: '测试词典', url: 'https://example.com/?q={text}', enabled: true }] },
     reading: { theme: 'sepia', mode: 'paged', fontFamily: 'serif', fontSize: 20, fontWeight: 400,

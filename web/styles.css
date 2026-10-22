@@ -61,7 +61,7 @@
 }
 .brand-mark { --icon-size: 20px; }
 .empty-state > span { --icon-size: 40px; }
-.selection-action { --icon-size: 12px; }
+.selection-action { --icon-size: 16px; }
 * {
   box-sizing: border-box;
 }
@@ -437,16 +437,6 @@ h1 span {
   height: 100%;
   background: var(--accent);
 }
-.continue-action {
-  color: var(--accent);
-  font-size: var(--text-body);
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-.continue-action :is(svg, .ui-icon) {
-  width: 16px;
-}
 .library-toolbar {
   display: flex;
   align-items: center;
@@ -498,13 +488,19 @@ h1 span {
 }
 .toolbar-right .select-control { width: 132px; }
 .toolbar-right .select-trigger {
-  min-height: 32px; padding: 4px 7px 4px 10px; border-radius: 7px;
-  background: transparent; color: var(--muted); box-shadow: none;
+  min-height: 32px;
+  padding: 4px 7px 4px 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
 }
 .toolbar-right .select-trigger:hover,
 .toolbar-right .select-trigger:focus-visible,
 .toolbar-right .select-trigger[aria-expanded="true"] {
-  color: var(--text); border-color: var(--control-border); box-shadow: none;
+  color: var(--text);
+  border-color: var(--control-border);
+  box-shadow: none;
 }
 .view-toggle {
   display: flex;
@@ -1600,17 +1596,8 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   border: 1px solid var(--border);
   border-radius: var(--radius-panel);
   box-shadow: var(--shadow-flyout);
-  padding: 8px;
+  padding: 4px 6px;
   animation: selection-in 130ms ease-out;
-}
-.selection-preview {
-  max-width: 520px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--muted);
-  font-size: var(--text-caption);
-  padding: 3px 7px 8px;
 }
 .selection-tools {
   display: flex;
@@ -1631,7 +1618,7 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   align-items: center;
   justify-content: center;
   width: 22px;
-  height: 29px;
+  height: 26px;
   padding: 0;
   border: 0;
   border-radius: 4px;
@@ -1659,6 +1646,8 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
 .mark-action[aria-pressed="true"]:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 18%, transparent); }
 .mark-palette {
   position: absolute;
+  display: flex;
+  align-items: center;
   z-index: 1;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -1675,19 +1664,39 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   width: max-content;
   max-width: min(340px, calc(100vw - 24px));
   max-height: min(260px, calc(100vh - 24px));
-  overflow: auto;
-  padding: 10px 12px 10px 14px;
+  overflow: visible;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow-flyout), inset 3px 0 0 var(--note-ink, var(--accent));
+  box-shadow: var(--shadow-flyout);
   font-size: var(--text-secondary);
   line-height: 1.65;
   animation: flyout-enter 140ms var(--ease-ui);
 }
+.note-peek::before {
+  content: "";
+  position: absolute;
+  /* Absolute offsets start inside the 1px border; center on the border itself. */
+  left: -0.5px;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--note-ink, var(--accent));
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
 .note-peek[hidden] { display: none; }
-.note-peek-text { white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+.note-peek-text {
+  max-height: min(258px, calc(100vh - 26px));
+  overflow: auto;
+  padding: 10px 12px 10px 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
 /* Highlight swatches show Notion's soft background colours as chips with a hairline edge. */
 .swatch-row { display: inline-flex; align-items: center; gap: 6px; }
 .color-dot {
@@ -1706,9 +1715,30 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
 }
 .color-dot:hover { transform: scale(1.1); }
 .color-dot.selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent), 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
-.color-custom { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1px var(--control-border); }
-.color-custom:hover { color: var(--text); background: var(--hover); }
-.color-custom :is(svg, .ui-icon) { width: 14px !important; height: 14px !important; }
+.color-custom {
+  position: relative;
+  /* Even dimensions keep both centred 2px strokes on whole pixels. */
+  width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--control-border);
+}
+.color-custom:hover { transform: none; color: var(--accent); }
+.color-custom::before, .color-custom::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.color-custom::after { width: 2px; height: 10px; }
 /* Custom colour flyout (color-picker.ts). */
 .color-picker {
   position: fixed;
@@ -1716,6 +1746,7 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   margin: 0;
   width: 252px;
   padding: 12px;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -1780,15 +1811,20 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
 .cp-hex:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .cp-footer .text-button, .cp-footer .primary { height: 28px; padding: 0 10px; border-radius: 6px; font-size: var(--text-secondary); }
 .selection-divider {
-  height: 21px;
+  height: 18px;
   border-left: 1px solid var(--border);
   margin: 0 4px;
 }
-.selection-action {
-  min-height: 29px;
-  padding: 5px 8px;
+.selection-menu .selection-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 8px;
   border-radius: 4px;
   font-size: var(--text-secondary);
+  line-height: 20px;
   white-space: nowrap;
 }
 .selection-action[aria-pressed="true"] {
@@ -1799,10 +1835,18 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   background: var(--hover);
   color: var(--accent);
 }
-.selection-action :is(svg, .ui-icon) {
+.selection-action > [data-icon] {
+  width: 16px;
+  height: 20px;
+  justify-content: center;
+  flex: 0 0 16px;
+  line-height: 0;
+}
+.selection-action > [data-icon] :is(svg, .ui-icon) {
   width: 16px;
   height: 16px;
 }
+.selection-action-label { display: block; line-height: 20px; }
 .annotation-dialog,
 .dictionary-picker {
   width: min(520px, calc(100vw - 32px));
@@ -1885,6 +1929,53 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   align-items: center;
   gap: 8px;
 }
+/* A compact, movable note editor keeps the passage behind it readable. */
+#annotation-dialog { width: min(420px, calc(100vw - 24px)); border-radius: 10px; }
+#annotation-dialog::backdrop { background: #0000000a; backdrop-filter: none; }
+#annotation-dialog form { padding: 16px; }
+#annotation-dialog .annotation-header {
+  align-items: center;
+  margin: -16px -16px 12px;
+  padding: 8px 8px 8px 16px;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+#annotation-dialog .annotation-header h2 { margin: 0; font-size: 15px; font-weight: 500; }
+#annotation-dialog .annotation-header .icon-button { width: 28px; height: 28px; padding: 6px; color: var(--muted); }
+#annotation-dialog .annotation-header .icon-button:hover { color: var(--text); }
+#annotation-dialog blockquote {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  max-height: 76px;
+  font-size: var(--text-secondary);
+  line-height: 1.65;
+}
+#annotation-dialog .annotation-note-label { font-size: var(--text-secondary); font-weight: 400; }
+#annotation-note {
+  height: 132px;
+  min-height: 96px;
+  max-height: min(320px, 40vh);
+  margin-top: 6px;
+  padding: 9px 10px;
+  font-size: var(--text-secondary);
+  line-height: 1.65;
+}
+#annotation-note:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+#annotation-dialog .annotation-style-row { gap: 10px; margin: 12px 0 16px; }
+#annotation-dialog .annotation-style-row select { padding: 5px 7px; }
+#annotation-dialog .annotation-actions { display: flex; }
+#annotation-dialog .annotation-actions > span { flex: 1; }
+#annotation-dialog .annotation-actions :is(.primary, .text-button, .danger-button) {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: var(--text-secondary);
+}
+#annotation-dialog .annotation-actions .danger-button { padding-left: 0; }
 .danger-button {
   color: var(--danger);
   font-size: var(--text-secondary);
@@ -1978,12 +2069,57 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   animation: spin 0.8s linear infinite;
 }
 .busy.book-opening-active .spinner { display: none; }
+.busy.book-opening-active {
+  background: var(--opening-background, var(--bg));
+  color: var(--opening-ink, var(--text));
+  backdrop-filter: none;
+}
 .book-opening {
-  width: min(600px, 80vw, 70vh);
-  height: min(600px, 80vw, 70vh);
+  width: min(300px, 40vw, 35vh);
+  height: min(300px, 40vw, 35vh);
   flex: 0 0 auto;
   filter: drop-shadow(0 4px 5px #0008);
 }
+.book-opening-book { width: min(296px, 80vw, 70vh); height: auto; aspect-ratio: 1.48; filter: none; }
+.opening-book-scene { position: relative; width: 100%; height: 100%; perspective: 1440px; }
+.opening-book-cover, .opening-book-paper {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  transform-origin: left bottom;
+  border-radius: 5px 0 0 5px;
+  box-shadow: inset 3px 0 20px #0003, 0 0 15px #0000001a;
+  background: #ff8c00;
+}
+.opening-book-paper { top: 2%; width: 48.65%; height: 96%; background: #e9e6c4; }
+.opening-book-paper::before {
+  content: "";
+  position: absolute;
+  inset: 18px 16px;
+  background: repeating-linear-gradient(to bottom, #0003 0 1px, transparent 1px 18px);
+  opacity: .6;
+}
+.book-opening-cover { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; filter: none; }
+.busy.book-opening-cover-active > :not(.book-opening-cover) { visibility: hidden; }
+.opening-cover-backdrop { position: absolute; inset: 0; background: var(--opening-background, var(--bg)); }
+.opening-cover-card {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  transform-origin: left top;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8%;
+  background: var(--cover-bg);
+  color: var(--cover-text);
+  box-shadow: 0 12px 40px #0003;
+}
+.opening-cover-card strong { font-size: clamp(24px, 4vh, 48px); font-weight: 500; overflow-wrap: anywhere; }
+.opening-cover-card small { margin-top: 24px; font-size: clamp(14px, 2vh, 22px); opacity: .75; }
+.opening-cover-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -2161,15 +2297,15 @@ body[data-animations="false"] .app-settings { animation: none; }
 /* The top strip belongs to the close button: content and the scrollbar track start below it, so
    the hover plate never covers a card border or the scrollbar. */
 .app-settings-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-top: 44px; }
-/* Close sits in the corner; its hover plate is concentric with the panel's 12px corner. */
+/* A compact hover plate keeps the close button tucked into the corner. */
 .app-settings-close {
   position: absolute;
   z-index: 31;
-  top: 6px;
-  right: 6px;
-  width: 32px !important;
-  height: 32px !important;
-  border-radius: 5px !important;
+  top: 4px;
+  right: 4px;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 4px !important;
 }
 .app-settings-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 0 36px 36px; }
 .app-section + .app-section { margin-top: 30px; }
@@ -2185,6 +2321,7 @@ body[data-animations="false"] .app-settings { animation: none; }
   padding: 14px 18px;
 }
 .app-row + .app-row { border-top: 1px solid var(--border); }
+.app-row:has(> #app-book-opening-label) > .select-control { width: 180px; flex: 0 0 180px; }
 .app-row-stack { flex-direction: column; align-items: stretch; gap: 12px; }
 .app-row-label { display: flex; flex-direction: column; color: var(--text); font-size: var(--text-body); line-height: 1.5; }
 .app-row-label small { margin-top: 2px; color: var(--muted); font-size: var(--text-caption); line-height: 1.6; }
@@ -2358,7 +2495,7 @@ body > .page-surface { max-width: none; }
 .stpageflip-page .motion-page { position: absolute; inset: 0; }
 /* A spread's pages are half the reading width; each crops its half of the spread snapshot. */
 .stpageflip-host[data-layout="double"] .stpageflip-page { width: 50% !important; }
-/* Two-page reading gets a faint spine down the middle of the open book. */
+/* A subtle spine at half the original opacity. */
 .reader-view[data-layout="double"] .page-surface::after {
   content: "";
   position: absolute;
@@ -2368,7 +2505,7 @@ body > .page-surface { max-width: none; }
   left: calc(50% - 18px);
   width: 36px;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, #00000010 45%, #00000018 50%, #00000010 55%, transparent);
+  background: linear-gradient(to right, transparent, #00000008 45%, #0000000c 50%, #00000008 55%, transparent);
 }
 
 .icon-button, .text-button, .nav-item, .toc-tabs button, .theme-swatch, .select-option {

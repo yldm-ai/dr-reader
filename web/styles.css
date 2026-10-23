@@ -2703,6 +2703,11 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
 .shelf-card:hover .cover-wrap { background: var(--selected); }
 .shelf-card strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-body); font-weight: 500; margin-bottom: 8px; }
 .shelf-card > small { color: var(--muted); }
+/* Shelf cards are buttons, whose icons are otherwise fixed at 18px. */
+.private-cover { --icon-size: 88px; }
+.private-cover .ui-icon { width: var(--icon-size); height: var(--icon-size); }
+.private-cover .ui-icon svg { width: 100%; height: 100%; }
+#shelf-cover-preview .private-cover { --icon-size: 44px; }
 .shelf-add .cover-wrap { border: 1px dashed var(--control-border); background: transparent; }
 .shelf-add .ui-icon { font-size: 30px; width: 32px; height: 32px; color: var(--muted); }
 .shelf-actions { display: flex; justify-content: space-between; margin-bottom: 20px; }

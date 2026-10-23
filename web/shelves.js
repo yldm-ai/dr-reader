@@ -1,5 +1,5 @@
 import { $, call, escape, bookUrl } from './bridge.js';
-import { hydrate } from './icons.ts';
+import { hydrate, icon } from './icons.ts';
 
 // Books in the private shelf are hidden from every other library view.
 export const PRIVATE_SHELF = 'private';
@@ -43,8 +43,10 @@ export class Shelves {
   coverMarkup(shelf) {
     const book = this.books().find(book => book.id === shelf.cover?.bookId && shelf.bookIds.includes(book.id));
     const src = shelf.cover?.image || (book?.cover ? bookUrl(book, book.cover) : '');
-    return src ? `<img class="cover-image" src="${escape(src)}" alt="${escape(shelf.name)}封面">`
-      : `<div class="cover-fallback cover-image">${escape(shelf.name || '书架')}</div>`;
+    if (src) return `<img class="cover-image" src="${escape(src)}" alt="${escape(shelf.name)}封面">`;
+    // Without a chosen cover the private shelf shows a mask rather than its name.
+    if (this.isPrivate(shelf)) return `<div class="cover-fallback cover-image private-cover" role="img" aria-label="隐私书架封面">${icon('private-shelf')}</div>`;
+    return `<div class="cover-fallback cover-image">${escape(shelf.name || '书架')}</div>`;
   }
 
   selectedBooks() {
@@ -52,7 +54,7 @@ export class Shelves {
   }
 
   preview() {
-    $('shelf-cover-preview').innerHTML = this.coverMarkup({ name: $('shelf-name').value, bookIds: this.selectedBooks(), cover: this.cover });
+    $('shelf-cover-preview').innerHTML = this.coverMarkup({ id: this.editing?.id, name: $('shelf-name').value, bookIds: this.selectedBooks(), cover: this.cover });
   }
 
   coverOptions() {

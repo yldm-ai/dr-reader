@@ -96,6 +96,8 @@ try {
   const shelfCard = name => [...doc.querySelectorAll('#shelf-grid .shelf-card')].find(card => card.querySelector('strong')?.textContent === name);
   check(shelfCard('隐私书架').textContent.includes('1 本图书') && shelfCard('历史与人文').textContent.includes('0 本图书'),
     'only the private shelf counts hidden books');
+  check(shelfCard('隐私书架').querySelector('.private-cover .material-icon svg') && !shelfCard('历史与人文').querySelector('.private-cover'),
+    'the private shelf cover is the domino mask icon');
   shelfCard('历史与人文').click();
   check(!doc.querySelector('.book-card'), 'other shelves do not show hidden books');
   click('shelf-edit');

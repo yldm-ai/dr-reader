@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bundled application smoke test</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, label) => { if (!value) throw Error(label); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  throw Error('Timed out waiting for bundled application');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js?icons=mdl2"><\/script>`);
+  frame.srcdoc = html;
+  document.body.append(frame);
+  await until(() => frame.contentDocument.querySelector('.book-card'));
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+
+
+  check(doc.querySelector('[data-filter="unread"] .material-icon'), 'missing MDL2 glyph uses SVG');
+  check(doc.querySelector('[data-filter="recent"] .fluent-icon').textContent.codePointAt(0) === 0xe81c, 'recent uses available MDL2 History');
+  check(doc.querySelector('#list-view .fluent-icon').textContent.codePointAt(0) === 0xe8fd, 'list uses older MDL2 glyph');
+  check([...doc.querySelectorAll('.fluent-icon')].every(el => el.dataset.iconFont === 'mdl2' && win.getComputedStyle(el).fontFamily.includes('Segoe MDL2 Assets')), 'all remaining font icons explicitly use MDL2');
+  doc.querySelector('[data-filter="shelves"]').click();
+  check(doc.querySelector('#shelf-add [data-icon-font="mdl2"]'), 'dynamic shelf icons use same fallback');
+  doc.getElementById('open-settings').click();
+  doc.getElementById('application-settings-close').click();
+  doc.querySelector('[data-filter="all"]').click();
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  check(doc.querySelector('#reader-app-settings [data-icon-font="mdl2"]'), 'reader settings icon uses MDL2');
+  const tipDoc = doc.getElementById('book-frame').contentDocument;
+  await until(() => tipDoc.querySelector('.dr-note-tip'));
+  check(tipDoc.defaultView.getComputedStyle(tipDoc.querySelector('.dr-note-tip'), '::before').fontFamily.includes('Segoe MDL2 Assets'), 'note tip uses MDL2');
+  check(tipDoc.defaultView.getComputedStyle(tipDoc.querySelector('.dr-note-tip'), '::before').content.includes(String.fromCodePoint(0xe82f)), 'note tip uses available glyph');
+  check(doc.querySelector('#reader-search .material-icon'), 'reader Material icons stay unchanged');
+  check(!win.runtimeErrors.length, win.runtimeErrors.join('\n'));
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS MDL2 fallback';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

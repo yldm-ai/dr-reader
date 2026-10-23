@@ -8,6 +8,36 @@
 namespace dr
 {
 namespace {
+Json installed_icon_glyphs()
+{
+    Json result = {{"Segoe Fluent Icons", Json::array()}, {"Segoe MDL2 Assets", Json::array()}};
+    Microsoft::WRL::ComPtr<IDWriteFactory> factory;
+    Microsoft::WRL::ComPtr<IDWriteFontCollection> collection;
+    if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+            reinterpret_cast<IUnknown **>(factory.GetAddressOf()))) ||
+        FAILED(factory->GetSystemFontCollection(&collection))) return result;
+    // Probe the icon range in one call per installed face; glyph index zero means missing.
+    std::vector<UINT32> codepoints;
+    for (UINT32 code = 0xe700; code <= 0xf8ff; ++code) codepoints.push_back(code);
+    std::vector<UINT16> indices(codepoints.size());
+    for (const auto *name : {L"Segoe Fluent Icons", L"Segoe MDL2 Assets"})
+    {
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+        Microsoft::WRL::ComPtr<IDWriteFontFamily> family;
+        Microsoft::WRL::ComPtr<IDWriteFont> font;
+        Microsoft::WRL::ComPtr<IDWriteFontFace> face;
+        if (FAILED(collection->FindFamilyName(name, &index, &exists)) || !exists ||
+            FAILED(collection->GetFontFamily(index, &family)) ||
+            FAILED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL, &font)) || FAILED(font->CreateFontFace(&face)) ||
+            FAILED(face->GetGlyphIndices(codepoints.data(), static_cast<UINT32>(codepoints.size()), indices.data()))) continue;
+        auto &available = result[narrow(name)];
+        for (size_t i = 0; i < indices.size(); ++i)
+            if (indices[i]) available.push_back(codepoints[i]);
+    }
+    return result;
+}
 Json installed_fonts(){Microsoft::WRL::ComPtr<IDWriteFactory> factory;Json result=Json::array();if(FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),reinterpret_cast<IUnknown**>(factory.GetAddressOf()))))return result;
  Microsoft::WRL::ComPtr<IDWriteFontCollection> collection;if(FAILED(factory->GetSystemFontCollection(&collection)))return result;std::set<std::string> names;
  for(UINT32 i=0;i<collection->GetFontFamilyCount();++i){Microsoft::WRL::ComPtr<IDWriteFontFamily> family;Microsoft::WRL::ComPtr<IDWriteLocalizedStrings> localized;if(FAILED(collection->GetFontFamily(i,&family))||FAILED(family->GetFamilyNames(&localized)))continue;UINT32 index=0;BOOL exists=FALSE;localized->FindLocaleName(L"zh-cn",&index,&exists);if(!exists)localized->FindLocaleName(L"en-us",&index,&exists);if(!exists)index=0;UINT32 length=0;localized->GetStringLength(index,&length);std::wstring name(length+1,L'\0');if(SUCCEEDED(localized->GetString(index,name.data(),length+1))){name.resize(length);names.insert(narrow(name));}}
@@ -166,6 +196,7 @@ void Application::receive(const Json &request)
                               {"shelves", library_.shelves()},
                               {"dataPath", utf8(library_.root())},
                               {"fonts",installed_fonts()},
+                              {"iconFonts",installed_icon_glyphs()},
                               {"defaults",default_settings()},
                               {"importErrors", errors}};
                     if (!shell_override_.empty())

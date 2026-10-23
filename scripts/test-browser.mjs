@@ -16,7 +16,7 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
+  for (const name of ['icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
     if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors = [];
@@ -30,6 +30,25 @@ try {
       await writeFile(resolve(directory, `${name}.html`), await page.content());
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));
       if (!passed || errors.length) throw Error(`${name}: ${await page.locator('#result').textContent()}\n${errors.join('\n')}`);
+      if (name === 'icon_fallback') {
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'icons-mdl2.png') });
+        const app = page.frames().find(frame => frame.parentFrame());
+        await app.locator('#back-library').click();
+        await app.locator('#library-view').waitFor({ state: 'visible' });
+        await page.locator('iframe').evaluate(frame => { frame.srcdoc = frame.srcdoc.replace('icons=mdl2', 'icons=none'); });
+        await page.waitForFunction(() => document.querySelector('iframe').contentDocument?.querySelector('.book-card'));
+        const refreshed = page.frames().find(frame => frame.parentFrame());
+        if (await refreshed.locator('.fluent-icon').count()) throw Error('missing icon fonts must use SVG for every icon');
+        if (await refreshed.locator('.sidebar .material-icon').count() < 8) throw Error('fontless library must remain usable');
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'icons-svg-fallback.png') });
+        await refreshed.locator('.book-card').first().click();
+        await refreshed.locator('#reader-loading').waitFor({ state: 'hidden' });
+        if (!await refreshed.evaluate(() => {
+          const doc = document.getElementById('book-frame').contentDocument, tip = doc.querySelector('.dr-note-tip');
+          const style = tip && doc.defaultView.getComputedStyle(tip, '::before');
+          return style && style.maskImage.includes('data:image/svg+xml') && style.content === '""';
+        })) throw Error('fontless note tip must use vector mask without adding anchor text');
+      }
       if (name === 'footer_auto_hide') {
         const app = page.frames().find(frame => frame.parentFrame());
         const footer = app.locator('.reader-footer');

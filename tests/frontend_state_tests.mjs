@@ -7,6 +7,8 @@ import { pageMargins, pageClickDirection, pageCorner } from '../web/reading-layo
 import { DEFAULT_PALETTE, normalizeColor, paint, pushColor } from '../web/highlight-colors.ts';
 import { bookPages, chapterTextLength } from '../web/book-pages.ts';
 import { htmlFromXhtml } from '../web/xhtml.ts';
+import { materialPaths } from '../web/material-icons.ts';
+import { configureIconFonts, icon, fluentGlyph } from '../web/icons.ts';
 import { shortTitle } from '../web/title.ts';
 
 test('book titles past twenty characters end in an ellipsis', () => {
@@ -92,4 +94,28 @@ test('the pointer half of the page picks the soft-page curl corner', () => {
   assert.equal(pageCorner(300, 600), 'top');
   assert.equal(pageCorner(301, 600), 'bottom');
   assert.equal(pageCorner(100, 0), 'top');
+});
+
+test('icons prefer Fluent, then an available MDL2 glyph, then semantic SVG', () => {
+  try {
+    configureIconFonts({ 'Segoe Fluent Icons': [0xe710], 'Segoe MDL2 Assets': [0xe710, 0xe713, 0xe81c, 0xe8fd] });
+    assert.match(icon('plus', 'fluent'), /data-icon-font="fluent"/);
+    assert.match(icon('settings'), /data-icon-font="mdl2"/);
+    assert.equal(fluentGlyph('clock').code, 0xe81c);
+    assert.equal(fluentGlyph('list').code, 0xe8fd);
+    assert.match(icon('unread', 'fluent'), /material-icon/);
+    assert.match(icon('unread', 'fluent'), /data-render-icon="unread"/);
+    assert.match(icon('search'), /material-icon/);
+    configureIconFonts({});
+    for (const name of ['settings', 'user', 'tip', 'clock', 'unread', 'library', 'fullscreen']) {
+      assert.match(icon(name, 'fluent'), /<svg/);
+      assert.doesNotMatch(icon(name, 'fluent'), /&#x/);
+    }
+    assert.ok(icon('settings').includes(materialPaths.settings));
+    assert.ok(icon('user').includes(materialPaths.person));
+    assert.ok(icon('tip').includes(materialPaths.chat_bubble));
+    configureIconFonts({ 'Segoe MDL2 Assets': [0xe823, 0xe8a5] });
+    assert.equal(fluentGlyph('clock').code, 0xe823);
+    assert.equal(fluentGlyph('unread').code, 0xe8a5);
+  } finally { configureIconFonts(); }
 });

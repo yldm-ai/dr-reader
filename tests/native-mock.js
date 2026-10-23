@@ -4,6 +4,16 @@ if (new URL(import.meta.url).searchParams.has('system')) {
   fixture.settings.application.theme = 'system';
   fixture.settings.reading.theme = 'system';
 }
+const iconMode = new URL(import.meta.url).searchParams.get('icons');
+if (iconMode) {
+  fixture.annotations = [{ id: 'icon-tip', chapter: 0, href: 'chapter.html', start: 3, end: 5, quote: '阅读', note: '图标回退测试', style: 'note', color: '#ddedea' }];
+  fixture.iconFonts = iconMode === 'none' ? {} : {
+    'Segoe Fluent Icons': [],
+    'Segoe MDL2 Assets': [0xe736, 0xe8f1, 0xe710, 0xe81c, 0xe8a4, 0xe73e, 0xe77b, 0xe76c, 0xe70d,
+      0xe713, 0xe721, 0xe74c, 0xe8fd, 0xe74a, 0xe72b, 0xe72a, 0xe8d2, 0xe711, 0xe768, 0xe70f,
+      0xe74d, 0xe718, 0xe8c8, 0xe70b, 0xe8dc, 0xe82d, 0xe82f, 0xe7e6],
+  };
+}
 window.nativeProbe = installNativeMock(fixture);
 window.runtimeErrors = [];
 window.addEventListener('error', event => window.runtimeErrors.push(event.message));

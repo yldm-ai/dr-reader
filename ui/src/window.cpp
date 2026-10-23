@@ -287,16 +287,26 @@ void Window::paint()
         }
         if (write_ && !caption_icons_)
         {
-            const wchar_t *family = L"Segoe Fluent Icons";
             Microsoft::WRL::ComPtr<IDWriteFontCollection> fonts;
-            UINT32 index = 0;
-            BOOL exists = FALSE;
-            if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)) &&
-                SUCCEEDED(fonts->FindFamilyName(family, &index, &exists)) && !exists)
-                family = L"Segoe MDL2 Assets";
-            write_->CreateTextFormat(family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                                     DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10, L"en-US",
-                                     &caption_icons_);
+            if (SUCCEEDED(write_->GetSystemFontCollection(&fonts)))
+                for (const auto *name : {L"Segoe Fluent Icons", L"Segoe MDL2 Assets"})
+                {
+                    UINT32 index = 0;
+                    BOOL exists = FALSE;
+                    Microsoft::WRL::ComPtr<IDWriteFontFamily> family;
+                    Microsoft::WRL::ComPtr<IDWriteFont> font;
+                    Microsoft::WRL::ComPtr<IDWriteFontFace> face;
+                    const UINT32 codes[] = {0xe921, 0xe922, 0xe923, 0xe8bb};
+                    UINT16 glyphs[4] = {};
+                    if (FAILED(fonts->FindFamilyName(name, &index, &exists)) || !exists ||
+                        FAILED(fonts->GetFontFamily(index, &family)) ||
+                        FAILED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                            DWRITE_FONT_STYLE_NORMAL, &font)) || FAILED(font->CreateFontFace(&face)) ||
+                        FAILED(face->GetGlyphIndices(codes, 4, glyphs)) ||
+                        std::any_of(std::begin(glyphs), std::end(glyphs), [](UINT16 glyph) { return glyph == 0; })) continue;
+                    if (SUCCEEDED(write_->CreateTextFormat(name, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10, L"en-US", &caption_icons_))) break;
+                }
             if (caption_icons_)
             {
                 caption_icons_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
@@ -343,6 +353,27 @@ void Window::paint()
                         target_->DrawTextW(&glyph, 1, caption_icons_.Get(),
                                            D2D1::RectF(x, 0, x + 46, height), brush.Get(),
                                            D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    else
+                    {
+                        // Font-free last resort: caption controls must remain visible and usable.
+                        const float cx = x + 23, cy = height / 2;
+                        if (i == 0)
+                            target_->DrawLine(D2D1::Point2F(cx - 5, cy), D2D1::Point2F(cx + 5, cy), brush.Get());
+                        else if (i == 2)
+                        {
+                            target_->DrawLine(D2D1::Point2F(cx - 5, cy - 5), D2D1::Point2F(cx + 5, cy + 5), brush.Get());
+                            target_->DrawLine(D2D1::Point2F(cx - 5, cy + 5), D2D1::Point2F(cx + 5, cy - 5), brush.Get());
+                        }
+                        else if (IsZoomed(hwnd_))
+                        {
+                            target_->DrawRectangle(D2D1::RectF(cx - 3, cy - 5, cx + 5, cy + 3), brush.Get());
+                            brush->SetColor(D2D1::ColorF(hot_ == hit ? caption_hover_ : caption_background_));
+                            target_->FillRectangle(D2D1::RectF(cx - 5, cy - 3, cx + 3, cy + 5), brush.Get());
+                            brush->SetColor(D2D1::ColorF(caption_text_));
+                            target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 3, cx + 3, cy + 5), brush.Get());
+                        }
+                        else target_->DrawRectangle(D2D1::RectF(cx - 5, cy - 5, cx + 5, cy + 5), brush.Get());
+                    }
                 }
             }
             if (target_->EndDraw() == D2DERR_RECREATE_TARGET)

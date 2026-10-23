@@ -1,3 +1,5 @@
+import { fluentGlyph } from "./icons.ts";
+import { materialPaths } from "./material-icons.ts";
 import { paint } from "./highlight-colors.ts";
 export class AnnotationLayer {
   constructor(doc, callbacks = {}) {
@@ -50,14 +52,21 @@ export class AnnotationLayer {
     const view = doc.defaultView;
     const pixelRatio = view.devicePixelRatio || 1;
     const snap = (value) => Math.round(value * pixelRatio) / pixelRatio;
-    if (!doc.getElementById("dr-note-tip-style")) {
-      const style = doc.createElement("style");
+    let style = doc.getElementById("dr-note-tip-style");
+    if (!style) {
+      style = doc.createElement("style");
       style.id = "dr-note-tip-style";
-      style.textContent = `.dr-note-tips{position:absolute!important;left:0!important;top:0!important;width:0!important;height:0!important;margin:0!important;padding:0!important;border:0!important}
-.dr-note-tip{position:absolute!important;display:block!important;width:14px!important;height:14px!important;margin:0!important;padding:0!important;color:var(--dr-tip,#dfab01)!important;cursor:pointer!important;user-select:none!important;-webkit-user-select:none!important;opacity:1!important}
-.dr-note-tip::before{content:"\\e8bd"!important;display:block!important;width:14px!important;height:14px!important;font:normal 400 14px/14px "Segoe Fluent Icons","Segoe MDL2 Assets"!important;letter-spacing:0!important;text-indent:0!important;text-transform:none!important;text-align:center!important}`;
       doc.head.append(style);
     }
+    const glyph = fluentGlyph('tip');
+    const family = glyph?.font === 'mdl2' ? '"Segoe MDL2 Assets"' : glyph?.font === 'fluent' ? '"Segoe Fluent Icons"' : '"Segoe Fluent Icons","Segoe MDL2 Assets"';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="${materialPaths.chat_bubble}"/></svg>`;
+    const content = glyph ? `content:"\\${glyph.code.toString(16)}"!important;font-family:${family}!important;`
+      : `content:""!important;background:currentColor!important;mask:url("data:image/svg+xml,${encodeURIComponent(svg)}") center/contain no-repeat!important;`;
+    const css = `.dr-note-tips{position:absolute!important;left:0!important;top:0!important;width:0!important;height:0!important;overflow:visible!important;z-index:7!important;pointer-events:none!important}
+.dr-note-tip{position:absolute!important;display:block!important;width:14px!important;height:14px!important;box-sizing:border-box!important;pointer-events:auto!important;margin:0!important;padding:0!important;color:var(--dr-tip,#dfab01)!important;cursor:pointer!important;user-select:none!important;-webkit-user-select:none!important;opacity:1!important}
+.dr-note-tip::before{display:block!important;width:14px!important;height:14px!important;font:normal 400 14px/14px ${family}!important;letter-spacing:0!important;text-indent:0!important;text-transform:none!important;text-align:center!important;${content}}`;
+    if (style.textContent !== css) style.textContent = css;
     const layer = doc.createElement("div");
     layer.className = "dr-note-tips";
     layer.setAttribute("aria-hidden", "true");

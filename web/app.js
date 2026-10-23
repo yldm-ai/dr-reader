@@ -1,5 +1,5 @@
 import { call, bookUrl, $, escape, toast, busy } from "./bridge.js";
-import { hydrate } from "./icons.ts";
+import { hydrate, configureIconFonts } from "./icons.ts";
 import { Reader } from "./reader.js";
 import { SettingsPanel } from "./settings.js";
 import { createLibraryOverlays } from "./library-overlays.js";
@@ -372,6 +372,7 @@ document.addEventListener("keydown", (event) => {
 busy(true, "正在打开本地书库…");
 try {
   const data = await call("bootstrap");
+  configureIconFonts(data.iconFonts);
   books = data.books;
   shelves.items = data.shelves || [];
   settingsPanel.configure(data);

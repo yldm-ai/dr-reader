@@ -166,8 +166,13 @@ int main()
             ncx += R"(第二节 < 5</n:text></navLabel><content src="text.xhtml#end"/></navPoint></navPoint></navMap></ncx>)";
             fixture(ncx);
             auto recovered = dr::import_epub(ncx_fixture, root / "ncx-recovered");
-            require(recovered["toc"].size() == 2 && recovered["toc"][0]["title"] == "第一章<原文><@>标题 & 名称 <@>",
-                    "NCX recovers literal invalid angle markers without double escaping entities or CDATA");
+            require(recovered["toc"].size() == 2 && recovered["toc"][0]["title"] == "第一章<原文> 标题 & 名称",
+                    "NCX recovers invalid angle markers as separators without double escaping entities or CDATA");
+            require(dr::clean_toc_title("第1章<@>无法无动于衷") == "第1章 无法无动于衷" &&
+                        dr::clean_toc_title(" A <#> B<*-+>C ") == "A B C",
+                    "symbol-only bracket markers become one separating space");
+            require(dr::clean_toc_title("第<5>章 <原文> < 5 <@@@@> <> a<b") == "第<5>章 <原文> < 5 <@@@@> <> a<b",
+                    "digits, names, spaced or long brackets stay literal");
             require(recovered["toc"][1]["title"] == "�第二节 < 5" && recovered["toc"][1]["depth"] == 1 &&
                         recovered["toc"][1]["href"].get<std::string>().find(".dr-1.xhtml#end") != std::string::npos,
                     "NCX repairs invalid UTF-8 in prefixed labels, preserving hierarchy and remapped links");
@@ -198,17 +203,34 @@ int main()
         auto html = dr::read_file(root / "library" / "books" / id / "content" / "OPS" / "text.dr-0.xhtml");
         require(html.find("text.dr-1.xhtml#end") != std::string::npos, "cross-flow link remap");
         require(library.import_book(epub)["id"] == id && library.list().size() == 1, "duplicate import");
-        require(library.shelves().empty(), "new library has no shelves");
-        const auto shelves = dr::Json::array({{{"id", "test-shelf"}, {"name", "文学"}, {"bookIds", dr::Json::array({id})}}});
-        require(library.save_shelves(shelves) == shelves, "save shelf membership");
-        rejects([&] { library.save_shelves(dr::Json::array({shelves[0], shelves[0]})); }, "reject duplicate shelves");
+        const dr::Json private_shelf = {{"id", "private"}, {"name", "隐私书架"}, {"bookIds", dr::Json::array()}};
+        require(library.shelves() == dr::Json::array({private_shelf}), "new library has only the private shelf");
+        const auto literature = dr::Json::array({{{"id", "test-shelf"}, {"name", "文学"}, {"bookIds", dr::Json::array({id})}}});
+        const auto shelves = dr::Json::array({private_shelf, literature[0]});
+        require(library.save_shelves(literature) == shelves, "save shelf membership; the private shelf is kept first");
+        rejects([&] { library.save_shelves(dr::Json::array({shelves[1], shelves[1]})); }, "reject duplicate shelves");
+        rejects([&] { library.save_shelves(dr::Json::array({{{"id", "x"}, {"name", "隐私书架"}, {"bookIds", dr::Json::array()}}})); },
+                "the private shelf name is reserved");
+        rejects([&] { library.save_shelves(dr::Json::array({{{"id", "private"}, {"name", "私密"}, {"bookIds", dr::Json::array()}}})); },
+                "the private shelf cannot be renamed");
         require(library.shelves() == shelves, "invalid save preserves shelves");
+        auto hidden = shelves;
+        hidden[0]["bookIds"] = dr::Json::array({id});
+        require(library.save_shelves(hidden) == hidden, "hiding a book stores it in the private shelf");
+        dr::write_file(root / "legacy-shelves" / "shelves.json",
+                       R"([{"id":"a","name":"文学","bookIds":[]},{"id":"old","name":"隐私书架","bookIds":[]}])");
+        {
+            dr::Library legacy(root / "legacy-shelves");
+            const auto adopted = legacy.shelves();
+            require(adopted.size() == 2 && adopted[0]["id"] == "private" && adopted[1]["id"] == "a",
+                    "an existing shelf with the reserved name becomes the private shelf");
+        }
         auto covered_shelves = shelves;
-        covered_shelves[0]["cover"] = {{"bookId", id}};
+        covered_shelves[1]["cover"] = {{"bookId", id}};
         require(library.save_shelves(covered_shelves) == covered_shelves, "book cover persists");
-        covered_shelves[0]["cover"] = {{"image", "data:image/webp;base64,UklGRg=="}};
+        covered_shelves[1]["cover"] = {{"image", "data:image/webp;base64,UklGRg=="}};
         require(library.save_shelves(covered_shelves) == covered_shelves, "uploaded cover persists");
-        covered_shelves[0]["cover"] = {{"image", "file:///private.png"}};
+        covered_shelves[1]["cover"] = {{"image", "file:///private.png"}};
         rejects([&] { library.save_shelves(covered_shelves); }, "reject invalid cover source");
         library.save_shelves(shelves);
         require(library.save_position(id, {{"chapter", 1}, {"ratio", 1}})["progress"] < 1, "content end precedes completion page");
@@ -219,6 +241,20 @@ int main()
         {
             dr::Library reopened(root / "library");
             require(reopened.shelves() == shelves, "shelves survive restart");
+            {
+                // A book imported before TOC title cleaning keeps its "<@>" marker on disk.
+                const auto file = root / "library" / "books" / id / "book.json";
+                auto stored = dr::Json::parse(dr::read_file(file));
+                stored["toc"][0]["title"] = "第一节<@>旧标题";
+                stored.erase("tocTitleVersion");
+                dr::write_file(file, stored.dump(2));
+                const auto migrated = reopened.get(id);
+                const auto saved = dr::Json::parse(dr::read_file(file));
+                require(migrated["toc"][0]["title"] == "第一节 旧标题" && saved["toc"][0]["title"] == "第一节 旧标题" &&
+                            saved["tocTitleVersion"] == dr::toc_title_version && saved["position"] == stored["position"] &&
+                            saved["progress"] == stored["progress"],
+                        "old TOC titles are cleaned once in place, keeping reading position");
+            }
             require(reopened.get(id)["position"]["chapter"] == 1, "progress survives restart");
             require(reopened.search(id, "结尾").size() == 1, "C++ search");
             // Chapters are parsed as HTML: <title/> would swallow the document as title text.

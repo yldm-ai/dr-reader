@@ -1,10 +1,22 @@
 import { $, call, escape, bookUrl } from './bridge.js';
 import { hydrate } from './icons.ts';
 
+// Books in the private shelf are hidden from every other library view.
+export const PRIVATE_SHELF = 'private';
+const privateShelf = () => ({ id: PRIVATE_SHELF, name: '隐私书架', bookIds: [] });
+
 export class Shelves {
   items = [];
   selected = null;
   editing = null;
+
+  hiddenIds() {
+    return new Set(this.items.find(shelf => shelf.id === PRIVATE_SHELF)?.bookIds ?? []);
+  }
+
+  isPrivate(shelf) {
+    return shelf?.id === PRIVATE_SHELF;
+  }
 
   constructor(books, refresh) {
     this.books = books;
@@ -86,11 +98,12 @@ export class Shelves {
   render(query) {
     const visible = this.items.filter(shelf => shelf.name.toLocaleLowerCase().includes(query));
     $('heading-count').textContent = visible.length;
+    const hidden = this.hiddenIds();
     const cards = visible.map(shelf => {
       const card = document.createElement('button');
       card.className = 'shelf-card';
-      const count = this.books().filter(book => shelf.bookIds.includes(book.id)).length;
-      card.innerHTML = `<div class="cover-wrap">${this.coverMarkup(shelf)}</div><strong>${escape(shelf.name)}</strong><small>${count} 本图书</small>`;
+      const count = this.books().filter(book => shelf.bookIds.includes(book.id) && (this.isPrivate(shelf) || !hidden.has(book.id))).length;
+      card.innerHTML = `<div class="cover-wrap">${this.coverMarkup(shelf)}</div><strong>${escape(shelf.name)}</strong><small>${count} 本图书${this.isPrivate(shelf) ? ' · 不在其他位置显示' : ''}</small>`;
       card.onclick = () => {
         this.selected = shelf;
         $('library-search').value = '';
@@ -108,10 +121,19 @@ export class Shelves {
   }
 
   async addBook(bookId, shelfId) {
-    const shelf = this.items.find(item => item.id === shelfId);
+    // Hiding also works against a store saved before the private shelf existed.
+    const items = shelfId === PRIVATE_SHELF && !this.items.some(this.isPrivate) ? [privateShelf(), ...this.items] : this.items;
+    const shelf = items.find(item => item.id === shelfId);
     if (!shelf) throw Error('这个分类书架已不存在');
     if (shelf.bookIds.includes(bookId)) return;
-    const next = this.items.map(item => item.id === shelfId ? { ...item, bookIds: [...item.bookIds, bookId] } : item);
+    await this.store(items.map(item => item.id === shelfId ? { ...item, bookIds: [...item.bookIds, bookId] } : item));
+  }
+
+  async removeBook(bookId, shelfId) {
+    await this.store(this.items.map(item => item.id === shelfId ? { ...item, bookIds: item.bookIds.filter(id => id !== bookId) } : item));
+  }
+
+  async store(next) {
     this.items = await call('shelves.save', { shelves: next });
     if (this.selected) this.selected = this.items.find(item => item.id === this.selected.id) || null;
     this.refresh();
@@ -126,8 +148,12 @@ export class Shelves {
     $('shelf-cover-file').value = '';
     $('shelf-dialog-title').textContent = shelf ? '编辑书架' : '添加书架';
     $('shelf-name').value = shelf?.name || '';
+    $('shelf-name').readOnly = this.isPrivate(shelf);
     $('shelf-error').textContent = '';
-    $('shelf-books').innerHTML = this.books().map(book =>
+    // Other shelves never list hidden books; only the private shelf manages them.
+    const hidden = this.hiddenIds();
+    const listed = this.isPrivate(shelf) ? this.books() : this.books().filter(book => !hidden.has(book.id) || book.id === bookId);
+    $('shelf-books').innerHTML = listed.map(book =>
       `<label><input type="checkbox" value="${escape(book.id)}" ${(shelf?.bookIds.includes(book.id) || book.id === bookId) ? 'checked' : ''}><span>${escape(book.title)}<small>${escape(book.author)}</small></span></label>`
     ).join('') || '<p>书库还没有图书，可以先创建空书架。</p>';
     this.coverOptions();
@@ -142,9 +168,14 @@ export class Shelves {
     if (this.items.some(item => item.id !== this.editing?.id && item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       $('shelf-error').textContent = '已有同名书架，请换一个名称。'; return;
     }
+    if (!this.isPrivate(this.editing) && name === privateShelf().name) {
+      $('shelf-error').textContent = '“隐私书架”是保留名称，请换一个名称。'; return;
+    }
+    // Memberships of hidden books were not listed, so keep them as they were.
+    const listed = new Set([...$('shelf-books').querySelectorAll('input')].map(input => input.value));
     const shelf = {
       id: this.editing?.id || crypto.randomUUID(), name,
-      bookIds: this.selectedBooks(), cover: this.cover,
+      bookIds: [...(this.editing?.bookIds ?? []).filter(id => !listed.has(id)), ...this.selectedBooks()], cover: this.cover,
     };
     const next = this.editing ? this.items.map(item => item.id === shelf.id ? shelf : item) : [...this.items, shelf];
     $('shelf-save').disabled = true;

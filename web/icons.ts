@@ -10,7 +10,7 @@ const fluent: Record<string, number> = {
   'arrow-left': 0xe72b, 'arrow-right': 0xe72a, type: 0xe8d2,
   close: 0xe711, play: 0xe768, edit: 0xe70f, delete: 0xe74d, pin: 0xe718,
   copy: 0xe8c8, note: 0xe70b, underline: 0xe8dc, dictionary: 0xe82d, tip: 0xe8bd, highlighter: 0xe7e6,
-  'book-info': 0xe946,
+  'book-info': 0xe946, hide: 0xed1a, view: 0xe890,
 };
 // Settings, author and note tips keep their Fluent glyphs everywhere.
 const alwaysFluent = new Set(['settings', 'user', 'tip']);

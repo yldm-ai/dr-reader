@@ -7,7 +7,7 @@ import { Tooltips } from "./tooltip.ts";
 import { BookOpening } from "./book-opening.ts";
 import { LibraryBackToTop } from "./back-to-top.ts";
 import { SelectControl } from "./select-control.ts";
-import { Shelves } from "./shelves.js";
+import { Shelves, PRIVATE_SHELF } from "./shelves.js";
 import { readingPalette, resolveTheme } from "./reading-palette.ts";
 import { BookInfo } from "./book-info.ts";
 
@@ -37,6 +37,15 @@ const libraryOverlays = createLibraryOverlays(book => {
     catch (error) { toast(error.message, "error"); }
   },
   createShelf: book => shelves.edit(null, book.id),
+  isHidden: book => shelves.hiddenIds().has(book.id),
+  hide: async book => {
+    try { await shelves.addBook(book.id, PRIVATE_SHELF); toast("已隐藏，可在分类书架的隐私书架中找到", "success"); }
+    catch (error) { toast(`隐藏失败：${error.message}`, "error"); }
+  },
+  unhide: async book => {
+    try { await shelves.removeBook(book.id, PRIVATE_SHELF); toast("已取消隐藏", "success"); }
+    catch (error) { toast(`取消隐藏失败：${error.message}`, "error"); }
+  },
   exportNotes: async book => {
     try {
       const result = await call("notes.export", { id: book.id });
@@ -108,7 +117,10 @@ function render() {
   $("shelf-actions").hidden = !browsingShelves || !shelves.selected;
   $("book-grid").hidden = browsingShelves && !shelves.selected;
   const query = $("library-search").value.trim().toLocaleLowerCase();
-  const visible = books.filter(
+  // Hidden books appear only inside the private shelf: not in lists, counts, authors or search.
+  const hidden = shelves.hiddenIds();
+  const listed = books.filter(book => !hidden.has(book.id));
+  const visible = (browsingShelves && shelves.isPrivate(shelves.selected) ? books : listed).filter(
     (book) =>
       (!browsingShelves || !shelves.selected || shelves.selected.bookIds.includes(book.id)) &&
       (!author || book.author === author) &&
@@ -143,11 +155,11 @@ function render() {
   };
   $("library-heading").firstChild.textContent = author || (browsingShelves && shelves.selected ? shelves.selected.name : titles[filter]);
   $("heading-count").textContent = visible.length;
-  $("count-all").textContent = books.length;
+  $("count-all").textContent = listed.length;
   $("count-shelves").textContent = shelves.items.length;
-  $("count-recent").textContent = books.filter((book) => book.lastRead).length;
-  $("count-finished").textContent = books.filter((book) => book.progress >= 1).length;
-  $("count-unread").textContent = books.filter((book) => !book.lastRead).length;
+  $("count-recent").textContent = listed.filter((book) => book.lastRead).length;
+  $("count-finished").textContent = listed.filter((book) => book.progress >= 1).length;
+  $("count-unread").textContent = listed.filter((book) => !book.lastRead).length;
 
   if (browsingShelves && !shelves.selected) {
     shelves.render(query);
@@ -196,7 +208,7 @@ function render() {
 
   const authors = $("authors");
   const authorCounts = new Map();
-  for (const book of books) authorCounts.set(book.author, (authorCounts.get(book.author) || 0) + 1);
+  for (const book of listed) authorCounts.set(book.author, (authorCounts.get(book.author) || 0) + 1);
   const authorButtons = document.createDocumentFragment();
   for (const name of [...authorCounts.keys()].sort()) {
     const button = document.createElement("button");

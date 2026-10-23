@@ -33,6 +33,26 @@ std::string content_id(const fs::path &file)
     out << std::hex << std::setw(16) << std::setfill('0') << hash;
     return out.str();
 }
+// Books in the private shelf are hidden everywhere else in the library. The shelf always
+// exists and comes first; an older user shelf with the reserved name becomes it.
+constexpr const char *private_shelf_id = "private";
+constexpr const char *private_shelf_name = "隐私书架";
+Json with_private_shelf(Json shelves)
+{
+    auto found = std::find_if(shelves.begin(), shelves.end(), [](const Json &shelf) { return shelf.value("id", "") == private_shelf_id; });
+    if (found == shelves.end())
+        found = std::find_if(shelves.begin(), shelves.end(), [](const Json &shelf) { return shelf.value("name", "") == private_shelf_name; });
+    Json shelf = {{"id", private_shelf_id}, {"name", private_shelf_name}, {"bookIds", Json::array()}};
+    if (found != shelves.end())
+    {
+        shelf = *found;
+        shelf["id"] = private_shelf_id;
+        shelf["name"] = private_shelf_name;
+        shelves.erase(found);
+    }
+    shelves.insert(shelves.begin(), shelf);
+    return shelves;
+}
 int64_t now()
 {
     return std::chrono::duration_cast<std::chrono::seconds>(
@@ -55,6 +75,15 @@ Json Library::get(const std::string &id) const
 {
     auto book=Json::parse(read_file(book_path(id) / "book.json"));
     annotations_->migrate_bookmarks(id,book.value("bookmarks",Json::array()));
+    // Older imports kept converter markers such as "<@>" in TOC titles. Clean the stored titles
+    // in place; position, progress, shelves and annotations stay untouched.
+    if (book.value("tocTitleVersion", 0) < toc_title_version)
+    {
+        for (auto &entry : book["toc"])
+            entry["title"] = clean_toc_title(entry.value("title", std::string()));
+        book["tocTitleVersion"] = toc_title_version;
+        store(id, book);
+    }
     book["bookmarks"]=annotations_->bookmarks(id);
     return book;
 }
@@ -85,7 +114,7 @@ Json Library::list() const
 Json Library::shelves() const
 {
     const auto path = root_ / "shelves.json";
-    return fs::exists(path) ? Json::parse(read_file(path)) : Json::array();
+    return with_private_shelf(fs::exists(path) ? Json::parse(read_file(path)) : Json::array());
 }
 Json Library::save_shelves(const Json &shelves)
 {
@@ -98,6 +127,8 @@ Json Library::save_shelves(const Json &shelves)
         if (id.empty() || id.size() > 128 || name.empty() || name.size() > 320 ||
             name.find_first_not_of(" \t\r\n") == std::string::npos || !shelf.at("bookIds").is_array())
             throw std::runtime_error("书架格式无效");
+        if ((id == private_shelf_id) != (name == private_shelf_name))
+            throw std::runtime_error("“隐私书架”为保留书架，不能重命名或重复创建");
         for (const auto &other : clean)
             if (other.at("id") == id || other.at("name") == name)
                 throw std::runtime_error("书架名称或 ID 重复");
@@ -133,6 +164,7 @@ Json Library::save_shelves(const Json &shelves)
         if (!cover.is_null()) item["cover"] = cover;
         clean.push_back(item);
     }
+    clean = with_private_shelf(std::move(clean));
     write_atomic(root_ / "shelves.json", clean.dump(2));
     return clean;
 }

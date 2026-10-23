@@ -211,6 +211,13 @@ void Window::post(std::function<void()> fn)
     }
     PostMessageW(hwnd_, dispatch, 0, 0);
 }
+// As in the MSIME settings window (TitleBar::HitTestCaption), minimize and close are reported
+// as client area and tracked here: the system shows its own "Minimize"/"Close" tooltips for
+// HTMINBUTTON and HTCLOSE. Only maximize stays HTMAXBUTTON so Windows 11 offers Snap Layouts.
+static bool client_caption_button(int hit)
+{
+    return hit == HTMINBUTTON || hit == HTCLOSE;
+}
 int Window::caption_hit(POINT p) const
 {
     RECT r{};
@@ -519,7 +526,13 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         // Eat its button-down before WebView2 can interpret it as a page tap.
         // Keyboard activation and native caption controls keep their usual behavior.
         if (LOWORD(l) == HTCLIENT && HIWORD(l) == WM_LBUTTONDOWN && GetForegroundWindow() != hwnd_)
-            return MA_ACTIVATEANDEAT;
+        {
+            POINT p{};
+            GetCursorPos(&p);
+            ScreenToClient(hwnd_, &p);
+            if (!(draws_caption() && client_caption_button(caption_hit(p))))
+                return MA_ACTIVATEANDEAT;
+        }
         break;
     case WM_ACTIVATE:
         InvalidateRect(hwnd_, nullptr, FALSE);
@@ -546,7 +559,8 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             ScreenToClient(hwnd_, &p);
             if (!IsZoomed(hwnd_) && p.y < scale(6))
                 return HTTOP;
-            return caption_hit(p);
+            const auto hit = caption_hit(p);
+            return client_caption_button(hit) ? HTCLIENT : hit;
         }
         case WM_NCMOUSEMOVE:
         {
@@ -561,12 +575,15 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         case WM_NCMOUSELEAVE:
+            // Leaving maximize for minimize arrives after that button's WM_MOUSEMOVE.
+            if (client_caption_button(hot_))
+                return 0;
             hot_ = HTNOWHERE;
             caption_tip(HTNOWHERE);
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         case WM_NCLBUTTONDOWN:
-            if (w == HTMINBUTTON || w == HTMAXBUTTON || w == HTCLOSE)
+            if (w == HTMAXBUTTON)
             {
                 caption_tip(HTNOWHERE);
                 pressed_ = static_cast<int>(w);
@@ -574,13 +591,56 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
                 return 0;
             }
             break;
+        case WM_LBUTTONDOWN:
+        {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            const auto hit = caption_hit(p);
+            if (client_caption_button(hit))
+            {
+                caption_tip(HTNOWHERE);
+                hot_ = pressed_ = hit;
+                SetCapture(hwnd_);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return 0;
+            }
+            break;
+        }
         case WM_MOUSEMOVE:
+        {
+            POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
             if (pressed_ != HTNOWHERE)
             {
-                POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
                 hot_ = caption_hit(p);
                 InvalidateRect(hwnd_, nullptr, FALSE);
                 return 0;
+            }
+            const auto hit = caption_hit(p);
+            if (client_caption_button(hit))
+            {
+                if (hot_ != hit)
+                {
+                    hot_ = hit;
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                }
+                caption_tip(hit);
+                TRACKMOUSEEVENT t{sizeof(t), TME_LEAVE, hwnd_, 0};
+                TrackMouseEvent(&t);
+                return 0;
+            }
+            if (client_caption_button(hot_))
+            {
+                hot_ = HTNOWHERE;
+                caption_tip(HTNOWHERE);
+                InvalidateRect(hwnd_, nullptr, FALSE);
+            }
+            break;
+        }
+        case WM_MOUSELEAVE:
+            if (client_caption_button(hot_) && pressed_ == HTNOWHERE)
+            {
+                hot_ = HTNOWHERE;
+                caption_tip(HTNOWHERE);
+                InvalidateRect(hwnd_, nullptr, FALSE);
             }
             break;
         case WM_LBUTTONUP:

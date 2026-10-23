@@ -251,6 +251,43 @@ std::string description_text(const std::string &source)
     return out;
 }
 } // namespace
+// calibre reads NCX labels with lxml's recovering parser (src/calibre/utils/xml_parse.py,
+// safe_xml_fromstring) and collapses whitespace in src/calibre/ebooks/oeb/reader.py
+// (_toc_from_navpoint, COLLAPSE_RE). Recovery only drops the '<' of a marker like "<@>", so
+// "第1章<@>标题" would show "第1章@>标题". Some converters write such markers where the chapter
+// number and name were on separate lines; here a bracket holding one to three ASCII symbols is
+// read as that separator. Names, digits and "< 5" stay literal. Independently implemented.
+std::string clean_toc_title(std::string_view title)
+{
+    std::string spaced;
+    for (size_t i = 0; i < title.size(); ++i)
+    {
+        size_t end = i + 1;
+        while (title[i] == '<' && end < title.size() && end - i <= 3 &&
+               std::ispunct(static_cast<unsigned char>(title[end])) &&
+               std::string_view("<>/!?&").find(title[end]) == std::string_view::npos)
+            ++end;
+        if (title[i] == '<' && end > i + 1 && end < title.size() && title[end] == '>')
+        {
+            spaced += ' ';
+            i = end;
+            continue;
+        }
+        spaced += title[i];
+    }
+    std::string out;
+    for (char c : spaced)
+    {
+        const bool space = c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v';
+        if (!space)
+            out += c;
+        else if (!out.empty() && out.back() != ' ')
+            out += ' ';
+    }
+    if (!out.empty() && out.back() == ' ')
+        out.pop_back();
+    return out;
+}
 Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimits &limits)
 {
     auto content = dest / "content";
@@ -437,7 +474,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
             {
                 auto href = std::string(n.attribute("href").value());
                 if (!external_url(href))
-                    book["toc"].push_back({{"title", trim(node_text(n))},
+                    book["toc"].push_back({{"title", clean_toc_title(node_text(n))},
                                            {"href", remap(nav_path, href)},
                                            {"depth", std::max(0, depth - 1)}});
             }
@@ -456,7 +493,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
             {
                 auto src = child_named(n, "content").attribute("src").value();
                 if (*src && !external_url(src))
-                    book["toc"].push_back({{"title", trim(node_text(child_named(n, "navLabel")))},
+                    book["toc"].push_back({{"title", clean_toc_title(node_text(child_named(n, "navLabel")))},
                                            {"href", remap(ncx_path, src)},
                                            {"depth", depth}});
                 ++depth;
@@ -487,6 +524,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
         }
     book["format"] = "EPUB";
     book["fileBytes"] = fs::file_size(archive);
+    book["tocTitleVersion"] = toc_title_version;
     return book;
 }
 // Mirrors the reading order of calibre's src/calibre/ebooks/metadata/opf3.py (read_title,

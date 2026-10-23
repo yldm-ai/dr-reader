@@ -36,7 +36,7 @@ try {
   context();
   await new Promise(resolve => setTimeout(resolve, 450));
   check(!titleFlashes && menu.matches(':popover-open'), 'right click focus must never flash the title tooltip');
-  check(menu.querySelectorAll(':scope > button').length === 5, 'all five actions are present');
+  check(menu.querySelectorAll(':scope > button').length === 6, 'all six actions are present');
   const infoDialog = doc.getElementById('book-info-dialog');
   click('book-menu-info');
   check(!menu.matches(':popover-open') && infoDialog.open, 'view info closes the menu and opens the details dialog');
@@ -85,6 +85,36 @@ try {
   context(); click('book-menu-export');
   await until(() => doc.getElementById('toast').textContent.includes('磁盘不可写'));
   win.nativeProbe.data.exportError = '';
+  // Hiding moves the book to the private shelf, which is created if the store predates it.
+  context();
+  check(doc.getElementById('book-menu-hide').textContent.includes('隐藏图书'), 'visible books offer hiding');
+  click('book-menu-hide');
+  await until(() => win.nativeProbe.data.shelves[0]?.id === 'private' && win.nativeProbe.data.shelves[0].bookIds.includes('fixture') && !doc.querySelector('.book-card'));
+  check(doc.getElementById('count-all').textContent === '0' && doc.getElementById('count-unread').textContent === '0' &&
+    !doc.getElementById('authors').textContent, 'hidden books leave lists, counts and the author list');
+  doc.querySelector('[data-filter="shelves"]').click();
+  const shelfCard = name => [...doc.querySelectorAll('#shelf-grid .shelf-card')].find(card => card.querySelector('strong')?.textContent === name);
+  check(shelfCard('隐私书架').textContent.includes('1 本图书') && shelfCard('历史与人文').textContent.includes('0 本图书'),
+    'only the private shelf counts hidden books');
+  shelfCard('历史与人文').click();
+  check(!doc.querySelector('.book-card'), 'other shelves do not show hidden books');
+  click('shelf-edit');
+  check(![...doc.querySelectorAll('#shelf-books input')].some(input => input.value === 'fixture'), 'other shelf editors do not list hidden books');
+  click('shelf-save');
+  await until(() => !doc.getElementById('shelf-dialog').open);
+  check(win.nativeProbe.data.shelves.find(shelf => shelf.id === 'history').bookIds.includes('fixture'), 'editing another shelf keeps hidden memberships');
+  click('shelves-back');
+  shelfCard('隐私书架').click();
+  check(doc.querySelector('.book-card'), 'the private shelf shows hidden books');
+  click('shelf-edit');
+  check(doc.getElementById('shelf-name').readOnly, 'the private shelf cannot be renamed');
+  doc.getElementById('shelf-dialog').close();
+  context();
+  check(doc.getElementById('book-menu-hide').textContent.includes('取消隐藏'), 'hidden books offer unhiding');
+  click('book-menu-hide');
+  await until(() => !win.nativeProbe.data.shelves[0].bookIds.includes('fixture') && !doc.querySelector('.book-card'));
+  doc.querySelector('[data-filter="all"]').click();
+  await until(() => doc.querySelector('.book-card') && doc.getElementById('count-all').textContent === '1');
   context();
   doc.getElementById('book-menu-category').focus();
   doc.getElementById('book-menu-category').dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));

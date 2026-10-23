@@ -33,6 +33,7 @@ export function createLibraryOverlays(onRemove, actions = {}) {
   category.setAttribute("aria-haspopup", "menu");
   category.setAttribute("aria-expanded", "false");
   category.setAttribute("aria-controls", "book-shelf-menu");
+  const hide = item(menu, "book-menu-hide", "隐藏图书", "hide");
   const divider = document.createElement("div");
   divider.className = "book-menu-divider";
   divider.setAttribute("role", "separator");
@@ -139,6 +140,10 @@ export function createLibraryOverlays(onRemove, actions = {}) {
     menuOwner = card;
     selectedBook = book;
     heading.textContent = book.title;
+    const hidden = Boolean(actions.isHidden?.(book));
+    hide.querySelector(".book-menu-label").textContent = hidden ? "取消隐藏" : "隐藏图书";
+    hide.querySelector(".ui-icon").outerHTML = icon(hidden ? "view" : "hide", "fluent");
+    hide.dataset.hidden = String(hidden);
     card.setAttribute("aria-expanded", "true");
     menu.showPopover();
     const rect = card.getBoundingClientRect();
@@ -154,13 +159,14 @@ export function createLibraryOverlays(onRemove, actions = {}) {
   open.onclick = () => choose(book => actions.open?.(book));
   details.onclick = () => choose(book => actions.showInfo?.(book));
   exportNotes.onclick = () => choose(book => actions.exportNotes?.(book));
+  hide.onclick = () => choose(hide.dataset.hidden === "true" ? actions.unhide : actions.hide);
   remove.onclick = () => choose(onRemove);
   category.onclick = () => showSubmenu(true);
   category.onpointerenter = () => showSubmenu();
   category.onpointerleave = () => { submenuTimer = setTimeout(hideSubmenu, 220); };
   submenu.onpointerenter = () => clearTimeout(submenuTimer);
   submenu.onpointerleave = () => { submenuTimer = setTimeout(hideSubmenu, 220); };
-  for (const button of [open, details, exportNotes, remove]) button.onpointerenter = hideSubmenu;
+  for (const button of [open, details, exportNotes, hide, remove]) button.onpointerenter = hideSubmenu;
   menu.onkeydown = event => {
     const nested = submenu.contains(event.target);
     if (event.key === "ArrowRight" && event.target === category) {

@@ -107,7 +107,17 @@ export class Shelves {
     hydrate();
   }
 
-  edit(shelf = null) {
+  async addBook(bookId, shelfId) {
+    const shelf = this.items.find(item => item.id === shelfId);
+    if (!shelf) throw Error('这个分类书架已不存在');
+    if (shelf.bookIds.includes(bookId)) return;
+    const next = this.items.map(item => item.id === shelfId ? { ...item, bookIds: [...item.bookIds, bookId] } : item);
+    this.items = await call('shelves.save', { shelves: next });
+    if (this.selected) this.selected = this.items.find(item => item.id === this.selected.id) || null;
+    this.refresh();
+  }
+
+  edit(shelf = null, bookId = null) {
     this.editing = shelf;
     this.editVersion = (this.editVersion || 0) + 1;
     $('shelf-save').disabled = false;
@@ -118,7 +128,7 @@ export class Shelves {
     $('shelf-name').value = shelf?.name || '';
     $('shelf-error').textContent = '';
     $('shelf-books').innerHTML = this.books().map(book =>
-      `<label><input type="checkbox" value="${escape(book.id)}" ${shelf?.bookIds.includes(book.id) ? 'checked' : ''}><span>${escape(book.title)}<small>${escape(book.author)}</small></span></label>`
+      `<label><input type="checkbox" value="${escape(book.id)}" ${(shelf?.bookIds.includes(book.id) || book.id === bookId) ? 'checked' : ''}><span>${escape(book.title)}<small>${escape(book.author)}</small></span></label>`
     ).join('') || '<p>书库还没有图书，可以先创建空书架。</p>';
     this.coverOptions();
     $('shelf-dialog').showModal();

@@ -5,6 +5,7 @@ import {
   textIndex,
 } from "./anchors.js";
 import { AnnotationLayer } from "./annotations.js";
+import { WheelPaging } from "./wheel-paging.ts";
 import { ReaderMotion } from "./motion.ts";
 import { fontStack } from "./fonts.ts";
 import { readingPalette } from "./reading-palette.ts";
@@ -16,6 +17,7 @@ import { OverlayScrollbar } from "./scrollbar.ts";
 import { ColorPicker } from "./color-picker.ts";
 import { bookPages, chapterTextLength } from "./book-pages.ts";
 import { htmlFromXhtml } from "./xhtml.ts";
+import { tocAnchor, tocSelectionIndex } from "./toc-selection.ts";
 import { shortTitle } from "./title.ts";
 import { DEFAULT_PALETTE, normalizeColor, paint, pushColor } from "./highlight-colors.ts";
 
@@ -171,9 +173,15 @@ export class Reader {
 
   attachTocAutoHide() {
     const panel = $("toc-panel");
-    $("toc-reveal-zone").addEventListener("pointerenter", () => this.setTocExpanded(true));
+    const reveal = event => {
+      if (panel.dataset.expanded !== "true" && !this.tocCornerProtected(event.clientX, event.clientY))
+        this.setTocExpanded(true);
+    };
+    $("toc-reveal-zone").addEventListener("pointerenter", reveal);
+    // Entering the edge inside the protected corner must still allow reveal further down.
+    $("toc-reveal-zone").addEventListener("pointermove", reveal);
     $("toc-reveal-zone").addEventListener("pointerleave", () => this.scheduleTocHide());
-    panel.addEventListener("pointerenter", () => this.setTocExpanded(true));
+    panel.addEventListener("pointerenter", reveal);
     panel.addEventListener("pointerleave", () => this.scheduleTocHide());
     panel.addEventListener("focusin", () => this.setTocExpanded(true));
     panel.addEventListener("focusout", () => this.scheduleTocHide());
@@ -187,15 +195,23 @@ export class Reader {
     document.addEventListener("pointermove", event => this.trackTocPointer(event.clientX, event.clientY));
   }
 
+  tocCornerProtected(x, y) {
+    if (this.settings?.showToolbar !== false) return false;
+    const rect = $("reader-view").getBoundingClientRect();
+    return x >= rect.left && x < rect.left + 180 && y >= rect.top && y < rect.top + 88;
+  }
+
   trackTocPointer(x, y) {
+    this.tocPointer = { x, y };
     const panel = $("toc-panel");
     if (!this.book || this.settings?.tocPinned || panel.hidden || panel.dataset.expanded !== "true") return;
     const rect = panel.getBoundingClientRect();
     const edge = $("toc-reveal-zone").getBoundingClientRect();
-    if (x >= edge.left && x <= edge.right && y >= edge.top && y <= edge.bottom) {
+    if (x >= edge.left && x <= edge.right && y >= edge.top && y <= edge.bottom && !this.tocCornerProtected(x, y)) {
       clearTimeout(this.tocHideTimer); this.tocHideTimer = null; return;
     }
-    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) this.scheduleTocHide();
+    if ((this.tocCornerProtected(x, y) && !panel.matches(":hover")) ||
+        x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) this.scheduleTocHide();
     else { clearTimeout(this.tocHideTimer); this.tocHideTimer = null; }
   }
 
@@ -205,7 +221,10 @@ export class Reader {
     this.tocHideTimer = setTimeout(() => {
       this.tocHideTimer = null;
       const panel = $("toc-panel");
-      if (!panel.matches(":hover") && !$("toc-reveal-zone").matches(":hover") && !panel.querySelector(":focus-visible"))
+      const pointer = this.tocPointer;
+      const overEdge = $("toc-reveal-zone").matches(":hover") &&
+        !(pointer && this.tocCornerProtected(pointer.x, pointer.y));
+      if (!panel.matches(":hover") && !overEdge && !panel.querySelector(":focus-visible"))
         this.setTocExpanded(false);
     }, 500);
   }
@@ -259,7 +278,8 @@ export class Reader {
     this.chapter = 0;
     this.ratio = 0;
     const title = $("reader-book-title");
-    title.textContent = `《${shortTitle(book.title)}》`;
+    const displayTitle = shortTitle(book.title);
+    title.textContent = /《[^》]*》/u.test(book.title) ? displayTitle : `《${displayTitle}》`;
     title.title = book.title;
     this.setTocExpanded(false);
     $("toc-panel").hidden = false;
@@ -308,30 +328,96 @@ export class Reader {
     indicator.className = "toc-active-indicator";
     indicator.setAttribute("aria-hidden", "true");
     root.replaceChildren(indicator);
-    for (const item of this.book.toc) {
+    const stack = [];
+    for (const [index, item] of this.book.toc.entries()) {
+      const depth = Math.max(0, Number(item.depth) || 0);
+      while (stack.length && stack.at(-1).depth >= depth) stack.pop();
+      const parent = stack.at(-1);
+      const node = document.createElement("div");
+      node.className = "toc-node";
+      const row = document.createElement("div");
+      row.className = "toc-row";
+      row.style.setProperty("--toc-depth", Math.min(stack.length, 5));
       const button = document.createElement("button");
       button.className = "toc-entry";
       button.textContent = item.title;
-      button.style.paddingLeft = `${12 + Math.min(item.depth, 5) * 13}px`;
       button.dataset.href = item.href;
+      button.dataset.tocIndex = String(index);
       button.onclick = () => this.navigate(item.href);
-      root.append(button);
+      const children = document.createElement("div");
+      children.className = "toc-children";
+      children.id = `toc-children-${index}`;
+      children.hidden = true;
+      row.append(button);
+      node.append(row, children);
+      (parent?.children ?? root).append(node);
+      if (parent && !parent.toggle) {
+        const toggle = document.createElement("button");
+        toggle.className = "toc-toggle";
+        toggle.innerHTML = icon("chevron");
+        toggle.setAttribute("aria-expanded", "false");
+        toggle.setAttribute("aria-controls", parent.children.id);
+        const label = parent.button.textContent;
+        toggle.setAttribute("aria-label", `展开 ${label}`);
+        toggle.onclick = () => {
+          const expanded = toggle.getAttribute("aria-expanded") !== "true";
+          toggle.setAttribute("aria-expanded", String(expanded));
+          toggle.setAttribute("aria-label", `${expanded ? "收起" : "展开"} ${label}`);
+          parent.children.hidden = !expanded;
+          this.activeToc(false);
+        };
+        parent.row.prepend(toggle);
+        parent.toggle = toggle;
+      }
+      stack.push({ depth, row, button, children });
     }
     this.activeToc();
   }
 
-  activeToc() {
+  activeToc(scroll = true) {
     if (!this.book) return;
     const href = this.book.chapters[this.chapter]?.href;
-    let active = null;
-    for (const button of $("toc-content").querySelectorAll(".toc-entry")) {
-      button.classList.toggle(
-        "active",
-        button.dataset.href.split("#")[0] === href,
-      );
-      if (!active && button.classList.contains("active")) active = button;
+    const root = $("toc-content");
+    const previous = root.querySelector(".toc-entry.active");
+    const view = this.doc?.defaultView;
+    const paged = this.settings?.mode === "paged";
+    const position = view ? (paged ? Math.round(view.scrollX / Math.max(1, view.innerWidth)) : Math.round(view.scrollY)) : 0;
+    let target = this.tocTarget;
+    if (target && (target.chapter !== this.chapter || (!this.loading && target.position !== undefined && target.position !== position)))
+      this.tocTarget = target = null;
+    if (target && !this.loading && target.position === undefined) target.position = position;
+    let positions, offset;
+    if (view && !this.loading && this.doc.getElementById) {
+      positions = new Map();
+      const columnWidth = Math.max(1, view.innerWidth / (this.isDouble() ? 2 : 1));
+      offset = paged ? Math.round(view.scrollX / columnWidth) * view.innerHeight + (this.settings?.paddingTop ?? 0) + 2
+        : view.scrollY + 42;
+      for (const [index, item] of this.book.toc.entries()) {
+        if (item.href.split("#")[0] !== href) continue;
+        const anchor = tocAnchor(item.href);
+        if (!anchor) { positions.set(index, -Infinity); continue; }
+        const node = this.doc.getElementById(anchor) || this.doc.getElementsByName(anchor)[0];
+        if (!node || !node.getClientRects().length) continue;
+        const rect = node.getClientRects()[0];
+        positions.set(index, paged ? Math.floor((rect.left + view.scrollX + 2) / columnWidth) * view.innerHeight + rect.top
+          : rect.top + view.scrollY);
+      }
     }
-    active?.scrollIntoView({ block: "nearest" });
+    const selected = tocSelectionIndex(this.book.toc, href, { anchor: target?.anchor, positions, offset });
+    if (previous?.dataset.tocIndex === String(selected)) {
+      this.updateTocIndicator();
+      return;
+    }
+    root.querySelectorAll(".toc-row").forEach(row => row.classList.remove("contains-active"));
+    let active = null;
+    for (const [index, button] of [...root.querySelectorAll(".toc-entry")].entries()) {
+      button.classList.toggle("active", index === selected);
+      if (index === selected) { active = button; button.setAttribute("aria-current", "location"); }
+      else button.removeAttribute("aria-current");
+    }
+    for (let node = active?.closest(".toc-node"); node; node = node.parentElement.closest(".toc-node"))
+      node.firstElementChild.classList.add("contains-active");
+    if (scroll && active !== previous && active?.offsetHeight) active.scrollIntoView({ block: "nearest" });
     this.updateTocIndicator();
   }
 
@@ -339,12 +425,18 @@ export class Reader {
     const root = $("toc-content");
     const indicator = root.querySelector(".toc-active-indicator");
     const active = root.querySelector(".toc-entry.active");
-    if (!indicator) return;
-    indicator.style.opacity = active ? "1" : "0";
-    if (!active?.offsetHeight) return;
+    // Wait for the final heading/layout instead of fading through an intermediate parent.
+    if (!indicator || this.loading) return;
+    const leaf = active && !active.parentElement.querySelector(":scope > .toc-toggle");
+    const visible = Boolean(leaf && active.offsetHeight);
+    indicator.style.opacity = visible ? "1" : "0";
+    if (!visible) return;
     if (!indicator.dataset.ready) indicator.style.transition = "none";
-    indicator.style.height = `${active.offsetHeight / 2}px`;
-    indicator.style.transform = `translate(-50%, ${active.offsetTop + active.offsetHeight / 4}px)`;
+    const rect = active.getBoundingClientRect(), bounds = root.getBoundingClientRect();
+    indicator.style.removeProperty("left");
+    indicator.style.height = `${rect.height / 2}px`;
+    // A single 2D transform gives x and y exactly the same interpolation progress.
+    indicator.style.transform = `translate(${rect.left - bounds.left}px, ${rect.top - bounds.top + rect.height / 4}px) translateX(-50%)`;
     if (!indicator.dataset.ready) {
       void indicator.offsetHeight;
       indicator.dataset.ready = "true";
@@ -483,6 +575,7 @@ export class Reader {
     );
     this.ratio = ratio;
     this.anchor = anchor;
+    this.tocTarget = anchor ? { chapter: this.chapter, anchor } : null;
     this.query = query;
     this.annotationFocus = annotationId;
     this.loading = true;
@@ -1037,8 +1130,11 @@ export class Reader {
   reflow() {
     if (!this.doc || $("app").hidden) return;
     clearTimeout(this.reflowTimer);
+    const doc = this.doc, generation = this.generation;
     this.reflowTimer = setTimeout(() => {
-      if (!this.doc || $("app").hidden) return;
+      // Loading restores its own anchor after fonts/layout are ready. An old resize timer
+      // must not consume that anchor in the outgoing document.
+      if (doc !== this.doc || generation !== this.generation || this.loading || $("app").hidden) return;
       if (this.layoutViewport !== `${this.doc.defaultView.innerWidth}x${this.doc.defaultView.innerHeight}`) {
         this.appliedReading = null; this.apply({ reading: this.settings, application: this.appSettings }); return;
       }
@@ -1071,6 +1167,7 @@ export class Reader {
           Math.max(1, doc.documentElement.scrollHeight - view.innerHeight),
       );
     if (this.atEnd()) this.ratio = 1;
+    this.activeToc();
     const progress = this.atEnd() ? 1 : Math.min(.999,
       (this.chapter + this.ratio) / this.book.chapters.length);
     $("page-indicator").textContent =
@@ -1110,10 +1207,10 @@ export class Reader {
     const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
     if (!delta) return;
     event.preventDefault();
-    if (this.reflowing) return;
-    // Each wheel event advances one page, independent of the OS scroll distance.
-    // Keep notches received during a queued chapter load, too.
-    return this.turn(delta > 0 ? 1 : -1, this.cornerAt(event), true);
+    this.wheelPaging ??= new WheelPaging();
+    const direction = this.wheelPaging.accept(event);
+    if (this.reflowing || !direction) return;
+    return this.turn(direction, this.cornerAt(event), true);
   }
 
   /** Book-page half under a pointer event, from the shell or from inside the book frame. */
@@ -1133,6 +1230,8 @@ export class Reader {
       if (this.wheelBacklog?.revision !== revision)
         this.wheelBacklog = { revision, count: 0 };
       backlog = this.wheelBacklog;
+      // Even an unusually fast wheel must not build an unbounded animation backlog.
+      if (backlog.count >= 8) return this.turnQueue;
       backlog.count++;
       this.motion?.setSpeed(Math.min(10, 1 + (backlog.count - 1) * .6));
     }

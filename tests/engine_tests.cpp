@@ -51,6 +51,25 @@ int main()
                 "relative URI");
         rejects([] { dr::resolve_href("a.xhtml", "../escape"); }, "traversal rejected");
         rejects([] { dr::resolve_href("", "%2e%2e/out"); }, "encoded traversal rejected");
+        {
+            const std::string input = "&amp;&lt;&gt;&quot;&apos;&#160;&#xA0;&nbsp;&copy;&NotEqualTilde;&unknown;";
+            const std::string expected = "&amp;&lt;&gt;&quot;&apos;&#160;&#xA0;&#xA0;&#xA9;&#x2242;&#x338;&unknown;";
+            require(dr::xml_compatible_entities(input) == expected, "HTML5 named entities become XML-safe numeric references");
+            require(dr::xml_compatible_entities(expected) == expected, "entity normalization is idempotent");
+            const std::string raw = R"(<!DOCTYPE html [<!ENTITY example "&nbsp;">]><!-- &copy; --><![CDATA[&nbsp;]]><?test &copy;?>)";
+            require(dr::xml_compatible_entities(raw) == raw, "entities in declarations, comments and CDATA remain literal");
+            auto entities = dr::split_xhtml("entities.xhtml",
+                R"entity(<html><head/><body><h1 id="heading">目&nbsp;&nbsp;录</h1><p title="A&nbsp;B">正文&nbsp;&copy;&NotEqualTilde; &amp;nbsp; &lt;tag&gt;</p><a href="javascript&colon;alert(1)">链接</a></body></html>)entity");
+            require(entities.flows[0].title == "目  录\n" && entities.flows[0].text.find("正文 ©≂̸ &nbsp; <tag>") != std::string::npos,
+                    "split chapter title and search text contain decoded Unicode, without double decoding literal entities");
+            pugi::xml_document parsed;
+            require(parsed.load_string(entities.flows[0].html.c_str()), "entity-normalized output remains valid XML");
+            const auto paragraph = dr::child_named(dr::child_named(parsed.document_element(), "body"), "p");
+            require(std::string(paragraph.attribute("title").value()) == "A B", "attribute entities decode before parsing");
+            require(entities.flows[0].html.find("&amp;copy;") == std::string::npos &&
+                        entities.flows[0].html.find("javascript") == std::string::npos,
+                    "entity output is not double escaped and sanitization sees decoded URL schemes");
+        }
         std::string source =
             R"(<html xmlns="http://www.w3.org/1999/xhtml"><head><title>test</title><link href="style.css" rel="stylesheet"/></head><body><section id="outer"><h1 id="start">一</h1><p>开头文字<a href="#end">跳转</a></p><div><h2 style="page-break-before: always" id="end">二</h2><p>结尾文字</p></div></section></body></html>)";
         auto result = dr::split_xhtml("OPS/text.xhtml", source);
@@ -97,6 +116,36 @@ int main()
              {"OPS/text.xhtml", source},
              {"OPS/nav.xhtml",
               R"(<html xmlns:epub="urn:epub"><body><nav epub:type="toc"><ol><li><a href="text.xhtml#start">第一节</a></li><li><a href="text.xhtml#end">第二节</a></li></ol></nav></body></html>)"}});
+        {
+            const auto ncx_fixture = root / "ncx-labels.epub";
+            const std::string package = R"(<package><metadata><title>NCX labels</title></metadata><manifest><item id="c" href="text.xhtml" media-type="application/xhtml+xml"/><item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/></manifest><spine toc="toc"><itemref idref="c"/></spine></package>)";
+            const auto fixture = [&](const std::string &ncx) {
+                zip(ncx_fixture, {{"META-INF/container.xml", R"(<container><rootfiles><rootfile full-path="OPS/package.opf"/></rootfiles></container>)"},
+                    {"OPS/package.opf", package}, {"OPS/text.xhtml", source}, {"OPS/toc.ncx", ncx}});
+            };
+            std::string ncx = R"(<ncx xmlns:n="urn:ncx"><navMap><navPoint><navLabel><text>第一章&lt;原文&gt;<@>标题 &amp; 名称 <![CDATA[<@>]]></text></navLabel><content src="text.xhtml#start"/><navPoint><navLabel><n:text>)";
+            ncx += static_cast<char>(0xc7);
+            ncx += R"(第二节 < 5</n:text></navLabel><content src="text.xhtml#end"/></navPoint></navPoint></navMap></ncx>)";
+            fixture(ncx);
+            auto recovered = dr::import_epub(ncx_fixture, root / "ncx-recovered");
+            require(recovered["toc"].size() == 2 && recovered["toc"][0]["title"] == "第一章<原文><@>标题 & 名称 <@>",
+                    "NCX recovers literal invalid angle markers without double escaping entities or CDATA");
+            require(recovered["toc"][1]["title"] == "�第二节 < 5" && recovered["toc"][1]["depth"] == 1 &&
+                        recovered["toc"][1]["href"].get<std::string>().find(".dr-1.xhtml#end") != std::string::npos,
+                    "NCX repairs invalid UTF-8 in prefixed labels, preserving hierarchy and remapped links");
+            require(!recovered.dump().empty(), "repaired NCX metadata is valid UTF-8 JSON");
+            fixture("<ncx><navMap><navPoint><navLabel><text>标题</text></navLabel></navMap></ncx>");
+            try
+            {
+                dr::import_epub(ncx_fixture, root / "ncx-malformed");
+                throw std::runtime_error("malformed NCX structure was accepted");
+            }
+            catch (const std::exception &error)
+            {
+                require(std::string(error.what()).find("第 1 行") != std::string::npos,
+                        "broken NCX structure stays an error and reports its location");
+            }
+        }
         std::string id;
         std::string annotation_href;
         {
@@ -221,6 +270,50 @@ int main()
             require(again.list("book").size() == 2, "migrated database reopens");
         }
         auto defaults = dr::default_settings();
+        require(dr::parse_settings_toml(dr::format_settings_toml(defaults)) == defaults,
+                "all default settings round trip through TOML");
+        {
+            const auto config_root = root / "配置迁移";
+            dr::Library migration(config_root);
+            auto old_settings = dr::patch_settings(defaults, {
+                {"application", {{"librarySort", "author"}, {"theme", "dark"}}},
+                {"reading", {{"fontFamily", "中文字体 \"测试\""}, {"fontSize", 26}}},
+                {"window", {{"widthRatio", 0.7}, {"heightRatio", 0.8}}}
+            });
+            dr::write_file(config_root / "settings.json", old_settings.dump(2));
+            require(migration.settings() == old_settings && dr::fs::exists(config_root / "config.toml"),
+                    "legacy JSON settings migrate to TOML, including Unicode strings and window ratios");
+            require(dr::read_file(config_root / "settings.json") == old_settings.dump(2),
+                    "migration preserves the original JSON backup");
+            dr::write_file(config_root / "settings.json", defaults.dump());
+            dr::Library reopened(config_root);
+            require(reopened.settings() == old_settings, "TOML takes precedence over legacy JSON");
+            auto changed = reopened.save_settings({{"application", {{"librarySort", "read"}, {"dictionaries", dr::Json::array()}}}});
+            require(dr::parse_settings_toml(dr::read_file(config_root / "config.toml")) == changed &&
+                        changed["application"]["dictionaries"].empty(),
+                    "settings changes and empty arrays persist in TOML");
+            dr::write_file(config_root / "config.toml", "# manual edits\n[application]\nlibrarySort = 'title'\n[window]\nwidthRatio = 0.65\nheightRatio = 0.75\n");
+            auto manual = reopened.settings();
+            require(manual["application"]["librarySort"] == "title" && manual["window"]["widthRatio"] == 0.65 &&
+                        manual["reading"] == defaults["reading"], "manual TOML edits load with defaults for omitted settings");
+            const std::string broken = "[application\nlibrarySort = 'title'\n";
+            dr::write_file(config_root / "config.toml", broken);
+            rejects([&] { reopened.save_settings({{"application", {{"librarySort", "read"}}}}); },
+                    "malformed TOML is reported before saving");
+            require(dr::read_file(config_root / "config.toml") == broken, "malformed TOML is never overwritten");
+            rejects([&] { dr::parse_settings_toml("[window]\nwidthRatio = 'wide'\n"); }, "window ratios must be numeric");
+        }
+
+        require(defaults["application"]["librarySort"] == "added", "library defaults to recently added");
+        for (const auto *sort : {"added", "read", "title", "author"})
+        {
+            library.save_settings({{"application", {{"librarySort", sort}}}});
+            dr::Library reopened(root / "library");
+            require(reopened.settings()["application"]["librarySort"] == sort,
+                    "library sort survives reopening the library");
+        }
+        rejects([&] { library.save_settings({{"application", {{"librarySort", "invalid"}}}}); },
+                "invalid library sort is rejected");
         require(defaults["application"]["shell"] == "direct2d" && defaults["reading"]["mode"] == "paged",
                 "settings defaults");
         require(defaults["application"]["theme"] == "system" && defaults["reading"]["theme"] == "system",
@@ -331,8 +424,15 @@ int main()
                     lookup.find("%2F") != std::string::npos,
                 "dictionary URL encoding");
         rejects([&] { library.save_position(id, {{"chapter", -1}}); }, "invalid progress");
+        require(library.export_notes(id).empty(), "a book without notes has nothing to export");
         library.save_annotation(id, {{"chapter", 1}, {"href", annotation_href},
-                                    {"start", 0}, {"end", 4}, {"quote", "结尾文字"}});
+                                    {"start", 0}, {"end", 8}, {"quote", "结尾文字\n第二行"},
+                                    {"style", "underline"}, {"note", "重点 *内容* <tag>\n下一行"}});
+        const auto markdown = library.export_notes(id);
+        require(markdown.starts_with("# 测试书\n") && markdown.find("> 结尾文字\n> 第二行") != markdown.npos &&
+                    markdown.find("标注：下划线") != markdown.npos && markdown.find("重点 \\*内容\\* \\<tag\\>") != markdown.npos,
+                "Markdown export contains the book, quoted passage, mark type and safely escaped multiline note");
+        rejects([&] { library.export_notes("../invalid"); }, "export rejects an unsafe book ID");
         library.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}});
         rejects([&] { library.remove_book("../library"); }, "reject unsafe deletion ID");
         require(library.list().size() == 1, "invalid deletion preserves library");

@@ -19,6 +19,7 @@ class Application
     void enqueue(std::function<void()> work);
     void worker(std::stop_token stop);
     std::vector<fs::path> pick_books();
+    fs::path pick_notes_path(const std::string &title);
     void apply_settings(const Json &settings);
     Window window_;
     WebView webview_;

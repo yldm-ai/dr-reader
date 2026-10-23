@@ -114,6 +114,8 @@ test('icons prefer Fluent, then an available MDL2 glyph, then semantic SVG', () 
     assert.ok(icon('settings').includes(materialPaths.settings));
     assert.ok(icon('user').includes(materialPaths.person));
     assert.ok(icon('tip').includes(materialPaths.chat_bubble));
+    configureIconFonts({ 'Segoe Fluent Icons': [0xe794], 'Segoe MDL2 Assets': [0xe8a5] });
+    assert.deepEqual(fluentGlyph('unread'), { code: 0xe794, font: 'fluent' });
     configureIconFonts({ 'Segoe MDL2 Assets': [0xe823, 0xe8a5] });
     assert.equal(fluentGlyph('clock').code, 0xe823);
     assert.equal(fluentGlyph('unread').code, 0xe8a5);

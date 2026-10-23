@@ -1,6 +1,6 @@
-add_library(dr_engine STATIC src/paths.cpp src/splitter.cpp src/epub.cpp src/library.cpp src/annotations.cpp src/settings.cpp)
+add_library(dr_engine STATIC src/paths.cpp src/splitter.cpp src/epub.cpp src/library.cpp src/annotations.cpp src/settings.cpp src/settings-toml.cpp src/entities.cpp)
 target_include_directories(dr_engine PUBLIC include)
-target_link_libraries(dr_engine PUBLIC pugixml::pugixml nlohmann_json::nlohmann_json PRIVATE miniz dr_sqlite)
+target_link_libraries(dr_engine PUBLIC pugixml::pugixml nlohmann_json::nlohmann_json PRIVATE miniz dr_sqlite tomlplusplus::tomlplusplus)
 if(WIN32)
   target_compile_definitions(dr_engine PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
 endif()

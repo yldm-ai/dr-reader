@@ -3,7 +3,7 @@ import { materialPaths } from './material-icons.ts';
 // Microsoft Segoe Fluent Icons / MDL2 shared code points. No redistributed font files.
 // https://learn.microsoft.com/windows/apps/design/iconography/segoe-fluent-icons-font
 const fluent: Record<string, number> = {
-  book: 0xe736, library: 0xe8f1, plus: 0xe710, clock: 0xe823, unread: 0xe8a5,
+  'all-books': 0xe82d, book: 0xe736, library: 0xe8f1, plus: 0xe710, clock: 0xe823, unread: 0xe794,
   bookmark: 0xe8a4, check: 0xe73e, user: 0xe77b, chevron: 0xe76c,
   'chevron-down': 0xe70d, settings: 0xe713, search: 0xe721,
   grid: 0xe74c, list: 0xea37, 'arrow-up': 0xe74a,
@@ -14,7 +14,7 @@ const fluent: Record<string, number> = {
 // Settings, author and note tips keep their Fluent glyphs everywhere.
 const alwaysFluent = new Set(['settings', 'user', 'tip']);
 const mdl2Alternatives: Record<string, number[]> = {
-  clock: [0xe81c], list: [0xe8fd], library: [0xe7bc], tip: [0xe82f],
+  unread: [0xe8a5], clock: [0xe81c], list: [0xe8fd], library: [0xe7bc], tip: [0xe82f],
 };
 export type IconFontGlyphs = Record<string, readonly number[]>;
 let coverage: Map<string, Set<number>> | undefined;
@@ -40,7 +40,7 @@ export function fluentGlyph(name: string): { code: number; font?: string } | und
 
 // The reader and settings use Material Symbols Rounded paths (see material-icons.ts).
 const material: Record<string, string> = {
-  book: 'menu_book', library: 'library_books', plus: 'add', minus: 'remove', clock: 'schedule', unread: 'draft', tip: 'chat_bubble',
+  'all-books': 'library_books', book: 'menu_book', library: 'library_books', plus: 'add', minus: 'remove', clock: 'schedule', unread: 'draft', tip: 'chat_bubble',
   settings: 'settings', user: 'person',
   bookmark: 'bookmark', 'bookmark-filled': 'bookmark-fill', check: 'check', chevron: 'chevron_right',
   'chevron-down': 'keyboard_arrow_down', search: 'search', grid: 'grid_view', list: 'view_list',

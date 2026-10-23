@@ -5,13 +5,15 @@ import { SettingsPanel } from "./settings.js";
 import { createLibraryOverlays } from "./library-overlays.js";
 import { Tooltips } from "./tooltip.ts";
 import { BookOpening } from "./book-opening.ts";
+import { LibraryBackToTop } from "./back-to-top.ts";
 import { SelectControl } from "./select-control.ts";
 import { Shelves } from "./shelves.js";
 import { readingPalette, resolveTheme } from "./reading-palette.ts";
 
 hydrate();
-new SelectControl($("sort"));
+const sortControl = new SelectControl($("sort"));
 const tooltips = new Tooltips();
+new LibraryBackToTop($("library-view"), $("library-back-to-top"), $("library-heading"));
 
 let books = [];
 let settings = null;
@@ -24,6 +26,21 @@ const libraryOverlays = createLibraryOverlays(book => {
   pendingRemoval = book;
   $("delete-book-title").textContent = `删除《${book.title}》？`;
   $("delete-book-dialog").showModal();
+}, {
+  open: book => openBook(book.id),
+  shelves: () => shelves.items,
+  addToShelf: async (book, id) => {
+    try { await shelves.addBook(book.id, id); toast("已添加至分类书架", "success"); }
+    catch (error) { toast(error.message, "error"); }
+  },
+  createShelf: book => shelves.edit(null, book.id),
+  exportNotes: async book => {
+    try {
+      const result = await call("notes.export", { id: book.id });
+      if (result.empty) toast("这本书还没有笔记或标注");
+      else if (result.saved) toast("笔记已导出", "success");
+    } catch (error) { toast(`导出失败：${error.message}`, "error"); }
+  },
 });
 
 const reader = new Reader((book) => {
@@ -37,6 +54,12 @@ function applySettings(value) {
     application: { ...value.application, theme: resolveTheme(value.application.theme) },
     reading: { ...value.reading, theme: resolveTheme(value.reading.theme) },
   };
+  const sort = settings.application.librarySort || "added";
+  if ($("sort").value !== sort) {
+    $("sort").value = sort;
+    sortControl.sync();
+    render();
+  }
   document.body.dataset.theme = settings.application.theme;
   document.body.dataset.animations = String(settings.application.animations);
   reader.apply(settings);
@@ -118,6 +141,7 @@ function render() {
   $("library-heading").firstChild.textContent = author || (browsingShelves && shelves.selected ? shelves.selected.name : titles[filter]);
   $("heading-count").textContent = visible.length;
   $("count-all").textContent = books.length;
+  $("count-shelves").textContent = shelves.items.length;
   $("count-recent").textContent = books.filter((book) => book.lastRead).length;
   $("count-finished").textContent = books.filter((book) => book.progress >= 1).length;
   $("count-unread").textContent = books.filter((book) => !book.lastRead).length;
@@ -307,7 +331,10 @@ $("library-search").onkeydown = (event) => {
   clearTimeout(searchTimer);
   render();
 };
-$("sort").onchange = render;
+$("sort").onchange = () => {
+  render();
+  settingsPanel.update("application", { librarySort: $("sort").value });
+};
 $("grid-view").onclick = () => {
   listMode = false;
   $("grid-view").classList.add("selected");

@@ -26,6 +26,14 @@ export function installNativeMock(data = bootstrapFixture()) {
     postMessage({ id, method, params }) {
       requests.push({ method, params });
       let result = true;
+      if (method === 'notes.export') {
+        if (data.exportError) {
+          queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { id, error: data.exportError } })));
+          return;
+        }
+        result = data.exportResult || { saved: true };
+      }
+
       if (method === 'shelves.save') { data.shelves = structuredClone(params.shelves); result = structuredClone(data.shelves); }
       if (method === 'bootstrap') result = structuredClone(data);
       if (method === 'import') result = { books: structuredClone(data.books), errors: data.importErrors || [] };

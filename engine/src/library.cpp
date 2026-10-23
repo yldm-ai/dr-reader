@@ -255,24 +255,71 @@ Json Library::chapter_lengths(const std::string &id) const
 }
 Json Library::settings() const
 {
-    auto p = root_ / "settings.json";
-    if (fs::exists(p))
+    const auto config = root_ / "config.toml";
+    if (fs::exists(config))
     {
-        try
+        try { return parse_settings_toml(read_file(config)); }
+        catch (const std::exception &error)
         {
-            return normalize_settings(Json::parse(read_file(p)));
-        }
-        catch (const std::exception &)
-        {
+            throw std::runtime_error("无法读取配置 " + utf8(config) + ": " + error.what());
         }
     }
-    return default_settings();
+    auto settings = default_settings();
+    const auto legacy = root_ / "settings.json";
+    if (fs::exists(legacy))
+        settings = normalize_settings(Json::parse(read_file(legacy)));
+    // Keep legacy settings as a backup, but use TOML exclusively after migration.
+    write_atomic(config, format_settings_toml(settings));
+    return settings;
 }
 Json Library::save_settings(const Json &patch)
 {
-    auto s = patch_settings(settings(),patch);
-    write_atomic(root_ / "settings.json", s.dump(2));
-    return s;
+    auto settings = patch_settings(this->settings(), patch);
+    write_atomic(root_ / "config.toml", format_settings_toml(settings));
+    return settings;
+}
+std::string Library::export_notes(const std::string &id) const
+{
+    const auto book = get(id);
+    const auto notes = annotations_->list(id);
+    if (notes.empty()) return {};
+    const auto escaped = [](const std::string &text) {
+        std::string result;
+        for (char c : text)
+        {
+            if (c == '\r') continue;
+            if (std::string_view("\\`*_{}[]<>()#+.!|-").find(c) != std::string_view::npos) result += '\\';
+            result += c;
+        }
+        return result;
+    };
+    std::ostringstream out;
+    out << "# " << escaped(book.value("title", std::string("阅读笔记"))) << "\n\n";
+    const auto author = book.value("author", std::string());
+    if (!author.empty()) out << "作者：" << escaped(author) << "\n\n";
+    int previous = -1;
+    for (const auto &note : notes)
+    {
+        const int chapter = note.at("chapter");
+        if (chapter != previous)
+        {
+            const auto &chapters = book.at("chapters");
+            std::string title = chapter >= 0 && static_cast<size_t>(chapter) < chapters.size()
+                ? chapters[chapter].value("title", std::string()) : "";
+            if (title.empty()) title = "第 " + std::to_string(chapter + 1) + " 节";
+            out << "## " << escaped(title) << "\n\n";
+            previous = chapter;
+        }
+        std::istringstream quote(escaped(note.value("quote", std::string())));
+        std::string line;
+        while (std::getline(quote, line)) out << "> " << line << '\n';
+        const auto style = note.value("style", std::string("highlight"));
+        out << "\n标注：" << (style == "underline" ? "下划线" : style == "note" ? "笔记" : "高亮") << "\n";
+        const auto text = note.value("note", std::string());
+        if (!text.empty()) out << "\n**笔记**\n\n" << escaped(text) << "\n";
+        out << "\n---\n\n";
+    }
+    return out.str();
 }
 Json Library::annotations(const std::string& id) const {get(id);return annotations_->list(id);}
 Json Library::save_annotation(const std::string& id,const Json& annotation){auto book=get(id);int chapter=annotation.at("chapter");if(chapter<0||static_cast<size_t>(chapter)>=book["chapters"].size()||annotation.at("href")!=book["chapters"][chapter]["href"])throw std::runtime_error("标注章节不属于当前书籍");return annotations_->save(id,annotation);}

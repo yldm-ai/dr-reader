@@ -23,6 +23,7 @@ class Library
     Json settings() const;
     Json save_settings(const Json &settings);
     Json annotations(const std::string& id) const;
+    std::string export_notes(const std::string& id) const;
     Json save_annotation(const std::string& id,const Json& annotation);
     void remove_annotation(const std::string& id,const std::string& annotation_id);
     std::string lookup_url(const std::string& dictionary,const std::string& text) const;

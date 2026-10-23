@@ -220,7 +220,8 @@ std::vector<BreakRule> break_rules(std::string css)
 SplitResult split_xhtml(const std::string &path, const std::string &markup, const SplitOptions &opts)
 {
     pugi::xml_document doc;
-    auto parsed = doc.load_buffer(markup.data(), markup.size(), pugi::parse_default | pugi::parse_ws_pcdata);
+    const auto normalized = xml_compatible_entities(markup);
+    auto parsed = doc.load_buffer(normalized.data(), normalized.size(), pugi::parse_default | pugi::parse_ws_pcdata);
     if (!parsed)
         throw std::runtime_error("XHTML 解析失败: " + path + " (" + parsed.description() + ")");
     auto html = doc.document_element(), body = child_named(html, "body");

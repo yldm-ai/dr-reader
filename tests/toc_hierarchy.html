@@ -1,0 +1,79 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Collapsible table of contents</title>
+<link rel="stylesheet" href="../web/styles.css">
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+try {
+  const html = new DOMParser().parseFromString(await (await fetch('../web/index.html')).text(), 'text/html');
+  document.body.append(...html.body.children);
+  const { Reader } = await import('../web/reader.js');
+  document.getElementById('reader-view').hidden = false;
+  const panel = document.getElementById('toc-panel');
+  panel.hidden = false;
+  panel.dataset.pinned = 'true';
+  panel.style.cssText = 'position:fixed;left:24px;top:24px;bottom:24px;width:280px';
+  document.body.dataset.theme = 'dark';
+  const reader = Object.create(Reader.prototype);
+  let navigated;
+  Object.assign(reader, {
+    chapter: 1,
+    book: {
+      chapters: [{ href: 'cover.html' }, { href: 'chapter.html' }, { href: 'other.html' }],
+      toc: [
+        { title: '封面', href: 'cover.html', depth: 0 },
+        { title: '新刻绣像批评金瓶梅卷之一', href: 'volume.html', depth: 0 },
+        { title: '第一回 西门庆热结十弟兄 武二郎冷遇亲哥嫂', href: 'chapter.html', depth: 1 },
+        { title: '第一节', href: 'chapter.html#section', depth: 2 },
+        { title: '第二回 俏潘娘帘下勾情 老王婆茶坊说技', href: 'other.html', depth: 1 },
+        { title: '新刻绣像批评金瓶梅卷之二', href: 'second.html', depth: 0 },
+        { title: '第六回', href: 'six.html', depth: 1 },
+      ],
+    },
+    navigate(href) { navigated = href; },
+  });
+  reader.toc();
+  const root = document.getElementById('toc-content');
+  const visible = () => [...root.querySelectorAll('.toc-entry')].filter(el => el.offsetHeight);
+  const toggles = root.querySelectorAll('.toc-toggle');
+  check(toggles.length === 3 && visible().length === 3, 'all hierarchy levels start collapsed');
+  check(root.querySelector('.toc-row.contains-active .toc-toggle[aria-expanded="false"]'), 'collapsed ancestor indicates current chapter');
+  toggles[0].click();
+  check(visible().length === 5 && !navigated, 'expansion reveals immediate children without navigating');
+  check(toggles[0].getAttribute('aria-expanded') === 'true', 'disclosure exposes accessible state');
+  check(root.querySelector('.toc-entry.active').parentElement.querySelector('.toc-toggle') && root.querySelector('.toc-active-indicator').style.opacity === '0', 'an active parent heading never shows a capsule');
+  root.querySelectorAll('.toc-entry')[1].click();
+  check(navigated === 'volume.html', 'parent title remains navigable');
+  toggles[1].click();
+  check(visible().length === 6, 'nested branches expand independently');
+  reader.tocTarget = { chapter: 1, anchor: 'section' };
+  reader.activeToc();
+  check(root.querySelectorAll('.toc-entry.active').length === 1 && root.querySelector('.toc-entry.active').dataset.href.endsWith('#section'),
+    'the exact nested anchor is the only highlighted title');
+  const marker = root.querySelector('.toc-active-indicator');
+  marker.style.transition = 'none';
+  const selected = root.querySelector('.toc-entry.active').getBoundingClientRect();
+  const capsule = marker.getBoundingClientRect();
+  check(Math.abs(capsule.left + capsule.width / 2 - selected.left) < 0.1 && Math.abs(capsule.height * 2 - selected.height) < 1,
+    'capsule centerline aligns exactly with the innermost title background left edge');
+  check(!root.querySelector('.toc-entry.active').closest('.toc-node').parentElement.closest('.toc-node').querySelector(':scope > .toc-row > .toc-entry').classList.contains('active'),
+    'the parent heading is not highlighted');
+
+  toggles[0].click();
+  check(visible().length === 3, 'collapse hides all descendants');
+  check(root.querySelector('.toc-active-indicator').style.opacity === '0', 'collapsed ancestors never inherit the capsule');
+  reader.chapter = 2;
+  reader.activeToc();
+  check(visible().length === 3, 'chapter changes respect collapsed state');
+  toggles[0].click();
+  check(visible().length === 6, 'reopening keeps nested expansion during this reading session');
+  reader.toc();
+  check(visible().length === 3, 'reopening the book starts collapsed');
+  document.documentElement.dataset.result = 'pass';
+  output.textContent = 'PASS collapsible hierarchy';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

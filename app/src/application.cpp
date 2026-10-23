@@ -124,6 +124,34 @@ std::vector<fs::path> Application::pick_books()
     }
     return files;
 }
+fs::path Application::pick_notes_path(const std::string &title)
+{
+    Microsoft::WRL::ComPtr<IFileSaveDialog> dialog;
+    if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+        throw std::runtime_error("无法打开笔记保存窗口");
+    const COMDLG_FILTERSPEC filters[] = {{L"Markdown 笔记 (*.md)", L"*.md"}};
+    dialog->SetFileTypes(1, filters);
+    dialog->SetDefaultExtension(L"md");
+    dialog->SetTitle(L"导出阅读笔记");
+    auto filename = widen(title);
+    for (auto &c : filename)
+        if (c < 32 || std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos) c = L'_';
+    filename = filename.substr(0, 100) + L" - 阅读笔记.md";
+    dialog->SetFileName(filename.c_str());
+    FILEOPENDIALOGOPTIONS options{};
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_OVERWRITEPROMPT | FOS_PATHMUSTEXIST);
+    const auto result = dialog->Show(window_.handle());
+    if (result == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return {};
+    if (FAILED(result)) throw std::runtime_error("无法保存笔记");
+    Microsoft::WRL::ComPtr<IShellItem> item;
+    PWSTR path = nullptr;
+    if (FAILED(dialog->GetResult(&item)) || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+        throw std::runtime_error("无法取得笔记保存路径");
+    fs::path destination(path);
+    CoTaskMemFree(path);
+    return destination;
+}
 void Application::receive(const Json &request)
 {
     if (!request.is_object() || !request.contains("id") || !request["id"].is_number_unsigned() ||
@@ -247,6 +275,40 @@ void Application::receive(const Json &request)
                     result = library_.search(params.at("id"), params.at("query"));
                 else if (method == "book.stats")
                     result = {{"chars", library_.chapter_lengths(params.at("id"))}};
+                else if (method == "notes.export")
+                {
+                    const auto book_id = params.at("id").get<std::string>();
+                    auto text = library_.export_notes(book_id);
+                    if (text.empty()) result = {{"saved", false}, {"empty", true}};
+                    else
+                    {
+                        const auto title = library_.get(book_id).value("title", std::string("阅读笔记"));
+                        window_.post([this, id, title, text = std::move(text)] {
+                            try
+                            {
+                                const auto path = pick_notes_path(title);
+                                if (path.empty())
+                                {
+                                    webview_.send({{"id", id}, {"result", {{"saved", false}}}});
+                                    return;
+                                }
+                                enqueue([this, id, path, text] {
+                                    try
+                                    {
+                                        write_atomic(path, text);
+                                        window_.post([this, id] { webview_.send({{"id", id}, {"result", {{"saved", true}}}}); });
+                                    }
+                                    catch (const std::exception &error)
+                                    {
+                                        window_.post([this, id, error = std::string(error.what())] { webview_.send({{"id", id}, {"error", error}}); });
+                                    }
+                                });
+                            }
+                            catch (const std::exception &error) { webview_.send({{"id", id}, {"error", error.what()}}); }
+                        });
+                        return;
+                    }
+                }
                 else if(method=="annotations")result=library_.annotations(params.at("id"));
                 else if(method=="annotation.save")result=library_.save_annotation(params.at("id"),params.at("annotation"));
                 else if(method=="annotation.delete"){library_.remove_annotation(params.at("id"),params.at("annotationId"));result=true;}
@@ -275,7 +337,9 @@ int Application::run(HINSTANCE instance)
         settings["application"]["shell"] = shell_override_;
     if (!window_.create(instance, settings["application"].value("shell", std::string("mica")) == "direct2d"
                                       ? ShellStyle::Direct2D
-                                      : ShellStyle::Mica, IDI_DR_READER))
+                                      : ShellStyle::Mica, IDI_DR_READER,
+                         settings["window"]["widthRatio"].get<double>(),
+                         settings["window"]["heightRatio"].get<double>()))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
     // Alt+Enter hides or restores the title bar; fullscreen stays on F11 and the toolbar.

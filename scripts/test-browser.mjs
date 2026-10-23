@@ -16,7 +16,7 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
+  for (const name of ['toc_motion', 'toc_anchors', 'reader_touchpad', 'library_context_actions', 'library_back_to_top', 'library_sort', 'toc_hierarchy', 'icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
     if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors = [];
@@ -30,6 +30,80 @@ try {
       await writeFile(resolve(directory, `${name}.html`), await page.content());
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));
       if (!passed || errors.length) throw Error(`${name}: ${await page.locator('#result').textContent()}\n${errors.join('\n')}`);
+      if (name === 'toc_anchors') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        await app.locator('#toc-panel').screenshot({ path: resolve(directory, 'toc-unique-leaf-light.png') });
+        await app.evaluate(() => { document.body.dataset.theme = 'dark'; });
+        await app.locator('#toc-panel').screenshot({ path: resolve(directory, 'toc-unique-leaf-dark.png') });
+      }
+      if (name === 'library_context_actions') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        const panel = app.locator('#toc-panel');
+        const box = await app.locator('#reader-view').boundingBox();
+        await page.mouse.move(box.x + 4, box.y + 48);
+        await page.waitForTimeout(100);
+        if (await panel.getAttribute('data-expanded') === 'true') throw Error('return-button approach must not reveal the sidebar');
+        await page.mouse.move(box.x + 4, box.y + 160);
+        await panel.waitFor({ state: 'visible' });
+        await app.locator('#book-frame').hover();
+        await panel.waitFor({ state: 'hidden' });
+        await page.mouse.move(box.x + 45, box.y + 20);
+        await app.locator('#corner-library').waitFor({ state: 'visible' });
+        if (await panel.getAttribute('data-expanded') === 'true') throw Error('return button hover must not reveal the sidebar');
+        await page.mouse.move(box.x + 4, box.y + 160);
+        await panel.waitFor({ state: 'visible' });
+        await app.locator('#corner-library').click();
+        await app.locator('#library-view').waitFor({ state: 'visible' });
+        const title = app.locator('.book-card h3').first();
+        let flashes = 0;
+        await app.evaluate(() => {
+          window.menuTitleFlashes = 0;
+          document.getElementById('book-title-tooltip').addEventListener('beforetoggle', e => {
+            if (e.newState === 'open') window.menuTitleFlashes++;
+          });
+        });
+        await title.click({ button: 'right' });
+        await page.waitForTimeout(500);
+        flashes = await app.evaluate(() => window.menuTitleFlashes);
+        if (flashes) throw Error('physical right click must not flash the title tooltip');
+        await app.locator('#book-menu-category').hover();
+        await app.locator('#book-shelf-menu').waitFor({ state: 'visible' });
+        await app.locator('#book-shelf-menu').hover();
+        await page.waitForTimeout(260);
+        if (!await app.locator('#book-shelf-menu').isVisible()) throw Error('submenu must stay open while crossing the gap');
+        await app.locator('#toast').evaluate(el => { el.hidden = true; });
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'book-menu-light.png') });
+        await app.evaluate(() => { document.body.dataset.theme = 'dark'; });
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'book-menu-dark.png') });
+        await app.locator('#book-menu-new-shelf').press('Escape');
+        await app.locator('#book-menu-category').press('Escape');
+        // Keyboard opening must offer every operation in a predictable order.
+        await app.locator('.book-card').first().press('Shift+F10');
+        await app.locator('#book-menu-open').press('ArrowDown');
+        if (!await app.locator('#book-menu-export').evaluate(el => el === document.activeElement)) throw Error('keyboard menu navigation must reach export');
+        await app.locator('#book-menu-export').press('Escape');
+      }
+      if (name === 'library_back_to_top') {
+        const frame = page.frames().find(frame => frame.parentFrame());
+        await frame.locator('#library-back-to-top').hover();
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'library-back-to-top-dark.png') });
+        await frame.evaluate(() => { document.body.dataset.theme = 'light'; });
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'library-back-to-top-light.png') });
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        if (!await frame.evaluate(() => {
+          document.body.dataset.animations = 'true';
+          document.getElementById('library-back-to-top').click();
+          return document.getElementById('library-view').scrollTop === 0;
+        })) throw Error('reduced motion must return to the top instantly');
+      }
+      if (name === 'toc_hierarchy') {
+        const panel = page.locator('#toc-panel');
+        await panel.screenshot({ path: resolve(directory, 'toc-collapsed.png') });
+        await panel.locator('.toc-toggle').first().click();
+        await panel.screenshot({ path: resolve(directory, 'toc-expanded.png') });
+        await page.evaluate(() => { document.body.dataset.theme = 'light'; });
+        await panel.screenshot({ path: resolve(directory, 'toc-expanded-light.png') });
+      }
       if (name === 'icon_fallback') {
         await page.locator('iframe').screenshot({ path: resolve(directory, 'icons-mdl2.png') });
         const app = page.frames().find(frame => frame.parentFrame());
@@ -479,14 +553,15 @@ try {
           throw Error('pinned sidebar must remain visible outside hover');
         await app.locator('.toc-entry').nth(1).click();
         await app.waitForFunction(() => document.querySelectorAll('.toc-entry')[1].classList.contains('active'));
-        if (!await app.locator('.toc-active-indicator').evaluate(el => el.getAnimations().some(a => a.playState === 'running')))
-          throw Error('chapter capsule must animate between entries');
+        // The capsule waits for the destination chapter layout, then moves once.
+        await app.waitForFunction(() => document.querySelector('.toc-active-indicator').getAnimations().some(a => a.playState === 'running'),
+          undefined, { timeout: 3000 });
         await app.locator('.toc-active-indicator').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
         if (!await app.locator('.toc-active-indicator').evaluate(el => {
           const marker = el.getBoundingClientRect(), active = document.querySelector('.toc-entry.active').getBoundingClientRect();
           return Math.abs(marker.height * 2 - active.height) < 1 &&
             Math.abs(marker.top + marker.height / 2 - active.top - active.height / 2) < 1 &&
-            Math.abs(marker.left + marker.width / 2 - active.left) < 1;
+            Math.abs(marker.left + marker.width / 2 - active.left) < 0.1;
         })) throw Error('chapter capsule must stay half-height and align to the active entry left edge');
         await app.locator('.toc-entry').first().click();
         await app.locator('#reader-loading').waitFor({ state: 'hidden' });
@@ -571,7 +646,7 @@ try {
           const toc = document.getElementById('toggle-toc'), title = document.getElementById('reader-book-title');
           return toc.closest('.toolbar-start') && toc.getBoundingClientRect().right <= title.getBoundingClientRect().left &&
             toc.querySelector('.material-icon') && /^《.+》$/.test(title.textContent) &&
-            !document.querySelector('.sidebar .material-icon, #library-view [data-icon] .material-icon:not(#shelves-back .material-icon), #book-context-menu .material-icon') &&
+            !document.querySelector('.sidebar .material-icon, #library-view [data-icon] .material-icon:not(#shelves-back .material-icon, #library-back-to-top .material-icon), #book-context-menu .material-icon') &&
             document.querySelectorAll(':is(.sidebar, #library-view) .fluent-icon').length > 8;
         })) throw Error('sidebar toggle must sit before the 《title》 and library navigation must keep Fluent icons');
         // Hover tips are self-drawn: no native title survives, and hovering shows the custom tip.

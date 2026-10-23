@@ -18,7 +18,7 @@ enum class ShellStyle
 class Window
 {
   public:
-    bool create(HINSTANCE instance, ShellStyle style, int icon_resource);
+    bool create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio = 0.6, double height_ratio = 0.75);
     HWND handle() const
     {
         return hwnd_;
@@ -46,6 +46,8 @@ class Window
     }
 
   private:
+    double width_ratio_ = 0.6;
+    double height_ratio_ = 0.75;
     bool follow_system_theme_ = false;
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
     LRESULT message(UINT, WPARAM, LPARAM);

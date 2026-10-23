@@ -1,0 +1,64 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Unique TOC anchor and capsule</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw Error('Timed out waiting for TOC anchors');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  frame.srcdoc = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js?toc"><\/script>`);
+  document.body.append(frame);
+  await until(() => frame.contentDocument?.querySelector('.book-card'));
+  const doc = frame.contentDocument;
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  const root = doc.getElementById('toc-content');
+  const panel = doc.getElementById('toc-panel');
+  panel.dataset.expanded = 'true'; panel.inert = false;
+  doc.getElementById('pin-toc').click();
+  const toggles = root.querySelectorAll('.toc-toggle');
+  toggles[0].click(); toggles[1].click();
+  const selected = () => root.querySelector('.toc-entry.active');
+  const clickAnchor = async anchor => {
+    const previous = doc.getElementById('book-frame').contentDocument;
+    root.querySelector(`[data-href="chapter.html#${anchor}"]`).click();
+    await until(() => doc.getElementById('book-frame').contentDocument !== previous &&
+      doc.getElementById('book-frame').contentDocument?.getElementById(anchor) && selected()?.dataset.href === `chapter.html#${anchor}`);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    check(root.querySelectorAll('.toc-entry.active').length === 1, 'same XHTML siblings never highlight together');
+    check(selected().dataset.href.endsWith(`#${anchor}`), 'explicit anchor stays selected even when other headings share the page');
+  };
+  await clickAnchor('section3');
+  const marker = root.querySelector('.toc-active-indicator');
+  marker.style.transition = 'none';
+  let capsule = marker.getBoundingClientRect(), background = selected().getBoundingClientRect();
+  check(Math.abs(capsule.left + capsule.width / 2 - background.left) < 0.1 && Math.abs(capsule.height * 2 - background.height) < 1,
+    'capsule centerline matches the selected leaf background left border');
+  check(!root.querySelector('.toc-row:has(> .toc-toggle) > .toc-entry.active'), 'ancestor headings have no active background');
+  const content = doc.getElementById('book-frame').contentWindow;
+  const beforeScroll = content.scrollX;
+  content.scrollTo(0, 0);
+  await until(() => selected() && selected().dataset.href !== 'chapter.html#section3').catch(error => { throw Error(`${error.message}: before=${beforeScroll}, after=${content.scrollX}, page=${doc.getElementById('page-indicator').textContent}, active=${selected()?.dataset.href}, tip=${doc.getElementById('toast').textContent}`); });
+  check(root.querySelectorAll('.toc-entry.active').length === 1, 'turning away from the anchor updates a single current title');
+  await clickAnchor('section4');
+  toggles[0].click();
+  check(marker.style.opacity === '0', 'collapsing the branch hides the capsule rather than moving it to an ancestor');
+  check(!root.querySelector('.toc-row:has(> .toc-toggle) > .toc-entry.active'), 'collapsed ancestor stays unhighlighted');
+  toggles[0].click();
+  check(marker.style.opacity === '1', 'expanding restores the leaf capsule');
+  check(!frame.contentWindow.runtimeErrors.length, frame.contentWindow.runtimeErrors.join('\n'));
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS unique TOC anchors';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

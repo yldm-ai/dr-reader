@@ -26,7 +26,7 @@
         <nav id="library-nav">
           <span class="library-nav-indicator" aria-hidden="true"></span>
           <button class="nav-item active" data-filter="all">
-            <span data-icon="library"></span>全部图书<span
+            <span data-icon="all-books"></span>全部图书<span
               class="count"
               id="count-all"
               >0</span
@@ -40,7 +40,7 @@
             >
           </button>
           <button class="nav-item" data-filter="shelves">
-            <span data-icon="library"></span>分类书架
+            <span data-icon="library"></span>分类书架<span class="count" id="count-shelves">0</span>
           </button>
           <button class="nav-item" data-filter="unread">
             <span data-icon="unread"></span>尚未开始<span class="count" id="count-unread">0</span>
@@ -68,7 +68,7 @@
           <div class="eyebrow">YOUR PERSONAL LIBRARY</div>
           <div class="heading-row">
             <div>
-              <h1 id="library-heading">
+              <h1 id="library-heading" tabindex="-1">
                 全部图书<span id="heading-count">0</span>
               </h1>
             </div>
@@ -122,6 +122,9 @@
           <p>添加一本 EPUB，建立属于自己的书架。</p>
           <button id="import-empty" class="primary">选择 EPUB 文件</button>
         </div>
+        <button id="library-back-to-top" class="library-back-to-top" type="button" aria-label="回到顶部" title="回到顶部" aria-hidden="true" inert data-icon-set="material">
+          <span data-icon="arrow-up"></span>
+        </button>
       </main>
       <main id="reader-view" class="reader-view" hidden>
         <header id="reader-toolbar" class="reader-toolbar">

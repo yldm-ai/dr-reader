@@ -7,8 +7,10 @@ if ($LASTEXITCODE) { throw 'Install failed' }
 $licensesDirectory = Join-Path $outputDirectory 'licenses'
 New-Item -ItemType Directory -Force $licensesDirectory | Out-Null
 $dependencyLicenses = @{
+ 'python-html-entities.txt' = 'licenses/python-html-entities.txt'
  'pugixml.txt' = 'build/_deps/pugixml-src/LICENSE.md'
  'nlohmann-json.txt' = 'build/_deps/json-src/LICENSE.MIT'
+ 'tomlplusplus.txt' = 'build/_deps/tomlplusplus-src/LICENSE'
  'miniz.txt' = 'build/_deps/miniz-src/LICENSE'
  'webview2.txt' = 'build/_deps/webview2-src/LICENSE.txt'
  'webview2-notice.txt' = 'build/_deps/webview2-src/NOTICE.txt'

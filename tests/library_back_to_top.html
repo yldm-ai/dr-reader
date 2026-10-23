@@ -1,0 +1,68 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Library back to top</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import { bootstrapFixture } from './frontend-fixtures.js';
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw Error('Timed out waiting for library shortcut');
+};
+try {
+  const fixture = bootstrapFixture();
+  fixture.settings.application.animations = true;
+  fixture.books = Array.from({ length: 72 }, (_, i) => ({ ...fixture.books[0],
+    id: `book-${i}`, title: `阅读与时光 ${i + 1}`, addedAt: i }));
+  const html = await (await fetch('../dist/index.html')).text();
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  const mock = `<script type="module">import { installNativeMock } from '/tests/frontend-fixtures.js';window.nativeProbe=installNativeMock(${JSON.stringify(fixture)});<\/script>`;
+  frame.srcdoc = html.replace('<head>', `<head><base href="${location.origin}/dist/">${mock}`);
+  document.body.append(frame);
+  await until(() => frame.contentDocument?.querySelectorAll('.book-card').length === 72);
+  const doc = frame.contentDocument, win = frame.contentWindow;
+  const viewport = doc.getElementById('library-view'), button = doc.getElementById('library-back-to-top');
+  check(button.inert && win.getComputedStyle(button).visibility === 'hidden', 'hidden and unfocusable at the top');
+  viewport.scrollTop = 160;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  check(button.inert, 'small scrolls do not show the button');
+  viewport.scrollTop = 1200;
+  await until(() => !button.inert);
+  const box = button.getBoundingClientRect();
+  check(box.right > 1100 && box.bottom > 750 && box.bottom <= 800, 'button stays in the bottom right of the viewport');
+  check(button.getAttribute('aria-label') === '回到顶部', 'shortcut has an accessible label');
+  const positions = [];
+  const capture = () => positions.push(viewport.scrollTop);
+  viewport.addEventListener('scroll', capture);
+  button.click();
+  await until(() => viewport.scrollTop === 0 && button.inert);
+  viewport.removeEventListener('scroll', capture);
+  check(positions.some(top => top > 0 && top < 1200), 'enabled animation scrolls smoothly');
+  viewport.scrollTop = 1200;
+  await until(() => !button.inert);
+  doc.body.dataset.animations = 'false';
+  button.click();
+  check(viewport.scrollTop === 0, 'disabled animations return instantly');
+  viewport.scrollTop = 1200;
+  await until(() => !button.inert);
+  const search = doc.getElementById('library-search');
+  search.value = 'no matching books';
+  search.dispatchEvent(new win.Event('input'));
+  await until(() => doc.querySelectorAll('.book-card').length === 0 && button.inert);
+  check(viewport.scrollTop === 0, 'filtering to a short result hides the shortcut');
+  search.value = '';
+  search.dispatchEvent(new win.Event('input'));
+  await until(() => doc.querySelectorAll('.book-card').length === 72);
+  viewport.scrollTop = 1200;
+  await until(() => !button.inert);
+  doc.body.dataset.theme = 'dark';
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS library back to top';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

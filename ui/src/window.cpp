@@ -21,8 +21,10 @@ int Window::caption_height() const
     const int resize=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
     return -frame.top-(IsZoomed(hwnd_)?resize:0);
 }
-bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource)
+bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio, double height_ratio)
 {
+    width_ratio_ = width_ratio;
+    height_ratio_ = height_ratio;
     style_ = style;
     icon_resource_ = icon_resource;
     WNDCLASSEXW wc{sizeof(wc)};
@@ -34,12 +36,19 @@ bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource)
     wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(icon_resource_), IMAGE_ICON,
         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     RegisterClassExW(&wc);
-    RECT work{};
-    SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-    auto dpi = GetDpiForSystem();
-    int width = std::min<int>(MulDiv(1280, dpi, 96), work.right - work.left - MulDiv(48, dpi, 96));
-    // 1027 DIP is the former 880 DIP default plus one sixth; still bounded by the work area.
-    int height = std::min<int>(MulDiv(1027, dpi, 96), work.bottom - work.top - MulDiv(48, dpi, 96));
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    MONITORINFO monitor{sizeof(monitor)};
+    if (!GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY), &monitor))
+    {
+        SystemParametersInfoW(SPI_GETWORKAREA, 0, &monitor.rcWork, 0);
+        monitor.rcMonitor = monitor.rcWork;
+    }
+    const RECT &work = monitor.rcWork;
+    const int width = std::min<int>(static_cast<int>((monitor.rcMonitor.right - monitor.rcMonitor.left) * width_ratio_),
+                               work.right - work.left);
+    const int height = std::min<int>(static_cast<int>((monitor.rcMonitor.bottom - monitor.rcMonitor.top) * height_ratio_),
+                                work.bottom - work.top);
     hwnd_ = CreateWindowExW(0, wc.lpszClassName, title_.c_str(), WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                             work.left + (work.right - work.left - width) / 2,
                             work.top + (work.bottom - work.top - height) / 2, width, height, nullptr, nullptr,
@@ -473,7 +482,18 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     case WM_GETMINMAXINFO:
     {
         auto info = reinterpret_cast<MINMAXINFO *>(l);
+        MONITORINFO monitor{sizeof(monitor)};
         info->ptMinTrackSize = {scale(780), scale(540)};
+        if (GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor))
+        {
+            // High DPI or a small screen must not force the initial window above its screen fraction.
+            info->ptMinTrackSize.x = std::min<LONG>(info->ptMinTrackSize.x,
+                std::min<int>(static_cast<int>((monitor.rcMonitor.right - monitor.rcMonitor.left) * width_ratio_),
+                         monitor.rcWork.right - monitor.rcWork.left));
+            info->ptMinTrackSize.y = std::min<LONG>(info->ptMinTrackSize.y,
+                std::min<int>(static_cast<int>((monitor.rcMonitor.bottom - monitor.rcMonitor.top) * height_ratio_),
+                         monitor.rcWork.bottom - monitor.rcWork.top));
+        }
         return 0;
     }
     case WM_DPICHANGED:
@@ -494,6 +514,13 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
+    case WM_MOUSEACTIVATE:
+        // A left click into an inactive client area only activates the window.
+        // Eat its button-down before WebView2 can interpret it as a page tap.
+        // Keyboard activation and native caption controls keep their usual behavior.
+        if (LOWORD(l) == HTCLIENT && HIWORD(l) == WM_LBUTTONDOWN && GetForegroundWindow() != hwnd_)
+            return MA_ACTIVATEANDEAT;
+        break;
     case WM_ACTIVATE:
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;

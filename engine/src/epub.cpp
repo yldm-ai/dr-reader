@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <regex>
 #include <miniz.h>
 #include <set>
 #include <stdexcept>
@@ -92,13 +93,66 @@ void extract(const fs::path &archive, const fs::path &dest, const ImportLimits &
         write_file(dest / p, std::string_view(static_cast<const char *>(memory), bytes));
     }
 }
-pugi::xml_document parse(const fs::path &p)
+// NCX labels are plain text. Some publishers leave literal '<' markers and bad UTF-8
+// in them; repair only label contents, keeping structural XML and URI attributes strict.
+std::string repair_ncx_labels(const std::string &source)
+{
+    static const std::regex label(R"(<((?:[A-Za-z_][A-Za-z0-9_.-]*:)?text)(?:\s[^<>]*?)?>([\s\S]*?)</\1\s*>)");
+    const auto name_start = [](unsigned char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':' || c >= 0x80;
+    };
+    std::string result;
+    size_t copied = 0;
+    for (std::sregex_iterator it(source.begin(), source.end(), label), end; it != end; ++it)
+    {
+        const auto &match = *it;
+        const size_t start = static_cast<size_t>(match.position(2));
+        result.append(source, copied, start - copied);
+        // Replacement characters keep damaged bytes visible instead of silently dropping text.
+        const auto text = Json::parse(Json(match.str(2)).dump(-1, ' ', false, Json::error_handler_t::replace)).get<std::string>();
+        for (size_t i = 0; i < text.size(); ++i)
+        {
+            if (text.compare(i, 9, "<![CDATA[") == 0 || text.compare(i, 4, "<!--") == 0)
+            {
+                const bool cdata = text.compare(i, 9, "<![CDATA[") == 0;
+                const auto close = text.find(cdata ? "]]>" : "-->", i + (cdata ? 9 : 4));
+                if (close != text.npos)
+                {
+                    result.append(text, i, close + 3 - i);
+                    i = close + 2;
+                    continue;
+                }
+            }
+            if (text[i] == '<')
+            {
+                const size_t next = i + 1 + (i + 1 < text.size() && text[i + 1] == '/' ? 1 : 0);
+                if (next >= text.size() || (!name_start(static_cast<unsigned char>(text[next])) &&
+                    text[next] != '!' && text[next] != '?'))
+                {
+                    result += "&lt;";
+                    continue;
+                }
+            }
+            result += text[i];
+        }
+        copied = start + static_cast<size_t>(match.length(2));
+    }
+    result.append(source, copied, source.size() - copied);
+    return result;
+}
+pugi::xml_document parse(const fs::path &p, bool ncx_labels = false)
 {
     pugi::xml_document d;
-    auto s = read_file(p);
+    auto s = xml_compatible_entities(read_file(p));
+    if (ncx_labels) s = repair_ncx_labels(s);
     auto r = d.load_buffer(s.data(), s.size());
     if (!r)
-        throw std::runtime_error("XML 解析失败: " + utf8(p));
+    {
+        const auto offset = std::min(static_cast<size_t>(std::max<ptrdiff_t>(0, r.offset)), s.size());
+        const auto line = 1 + std::count(s.begin(), s.begin() + offset, '\n');
+        throw std::runtime_error("XML 解析失败: " + utf8(p) + "（第 " + std::to_string(line) +
+            " 行，" + r.description() + "）");
+    }
     return d;
 }
 void visit(pugi::xml_node n, const std::function<void(pugi::xml_node)> &fn)
@@ -216,7 +270,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
             continue;
         if (item.type != "application/xhtml+xml" && item.type != "text/html")
             continue;
-        auto markup = read_file(content / path8(item.path));
+        auto markup = xml_compatible_entities(read_file(content / path8(item.path)));
         SplitOptions options;
         pugi::xml_document source_doc;
         source_doc.load_string(markup.c_str());
@@ -325,7 +379,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
     }
     if (book["toc"].empty() && !ncx_path.empty())
     {
-        auto ncx = parse(content / path8(ncx_path));
+        auto ncx = parse(content / path8(ncx_path), true);
         std::function<void(pugi::xml_node, int)> collect = [&](auto n, int depth)
         {
             if (local_name(n) == "navPoint")

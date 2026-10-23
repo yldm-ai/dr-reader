@@ -29,7 +29,7 @@ function reader() {
   return value;
 }
 function wheel(deltaY, extra = {}) {
-  return { deltaX: 0, deltaY, clientY: 100, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
+  return { deltaX: 0, deltaY, deltaMode: 1, clientY: 100, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
 }
 
 test('the wheel curls a soft page from the corner on the half under the pointer', async () => {
@@ -147,4 +147,31 @@ test('forward at chapter end and backward at chapter start navigate chapters', a
   value.chapter = 1;
   await value.wheel(wheel(-120, { clientY: 500 }));
   assert.deepEqual(loads[1], [0, 1, '', '', '', -1, 'bottom']);
+});
+
+
+test('one touchpad swipe and its long inertia tail turn only one page', async () => {
+  const value = reader();
+  const deltas = [2, 9, 24, 64, 120, 95, 70, 46, 30, 18, 8, 4, 2, 1, 0.5];
+  await Promise.all(deltas.map(delta => value.wheel(wheel(delta, { deltaMode: 0 }))));
+  assert.equal(value.page, 1);
+});
+
+test('touchpad inertia stays consumed across a chapter load', async () => {
+  const value = reader();
+  value.page = 7;
+  let loads = 0;
+  value.load = async function(chapter) { loads++; this.chapter = chapter; this.page = 0; this.doc.defaultView.scrollTo(0); };
+  await Promise.all([32, 64, 42, 23, 8, 2].map(delta => value.wheel(wheel(delta, { deltaMode: 0 }))));
+  assert.equal(loads, 1);
+  assert.equal(value.chapter, 1);
+  assert.equal(value.page, 0);
+});
+
+test('extreme wheel bursts have a bounded backlog', async () => {
+  const value = reader();
+  value.pages = 200;
+  await Promise.all(Array.from({ length: 200 }, () => value.wheel(wheel(120))));
+  assert.equal(value.page, 8);
+  assert.equal(value.wheelBacklog.count, 0);
 });

@@ -6,6 +6,8 @@ Dependencies are downloaded at configure time and are not copied from the local 
 | --- | --- | --- |
 | pugixml | 1.15 | MIT — https://github.com/zeux/pugixml |
 | nlohmann/json | 3.12.0 | MIT — https://github.com/nlohmann/json |
+| HTML5 named character data (Python `html.entities.html5`) | Generated standard entity table | PSF License — `licenses/python-html-entities.txt` |
+| toml++ | 3.4.0 | MIT — https://github.com/marzer/tomlplusplus |
 | miniz | 3.0.2 | MIT — https://github.com/richgel999/miniz |
 | SQLite | 3.53.4 amalgamation | Public domain — https://www.sqlite.org/copyright.html |
 | Microsoft.Web.WebView2 SDK | 1.0.2903.40 | Microsoft SDK license — https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40 |

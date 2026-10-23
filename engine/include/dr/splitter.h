@@ -12,6 +12,8 @@ std::string xml_string(pugi::xml_node node);
 // Chapters are parsed as HTML by the reader, where a self-closing non-void element such as
 // <title/> only opens it and swallows the rest of the document. Expands those to <x></x>.
 std::string html_compatible(const std::string &xhtml);
+// Resolve HTML5 named entities into XML-safe numeric references before parsing.
+std::string xml_compatible_entities(const std::string &markup);
 struct Flow
 {
     std::string path, html, title, text;

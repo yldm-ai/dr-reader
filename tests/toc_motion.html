@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>TOC straight-line motion</title>
+<link rel="stylesheet" href="../web/styles.css">
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+try {
+  const html = new DOMParser().parseFromString(await (await fetch('../web/index.html')).text(), 'text/html');
+  document.body.append(...html.body.children);
+  document.getElementById('reader-view').hidden = false;
+  const panel = document.getElementById('toc-panel');
+  panel.hidden = false; panel.dataset.pinned = 'true';
+  panel.style.cssText = 'position:fixed;left:24px;top:24px;bottom:24px;width:280px';
+  document.body.dataset.theme = 'dark';
+  document.body.dataset.animations = 'true';
+  const { Reader } = await import('../web/reader.js');
+  const reader = Object.create(Reader.prototype);
+  Object.assign(reader, { chapter: 0, book: {
+    chapters: [{ href: 'cover.html' }, { href: 'deep.html' }, { href: 'group.html' }],
+    toc: [
+      { title: '封面', href: 'cover.html', depth: 0 },
+      { title: '作品集', href: 'group.html', depth: 0 },
+      { title: '上卷', href: 'group.html', depth: 1 },
+      { title: '第四章 一个足够长的标题用来验证两行背景的胶囊条动画', href: 'deep.html', depth: 2 },
+    ],
+  }, navigate() {} });
+  reader.toc();
+  const root = document.getElementById('toc-content');
+  for (const toggle of root.querySelectorAll('.toc-toggle')) toggle.click();
+  const marker = root.querySelector('.toc-active-indicator');
+  for (const animation of marker.getAnimations()) animation.finish();
+  const center = () => {
+    const rect = marker.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  };
+  const start = center();
+  reader.loading = true; reader.chapter = 2; reader.activeToc();
+  check(marker.style.opacity === '1' && Math.abs(center().x - start.x) < 0.1 && Math.abs(center().y - start.y) < 0.1,
+    'loading through a parent does not fade or move the existing capsule');
+  reader.chapter = 1; reader.activeToc();
+  check(marker.style.opacity === '1' && Math.abs(center().x - start.x) < 0.1, 'loading waits for the final target');
+  reader.loading = false; reader.activeToc();
+  const active = root.querySelector('.toc-entry.active').getBoundingClientRect();
+  const finish = { x: active.left, y: active.top + active.height / 2 };
+  const animations = marker.getAnimations();
+  check(animations.some(animation => animation.transitionProperty === 'transform'), 'movement animates the 2D transform');
+  check(!marker.style.left && !animations.some(animation => animation.transitionProperty === 'left'), 'there is no separate horizontal jump');
+  for (const animation of animations) animation.pause();
+  const dx = finish.x - start.x, dy = finish.y - start.y, length = Math.hypot(dx, dy);
+  let previous = -1;
+  for (const time of [0, 30, 60, 90, 120, 159, 160]) {
+    for (const animation of animations) animation.currentTime = time;
+    const point = center();
+    const distance = Math.abs(dx * (point.y - start.y) - dy * (point.x - start.x)) / length;
+    const progress = ((point.x - start.x) * dx + (point.y - start.y) * dy) / (length * length);
+    check(distance < 0.15, `capsule stays on a straight line at ${time}ms`);
+    check(progress >= previous - 0.001 && progress <= 1.001, 'movement is monotonic with no bend or overshoot');
+    check(getComputedStyle(marker).opacity === '1', 'movement never flashes');
+    previous = progress;
+  }
+  for (const animation of animations) animation.finish();
+  check(Math.abs(center().x - finish.x) < 0.1 && Math.abs(center().y - finish.y) < 0.1,
+    'capsule ends with its centerline on the leaf background left border');
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS straight-line capsule motion';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

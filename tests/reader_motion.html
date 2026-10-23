@@ -169,7 +169,7 @@ try {
     hideSelection() {},
     report() { this.page = Math.round(frame.contentWindow.scrollX / 600); },
   });
-  const wheel = deltaY => reader.wheel({ deltaY, deltaX: 0, clientY: 100, preventDefault() {} });
+  const wheel = deltaY => reader.wheel({ deltaY, deltaX: 0, deltaMode: 1, clientY: 100, preventDefault() {} });
   const burst = Promise.all(Array.from({ length: 8 }, () => wheel(120)));
   for (let page = 1; page <= 8; page++) {
     await until(() => frame.contentWindow.scrollX === page * 600 &&

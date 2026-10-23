@@ -1,0 +1,96 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Book context actions and immersive corner guard</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  throw Error('Timed out waiting for book actions');
+};
+try {
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px;border:0';
+  let html = await (await fetch('../dist/index.html')).text();
+  frame.srcdoc = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js?menus"><\/script>`);
+  document.body.append(frame);
+  await until(() => frame.contentDocument?.querySelector('.book-card'));
+  const doc = frame.contentDocument, win = frame.contentWindow;
+  const menu = doc.getElementById('book-context-menu'), sub = doc.getElementById('book-shelf-menu');
+  const card = () => doc.querySelector('.book-card');
+  const click = id => doc.getElementById(id).click();
+  const context = () => {
+    card().dispatchEvent(new win.PointerEvent('pointerdown', { button: 2, bubbles: true }));
+    card().focus();
+    card().dispatchEvent(new win.MouseEvent('contextmenu', { clientX: 1140, clientY: 740, bubbles: true, cancelable: true }));
+  };
+  let titleFlashes = 0;
+  doc.getElementById('book-title-tooltip').addEventListener('beforetoggle', event => { if (event.newState === 'open') titleFlashes++; });
+  card().dispatchEvent(new win.PointerEvent('pointerdown', { button: 2, bubbles: true }));
+  card().focus();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  context();
+  await new Promise(resolve => setTimeout(resolve, 450));
+  check(!titleFlashes && menu.matches(':popover-open'), 'right click focus must never flash the title tooltip');
+  check(menu.querySelectorAll(':scope > button').length === 4, 'all four actions are present');
+  click('book-menu-category');
+  check(sub.matches(':popover-open') && menu.matches(':popover-open'), 'nested menu keeps the parent open');
+  const bounds = sub.getBoundingClientRect();
+  check(bounds.left >= 8 && bounds.right <= 1192 && bounds.bottom <= 792, 'submenu flips and fits at the bottom right');
+  check(sub.querySelector('[data-shelf-id="history"]').disabled, 'existing membership is marked and cannot be duplicated');
+  sub.querySelector('[data-shelf-id="literature"]').click();
+  await until(() => win.nativeProbe.data.shelves[0].bookIds.includes('fixture') && doc.getElementById('toast').textContent.includes('已添加至分类书架'));
+  check(!menu.matches(':popover-open'), 'successful membership action dismisses menus');
+  context(); click('book-menu-category');
+  check(sub.querySelector('[data-shelf-id="literature"]').disabled, 'saved membership is reflected when reopening');
+  click('book-menu-new-shelf');
+  check(doc.getElementById('shelf-dialog').open && doc.querySelector('#shelf-books input').checked, 'new category preselects the chosen book');
+  doc.getElementById('shelf-name').value = '我的珍藏';
+  click('shelf-save');
+  await until(() => win.nativeProbe.data.shelves.length === 3 && doc.getElementById('count-shelves').textContent === '3');
+  check(win.nativeProbe.data.shelves[2].bookIds[0] === 'fixture' && doc.getElementById('count-shelves').textContent === '3', 'new shelf and membership persist with sidebar count');
+  context(); click('book-menu-export');
+  await until(() => win.nativeProbe.requests.some(request => request.method === 'notes.export'));
+  check(win.nativeProbe.requests.find(request => request.method === 'notes.export').params.id === 'fixture', 'export targets the selected book');
+  await until(() => doc.getElementById('toast').textContent.includes('笔记已导出'));
+  win.nativeProbe.data.exportResult = { saved: false };
+  const beforeCancel = doc.getElementById('toast').textContent;
+  const beforeRequests = win.nativeProbe.requests.length;
+  context(); click('book-menu-export');
+  await until(() => win.nativeProbe.requests.length > beforeRequests);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  check(doc.getElementById('toast').textContent === beforeCancel, 'cancelling export is silent');
+  win.nativeProbe.data.exportResult = { saved: false, empty: true };
+  context(); click('book-menu-export');
+  await until(() => doc.getElementById('toast').textContent.includes('还没有笔记'));
+  win.nativeProbe.data.exportError = '磁盘不可写';
+  context(); click('book-menu-export');
+  await until(() => doc.getElementById('toast').textContent.includes('磁盘不可写'));
+  win.nativeProbe.data.exportError = '';
+  context();
+  doc.getElementById('book-menu-category').focus();
+  doc.getElementById('book-menu-category').dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+  check(sub.contains(doc.activeElement), 'keyboard opens the nested menu');
+  doc.activeElement.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  check(!sub.matches(':popover-open') && menu.matches(':popover-open') && doc.activeElement.id === 'book-menu-category', 'Escape closes only the submenu and restores focus');
+  click('book-menu-open');
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  click('collapse-toolbar');
+  await until(() => doc.getElementById('reader-view').dataset.toolbar === 'false');
+  const edge = doc.getElementById('toc-reveal-zone').getBoundingClientRect();
+  const back = doc.getElementById('corner-library').getBoundingClientRect();
+  const workspace = doc.querySelector('.reader-workspace').getBoundingClientRect();
+  const panelStyle = win.getComputedStyle(doc.getElementById('toc-panel'));
+  check(Math.abs(edge.top - workspace.top) < 1 && Math.abs(edge.bottom - workspace.bottom) < 1,
+    'the reveal zone keeps its original full height');
+  check(panelStyle.top === '12px' && panelStyle.bottom === '12px', 'the sidebar keeps its original insets and height');
+  check(!win.runtimeErrors.length, win.runtimeErrors.join('\n'));
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS context actions and corner guard';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

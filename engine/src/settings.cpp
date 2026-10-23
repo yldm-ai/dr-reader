@@ -10,6 +10,7 @@ Json default_settings()
     return Json::parse(R"defaults({
   "application": {
     "animations": true,
+    "librarySort": "added",
     "bookOpeningAnimation": "circles",
     "bookOpeningEnabled": true,
     "dictionaries": [
@@ -80,6 +81,10 @@ Json default_settings()
     "turnDuration": 500,
     "width": 760
   },
+  "window": {
+    "widthRatio": 0.6,
+    "heightRatio": 0.75
+  },
   "version": 2
 })defaults");
 }
@@ -90,7 +95,7 @@ void boolean(Json& target,const Json& patch,const char* key){if(!patch.contains(
 void validate_url(const std::string& url){if(url.size()>2048||(!url.starts_with("https://")&&!url.starts_with("http://"))||url.find_first_of(" \r\n\t\\")!=url.npos||url.find('\0')!=url.npos||url.find("{text}")==url.npos)throw std::runtime_error("查词地址必须是包含 {text} 的 HTTP/HTTPS 地址");auto host=url.substr(url.find("://")+3);host=host.substr(0,host.find_first_of("/?#"));if(host.empty()||host.find('@')!=host.npos)throw std::runtime_error("无效的查词网站地址");}
 }
 Json patch_settings(const Json& current,const Json& patch){if(!patch.is_object())throw std::runtime_error("设置格式无效");auto result=current;
- if(patch.contains("application")){auto p=patch.at("application");if(!p.is_object())throw std::runtime_error("应用设置格式无效");auto& a=result["application"];enumeration(a,p,"shell",{"mica","direct2d"});enumeration(a,p,"theme",{"system","light","sepia","dark"});boolean(a,p,"animations");boolean(a,p,"bookOpeningEnabled");enumeration(a,p,"bookOpeningAnimation",{"circles","book","cover","none"});
+ if(patch.contains("application")){auto p=patch.at("application");if(!p.is_object())throw std::runtime_error("应用设置格式无效");auto& a=result["application"];enumeration(a,p,"shell",{"mica","direct2d"});enumeration(a,p,"librarySort",{"added","read","title","author"});enumeration(a,p,"theme",{"system","light","sepia","dark"});boolean(a,p,"animations");boolean(a,p,"bookOpeningEnabled");enumeration(a,p,"bookOpeningAnimation",{"circles","book","cover","none"});
  // Most recent highlight colours first; the reader pushes a new pick to the front.
  if(p.contains("highlightColors")){auto colors=p["highlightColors"];if(!colors.is_array()||colors.empty()||colors.size()>8)throw std::runtime_error("高亮颜色需要 1 到 8 个");Json palette=Json::array();for(auto& color:colors){if(!color.is_string())throw std::runtime_error("高亮颜色格式无效");auto value=color.get<std::string>();std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});if(value.size()!=7||value[0]!='#'||!std::all_of(value.begin()+1,value.end(),[](unsigned char c){return std::isxdigit(c)!=0;}))throw std::runtime_error("高亮颜色必须是 #rrggbb");palette.push_back(value);}a["highlightColors"]=palette;}
  if(p.contains("underlineColor")){auto color=p["underlineColor"];if(!color.is_string())throw std::runtime_error("下划线颜色格式无效");auto value=color.get<std::string>();std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});if(value.size()!=7||value[0]!='#'||!std::all_of(value.begin()+1,value.end(),[](unsigned char c){return std::isxdigit(c)!=0;}))throw std::runtime_error("下划线颜色必须是 #rrggbb");a["underlineColor"]=value;}
@@ -104,8 +109,9 @@ Json patch_settings(const Json& current,const Json& patch){if(!patch.is_object()
  for(auto key:{"paddingTop","paddingBottom","paddingLeft","paddingRight"})number(r,p,key,0,240,true);
  for(auto key:{"showToolbar","showToc","tocPinned","showChapterTitle","showPagination","showProgress","autoHideProgress","fullBackground","fullWidth","showBookPages"})boolean(r,p,key);
  number(r,p,"animationDuration",100,600,true);number(r,p,"turnDuration",300,2000,true);boolean(r,p,"publisherStyles");}
+ if(patch.contains("window")){const auto& p=patch.at("window");if(!p.is_object())throw std::runtime_error("窗口设置格式无效");auto& w=result["window"];number(w,p,"widthRatio",0.1,1.0);number(w,p,"heightRatio",0.1,1.0);for(auto key:{"widthRatio","heightRatio"})w[key]=std::round(w[key].get<double>()*100.0)/100.0;}
  result["version"]=2;return result;}
-Json normalize_settings(const Json& source){auto defaults=default_settings();if(!source.is_object())return defaults;if(source.contains("application")||source.contains("reading")){try{auto normalized=patch_settings(defaults,source);if(source.contains("application")&&source["application"].is_object()&&!source["application"].contains("bookOpeningEnabled")&&source["application"].contains("animations"))normalized["application"]["bookOpeningEnabled"]=normalized["application"]["animations"];return normalized;}catch(const std::exception&){return defaults;}}
+Json normalize_settings(const Json& source){auto defaults=default_settings();if(!source.is_object())return defaults;if(source.contains("application")||source.contains("reading")||source.contains("window")){try{auto normalized=patch_settings(defaults,source);if(source.contains("application")&&source["application"].is_object()&&!source["application"].contains("bookOpeningEnabled")&&source["application"].contains("animations"))normalized["application"]["bookOpeningEnabled"]=normalized["application"]["animations"];return normalized;}catch(const std::exception&){return defaults;}}
  Json old_app=Json::object(),old_reading=Json::object();for(auto key:{"shell","theme"})if(source.contains(key))old_app[key]=source[key];for(auto key:{"theme","fontFamily","fontSize","lineHeight","width","mode"})if(source.contains(key))old_reading[key]=source[key];try{return patch_settings(defaults,{{"application",old_app},{"reading",old_reading}});}catch(const std::exception&){return defaults;}}
 std::string dictionary_url(const Json& settings,const std::string& id,const std::string& text){if(text.empty()||text.size()>8192)throw std::runtime_error("查词文字为空或过长");for(auto& item:settings.at("application").at("dictionaries"))if(item["id"]==id&&item.value("enabled",true)){auto url=item.at("url").get<std::string>();validate_url(url);std::string encoded;for(unsigned char c:text){constexpr char digits[]="0123456789ABCDEF";if(std::isalnum(c)||c=='-'||c=='_'||c=='.'||c=='~')encoded+=char(c);else{encoded+='%';encoded+=digits[c>>4];encoded+=digits[c&15];}}for(size_t p=0;(p=url.find("{text}",p))!=url.npos;p+=encoded.size())url.replace(p,6,encoded);return url;}throw std::runtime_error("查词网站不存在或已禁用");}
 }

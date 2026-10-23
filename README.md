@@ -42,7 +42,7 @@ pnpm test:browser
 
 ## 当前功能
 
-- 书架网格/列表、封面、书名/作者搜索、排序、作者筛选、最近阅读、未读/已读筛选。支持确认后删除图书及其阅读数据，保留原始 EPUB 文件。
+- 书架网格/列表、封面、书名/作者搜索、排序、作者筛选、最近阅读、未读/已读筛选。图书右键菜单支持打开阅读、导出 Markdown 笔记与标注、通过二级菜单添加至分类（含新建分类）。支持确认后删除图书及其阅读数据，保留原始 EPUB 文件。
 - C++ 后台导入：ZIP 解包、OPF 元数据、spine 阅读顺序、EPUB 3 nav / EPUB 2 NCX、封面与章节缓存。
 - C++ XHTML 拆分：保持 DOM 祖先和 head，分页标记、256 KiB 内容预算、锚点归属、跨章节链接与目录重映射。
 - WebView2 正文排版：目录、上下滚动/左右翻页、章节内锚点，以及字体、字号、字重、行距、段距、字距、首行缩进、对齐、正文宽度、页面留白、原书样式开关和明亮/纸张/夜间主题。
@@ -80,7 +80,7 @@ docs/         架构、拆分策略与验证记录
 默认在 `%LOCALAPPDATA%/DRReader`，可用 `--data-dir` 指定独立目录。从带包标识的应用启动时，Windows 可能重定向到该包的 LocalCache；设置底部会显示实际书库路径。
 
 ```text
-settings.json                  版本化应用设置与阅读设置
+config.toml                    应用设置、阅读设置、排序规则与启动窗口比例
 reader.sqlite3                 SQLite 标注、笔记与书签
 books/<content-id>/book.json   元数据、目录与阅读进度
 books/<content-id>/content/    解包资源、拆分后的 XHTML
@@ -88,7 +88,7 @@ books/<content-id>/search/     C++ 提取的每节纯文本
 webview-profile/              WebView2 用户数据
 ```
 
-原始 EPUB 不会被修改。导入先写 staging，成功后整体发布；失败清理临时内容。书库元数据和进度使用 JSON 文件，设置使用版本化 JSON；标注、笔记和书签使用 WAL 模式的 SQLite。旧版书签会在首次读取书籍时自动迁移。
+原始 EPUB 不会被修改。导入先写 staging，成功后整体发布；失败清理临时内容。书库元数据和进度使用 JSON 文件，设置统一使用 TOML；标注、笔记和书签使用 WAL 模式的 SQLite。旧版书签会在首次读取书籍时自动迁移。旧 `settings.json` 会在首次启动时迁移为 `config.toml`，并保留旧文件作为备份；迁移后只读写 `config.toml`。关闭应用后可直接编辑该文件，`[window]` 的 `widthRatio = 0.6` 和 `heightRatio = 0.75` 分别控制启动窗口占当前屏幕的宽高比例，`[application]` 的 `librarySort` 支持 `added`、`read`、`title`、`author`。
 
 ## 当前边界
 

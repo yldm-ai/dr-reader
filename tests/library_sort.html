@@ -1,0 +1,56 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Library sorting persistence</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import { bootstrapFixture } from './frontend-fixtures.js';
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw Error('Timed out waiting for library sorting');
+};
+try {
+  let fixture = bootstrapFixture();
+  fixture.books = [
+    { ...fixture.books[0], title: 'C', author: 'B', addedAt: 1, lastRead: 3 },
+    { ...fixture.books[0], id: 'second', title: 'A', author: 'C', addedAt: 3, lastRead: 2 },
+    { ...fixture.books[0], id: 'third', title: 'B', author: 'A', addedAt: 2, lastRead: 1 },
+  ];
+  const bundled = await (await fetch('../dist/index.html')).text();
+  let frame;
+  const launch = async () => {
+    frame?.remove();
+    frame = document.createElement('iframe');
+    frame.style.cssText = 'width:1200px;height:800px';
+    const mock = `<script type="module">import { installNativeMock } from '/tests/frontend-fixtures.js';window.nativeProbe=installNativeMock(${JSON.stringify(fixture)});<\/script>`;
+    frame.srcdoc = bundled.replace('<head>', `<head><base href="${location.origin}/dist/">${mock}`);
+    document.body.append(frame);
+    await until(() => frame.contentDocument?.querySelectorAll('.book-card').length === 3);
+  };
+  await launch();
+  check(frame.contentDocument.getElementById('sort').value === 'added', 'old settings use recent additions');
+  for (const [sort, order, label] of [
+    ['title', 'ABC', '书名排序'], ['author', 'BCA', '作者排序'],
+    ['read', 'CAB', '最近阅读'], ['added', 'ABC', '最近添加'],
+  ]) {
+    const select = frame.contentDocument.getElementById('sort');
+    select.value = sort;
+    select.dispatchEvent(new frame.contentWindow.Event('change', { bubbles: true }));
+    await until(() => frame.contentWindow.nativeProbe.data.settings.application.librarySort === sort);
+    fixture = structuredClone(frame.contentWindow.nativeProbe.data);
+    await launch();
+    const doc = frame.contentDocument;
+    check(doc.getElementById('sort').value === sort, `${sort}: selected value restored`);
+    check(doc.getElementById('sort-trigger').textContent.includes(label), `${sort}: dropdown label restored`);
+    check([...doc.querySelectorAll('.book-card h3')].map(el => el.textContent).join('') === order,
+      `${sort}: persisted rule sorts books on startup`);
+  }
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS library sorting persistence';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

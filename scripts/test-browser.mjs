@@ -80,6 +80,8 @@ try {
         // Keyboard opening must offer every operation in a predictable order.
         await app.locator('.book-card').first().press('Shift+F10');
         await app.locator('#book-menu-open').press('ArrowDown');
+        if (!await app.locator('#book-menu-info').evaluate(el => el === document.activeElement)) throw Error('keyboard menu navigation must reach info');
+        await app.locator('#book-menu-info').press('ArrowDown');
         if (!await app.locator('#book-menu-export').evaluate(el => el === document.activeElement)) throw Error('keyboard menu navigation must reach export');
         await app.locator('#book-menu-export').press('Escape');
       }

@@ -36,7 +36,21 @@ try {
   context();
   await new Promise(resolve => setTimeout(resolve, 450));
   check(!titleFlashes && menu.matches(':popover-open'), 'right click focus must never flash the title tooltip');
-  check(menu.querySelectorAll(':scope > button').length === 4, 'all four actions are present');
+  check(menu.querySelectorAll(':scope > button').length === 5, 'all five actions are present');
+  const infoDialog = doc.getElementById('book-info-dialog');
+  click('book-menu-info');
+  check(!menu.matches(':popover-open') && infoDialog.open, 'view info closes the menu and opens the details dialog');
+  await until(() => infoDialog.querySelector('.book-info-words'));
+  check(win.nativeProbe.requests.find(request => request.method === 'book.info').params.id === 'fixture', 'details target the selected book');
+  const infoText = infoDialog.textContent;
+  check(infoText.includes('字数（含标点）') && infoText.includes('128,566 字') && infoText.includes('约 12.9 万') &&
+    infoText.includes('字数（不含标点）') && infoText.includes('124,245 字'), 'both word counts are shown');
+  check(infoText.includes('译者') && infoText.includes('测试译者') && infoText.includes('第 2 册') &&
+    infoText.includes('9787536692930') && infoText.includes('2.5 MB') && infoText.includes('尚未开始'), 'calibre-style metadata rows are shown');
+  check(!infoDialog.querySelector('.book-info-description b') && infoText.includes('<b>不是标签</b>'), 'description is rendered as text');
+  infoDialog.querySelector('.annotation-actions .text-button').click();
+  check(!infoDialog.open, 'details dialog closes');
+  context();
   click('book-menu-category');
   check(sub.matches(':popover-open') && menu.matches(':popover-open'), 'nested menu keeps the parent open');
   const bounds = sub.getBoundingClientRect();
@@ -79,6 +93,13 @@ try {
   check(!sub.matches(':popover-open') && menu.matches(':popover-open') && doc.activeElement.id === 'book-menu-category', 'Escape closes only the submenu and restores focus');
   click('book-menu-open');
   await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  const infoButton = doc.getElementById('reader-book-info');
+  check(infoButton.querySelector('.fluent-icon')?.textContent === String.fromCharCode(0xe946), 'reader toolbar uses the Segoe Fluent info glyph');
+  const infoRequests = win.nativeProbe.requests.filter(request => request.method === 'book.info').length;
+  infoButton.click();
+  await until(() => infoDialog.open && win.nativeProbe.requests.filter(request => request.method === 'book.info').length > infoRequests && infoDialog.querySelector('.book-info-words'));
+  infoDialog.querySelector('.annotation-header .icon-button').click();
+  check(!infoDialog.open, 'reader details dialog closes from the header');
   click('collapse-toolbar');
   await until(() => doc.getElementById('reader-view').dataset.toolbar === 'false');
   const edge = doc.getElementById('toc-reveal-zone').getBoundingClientRect();

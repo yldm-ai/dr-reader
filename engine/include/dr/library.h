@@ -20,6 +20,8 @@ class Library
     // Visible characters per chapter (UTF-16 units, whitespace excluded) from the search text,
     // for estimating whole-book page counts without loading every chapter.
     Json chapter_lengths(const std::string &id) const;
+    // Book details: OPF metadata re-read from the cached package, library state and word counts.
+    Json info(const std::string &id) const;
     Json settings() const;
     Json save_settings(const Json &settings);
     Json annotations(const std::string& id) const;

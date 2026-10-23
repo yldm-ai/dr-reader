@@ -2,6 +2,7 @@
 #include "dr/annotations.h"
 #include "dr/settings.h"
 #include "dr/splitter.h"
+#include "dr/wordcount.h"
 #include <chrono>
 #include <iostream>
 #include <miniz.h>
@@ -69,6 +70,43 @@ int main()
             require(entities.flows[0].html.find("&amp;copy;") == std::string::npos &&
                         entities.flows[0].html.find("javascript") == std::string::npos,
                     "entity output is not double escaped and sanitization sees decoded URL schemes");
+        }
+        {
+            const auto mixed = dr::count_words("你好，世界。Hello, world! don't “well-known” 3.14 1,000 ＡＢＣ 😀 々");
+            require(mixed.cjk == 5 && mixed.words == 7 && mixed.punctuation == 7,
+                    "Han characters count singly, words by run, punctuation and symbols separately");
+            require(dr::count_words("end-  -- 'quote'").words == 2 && dr::count_words("end-  -- 'quote'").punctuation == 5,
+                    "joiners only bind letters on both sides");
+            pugi::xml_document doc;
+            doc.load_string(R"(<html><head><title>标题</title></head><body><p><span>T</span>he <ruby>汉<rp>(</rp><rt>hàn</rt><rp>)</rp></ruby>字</p><p>next</p><script>x</script></body></html>)");
+            const auto text = dr::reading_text(doc);
+            const auto counted = dr::count_words(text);
+            require(counted.words == 2 && counted.cjk == 2 && counted.punctuation == 0,
+                    "reading text keeps inline markup contiguous and skips ruby annotations, head and scripts");
+            const auto opf = root / "opf-metadata";
+            dr::write_file(opf / "META-INF" / "container.xml", R"(<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>)");
+            dr::write_file(opf / "OEBPS" / "content.opf", R"(<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf"><metadata>
+<dc:title id="t1">  三体  </dc:title><dc:title id="t2">地球往事</dc:title><meta refines="#t2" property="title-type">subtitle</meta>
+<dc:creator id="c2">刘慈欣</dc:creator><meta refines="#c2" property="role" scheme="marc:relators">aut</meta><meta refines="#c2" property="display-seq">1</meta>
+<dc:creator id="c3">Ken Liu</dc:creator><meta refines="#c3" property="role" scheme="marc:relators">trl</meta>
+<dc:creator opf:role="aut">第二作者</dc:creator>
+<dc:publisher>重庆出版社</dc:publisher><dc:date opf:event="modification">2020-01-01</dc:date><dc:date>2008-01-15T00:00:00Z</dc:date>
+<dc:language>zh-CN</dc:language><dc:language>und</dc:language><dc:subject>科幻, 小说</dc:subject><dc:subject>小说</dc:subject>
+<dc:identifier opf:scheme="ISBN">978-7-5366-9293-0</dc:identifier><dc:identifier>urn:uuid:1234</dc:identifier><dc:identifier>urn:isbn:9787536692931</dc:identifier>
+<dc:description>&lt;p&gt;第一段&amp;nbsp;&amp;amp;&lt;/p&gt;&lt;p&gt;第二段&lt;br/&gt;第三行&lt;/p&gt;</dc:description>
+<meta property="belongs-to-collection" id="s">地球往事三部曲</meta><meta refines="#s" property="collection-type">series</meta><meta refines="#s" property="group-position">1</meta>
+</metadata><manifest/><spine/></package>)");
+            const auto meta = dr::read_opf_metadata(opf);
+            require(meta["title"] == "三体" && meta["subtitle"] == "地球往事", "main title and refined subtitle");
+            require(meta["authors"] == dr::Json::array({"第二作者", "刘慈欣"}), "only aut roles are authors, ordered by display-seq");
+            require(meta["contributors"] == dr::Json::array({{{"name", "Ken Liu"}, {"role", "trl"}}}), "translator kept as contributor");
+            require(meta["publisher"] == "重庆出版社" && meta["published"] == "2008-01-15", "publisher and publication date");
+            require(meta["languages"] == dr::Json::array({"zh-CN"}) && meta["subjects"] == dr::Json::array({"科幻", "小说"}),
+                    "languages skip und, subjects split by comma and deduplicate");
+            require(meta["identifiers"] == dr::Json::array({{{"scheme", "isbn"}, {"value", "9787536692930"}}}),
+                    "ISBN check digits validated, uuid hidden, invalid ISBN dropped");
+            require(meta["description"] == "第一段 &\n第二段\n第三行", "escaped HTML description becomes plain paragraphs");
+            require(meta["series"] == "地球往事三部曲" && meta["seriesIndex"] == 1.0, "EPUB 3 series collection");
         }
         std::string source =
             R"(<html xmlns="http://www.w3.org/1999/xhtml"><head><title>test</title><link href="style.css" rel="stylesheet"/></head><body><section id="outer"><h1 id="start">一</h1><p>开头文字<a href="#end">跳转</a></p><div><h2 style="page-break-before: always" id="end">二</h2><p>结尾文字</p></div></section></body></html>)";
@@ -191,6 +229,12 @@ int main()
             auto lengths = reopened.chapter_lengths(id);
             require(lengths.size() == reopened.get(id)["chapters"].size() && lengths[1] == 5,
                     "chapter lengths count visible characters without whitespace");
+            // Chapters read "一开头文字跳转" and "二结尾文字"; the <title> in head is not text.
+            auto info = reopened.info(id);
+            require(info["title"] == "测试书" && info["authors"] == dr::Json::array({"测试作者"}) &&
+                        info["chapters"] == 2 && info["words"]["cjk"] == 12 &&
+                        info["words"]["withPunctuation"] == 12 && info["words"]["withoutPunctuation"] == 12,
+                    "book info reads cached OPF metadata and counts every chapter");
             require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].size() == 1,
                     "bookmark add");
             require(reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}})["bookmarks"].empty(),

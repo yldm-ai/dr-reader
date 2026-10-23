@@ -275,6 +275,8 @@ void Application::receive(const Json &request)
                     result = library_.search(params.at("id"), params.at("query"));
                 else if (method == "book.stats")
                     result = {{"chars", library_.chapter_lengths(params.at("id"))}};
+                else if (method == "book.info")
+                    result = library_.info(params.at("id"));
                 else if (method == "notes.export")
                 {
                     const auto book_id = params.at("id").get<std::string>();

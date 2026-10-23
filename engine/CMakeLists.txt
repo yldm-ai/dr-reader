@@ -1,4 +1,4 @@
-add_library(dr_engine STATIC src/paths.cpp src/splitter.cpp src/epub.cpp src/library.cpp src/annotations.cpp src/settings.cpp src/settings-toml.cpp src/entities.cpp)
+add_library(dr_engine STATIC src/paths.cpp src/splitter.cpp src/epub.cpp src/library.cpp src/annotations.cpp src/settings.cpp src/settings-toml.cpp src/entities.cpp src/wordcount.cpp)
 target_include_directories(dr_engine PUBLIC include)
 target_link_libraries(dr_engine PUBLIC pugixml::pugixml nlohmann_json::nlohmann_json PRIVATE miniz dr_sqlite tomlplusplus::tomlplusplus)
 if(WIN32)

@@ -1,5 +1,7 @@
 #include "dr/library.h"
 #include "dr/settings.h"
+#include "dr/splitter.h"
+#include "dr/wordcount.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -252,6 +254,68 @@ Json Library::chapter_lengths(const std::string &id) const
         lengths.push_back(count);
     }
     return lengths;
+}
+Json Library::info(const std::string &id) const
+{
+    const auto book = get(id);
+    const auto path = book_path(id);
+    // Reading the cached OPF keeps details available for books imported before this view existed.
+    Json metadata = Json::object();
+    try
+    {
+        metadata = read_opf_metadata(path / "content");
+    }
+    catch (const std::exception &)
+    {
+    }
+    WordCount count;
+    for (size_t i = 0; i < book["chapters"].size(); ++i)
+    {
+        std::string text;
+        try
+        {
+            pugi::xml_document doc;
+            const auto markup =
+                xml_compatible_entities(read_file(path / "content" / path8(book["chapters"][i].at("href").get<std::string>())));
+            if (doc.load_buffer(markup.data(), markup.size()))
+                text = reading_text(doc);
+        }
+        catch (const std::exception &)
+        {
+        }
+        // Search text breaks words at inline markup, so it is only the fallback.
+        if (text.empty())
+        {
+            const auto search = path / "search" / (std::to_string(i) + ".txt");
+            if (fs::exists(search))
+                text = read_file(search);
+        }
+        count += count_words(text);
+    }
+    const auto fallback = [&](const char *key, const Json &value) {
+        if (!metadata.contains(key) || metadata[key] == "" || metadata[key] == Json::array())
+            metadata[key] = value;
+    };
+    fallback("title", book.value("title", std::string()));
+    const auto author = book.value("author", std::string());
+    fallback("authors", author.empty() || author == "未知作者" ? Json::array() : Json::array({author}));
+    fallback("publisher", book.value("publisher", std::string()));
+    const auto language = book.value("language", std::string());
+    fallback("languages", language.empty() ? Json::array() : Json::array({language}));
+    fallback("subjects", book.value("subjects", Json::array()));
+    metadata["id"] = id;
+    metadata["format"] = book.value("format", std::string("EPUB"));
+    metadata["fileBytes"] = book.value("fileBytes", Json());
+    metadata["addedAt"] = book.value("addedAt", Json());
+    metadata["lastRead"] = book.value("lastRead", Json());
+    metadata["progress"] = book.value("progress", 0.0);
+    metadata["chapters"] = book["chapters"].size();
+    metadata["words"] = {{"cjk", count.cjk},
+                         {"words", count.words},
+                         {"punctuation", count.punctuation},
+                         {"withPunctuation", count.cjk + count.words + count.punctuation},
+                         {"withoutPunctuation", count.cjk + count.words}};
+    return metadata;
 }
 Json Library::settings() const
 {

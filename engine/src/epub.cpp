@@ -1,6 +1,7 @@
 #include "dr/epub.h"
 #include "dr/splitter.h"
 #include <algorithm>
+#include <cctype>
 #include <functional>
 #include <memory>
 #include <regex>
@@ -170,6 +171,85 @@ std::string trim(std::string s)
     auto a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
     return a == s.npos ? "" : s.substr(a, b - a + 1);
 }
+std::string opf_path(const fs::path &content)
+{
+    auto container = parse(content / "META-INF" / "container.xml");
+    std::string opf;
+    visit(container,
+          [&](auto n)
+          {
+              if (opf.empty() && local_name(n) == "rootfile")
+                  opf = n.attribute("full-path").value();
+          });
+    if (opf.empty())
+        throw std::runtime_error("container.xml 中没有 OPF");
+    return resolve_href("", opf);
+}
+// Collapses runs of whitespace, including no-break and ideographic spaces, like calibre's
+// normalize_whitespace.
+std::string collapse_spaces(const std::string &text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        const char c = text[i];
+        size_t extra = text.compare(i, 2, "\xC2\xA0") == 0 ? 1 : text.compare(i, 3, "\xE3\x80\x80") == 0 ? 2 : 0;
+        const bool space = extra || c == ' ' || c == '\t' || c == '\r' || c == '\n';
+        i += extra;
+        if (!space)
+            out += c;
+        else if (!out.empty() && out.back() != ' ')
+            out += ' ';
+    }
+    return trim(out);
+}
+// Descriptions are often escaped HTML. Keep paragraph breaks and drop the markup.
+std::string description_text(const std::string &source)
+{
+    std::string text;
+    for (size_t at = 0; at < source.size(); ++at)
+    {
+        const auto next = at + 1 < source.size() ? static_cast<unsigned char>(source[at + 1]) : 0;
+        if (source[at] != '<' || !(std::isalpha(next) || next == '/' || next == '!'))
+        {
+            text += source[at];
+            continue;
+        }
+        const auto close = source.find('>', at);
+        if (close == source.npos)
+        {
+            text.append(source, at);
+            break;
+        }
+        std::string tag = source.substr(at + 1, close - at - 1);
+        if (!tag.empty() && tag[0] == '/')
+            tag.erase(0, 1);
+        tag = tag.substr(0, tag.find_first_of(" \t\r\n/"));
+        std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        if (tag == "br" || tag == "p" || tag == "div" || tag == "li" || tag == "tr" ||
+            (tag.size() == 2 && tag[0] == 'h' && tag[1] >= '1' && tag[1] <= '6'))
+            text += '\n';
+        at = close;
+    }
+    // Decode the inner HTML's entities with the same HTML5 table used for chapters.
+    pugi::xml_document decoded;
+    const auto wrapped = "<d>" + xml_compatible_entities(text) + "</d>";
+    if (decoded.load_buffer(wrapped.data(), wrapped.size()))
+        text = decoded.document_element().text().get();
+    std::string out;
+    size_t start = 0;
+    while (start <= text.size())
+    {
+        auto end = text.find('\n', start);
+        if (end == text.npos)
+            end = text.size();
+        const auto line = collapse_spaces(text.substr(start, end - start));
+        if (!line.empty())
+            out += (out.empty() ? "" : "\n") + line;
+        start = end + 1;
+    }
+    return out;
+}
 } // namespace
 Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimits &limits)
 {
@@ -193,17 +273,7 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
         if (drm)
             throw std::runtime_error("这本书受 DRM 保护，初版仅支持无 DRM EPUB");
     }
-    auto container = parse(content / "META-INF" / "container.xml");
-    std::string opf;
-    visit(container,
-          [&](auto n)
-          {
-              if (opf.empty() && local_name(n) == "rootfile")
-                  opf = n.attribute("full-path").value();
-          });
-    if (opf.empty())
-        throw std::runtime_error("container.xml 中没有 OPF");
-    opf = resolve_href("", opf);
+    const auto opf = opf_path(content);
     auto package = parse(content / path8(opf));
     auto root = package.document_element();
     Json book = {{"title", utf8(archive.stem())},
@@ -418,5 +488,241 @@ Json import_epub(const fs::path &archive, const fs::path &dest, const ImportLimi
     book["format"] = "EPUB";
     book["fileBytes"] = fs::file_size(archive);
     return book;
+}
+// Mirrors the reading order of calibre's src/calibre/ebooks/metadata/opf3.py (read_title,
+// read_authors, read_series, read_pubdate, read_identifiers, read_tags, read_comments): EPUB 3
+// refinements first, OPF 2 attributes and calibre:series meta as fallbacks. Independently written.
+Json read_opf_metadata(const fs::path &content)
+{
+    const auto package = parse(content / path8(opf_path(content)));
+    const auto lower = [](std::string text) {
+        std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+        return text;
+    };
+    // Matches opf:role, opf:scheme and opf:file-as whatever prefix the publisher bound.
+    const auto attribute = [](pugi::xml_node node, std::string_view name) {
+        for (auto a : node.attributes())
+        {
+            std::string_view key = a.name();
+            if (key.substr(key.find(':') == key.npos ? 0 : key.find(':') + 1) == name)
+                return std::string(a.value());
+        }
+        return std::string();
+    };
+    // OPF 1 nests Dublin Core entries in dc-metadata and x-metadata.
+    std::vector<pugi::xml_node> entries;
+    for (auto n : child_named(package.document_element(), "metadata").children())
+    {
+        const auto name = local_name(n);
+        if (name == "dc-metadata" || name == "x-metadata")
+            for (auto c : n.children())
+                entries.push_back(c);
+        else
+            entries.push_back(n);
+    }
+    std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> refines;
+    for (auto n : entries)
+    {
+        const std::string target = n.attribute("refines").value();
+        if (local_name(n) == "meta" && target.starts_with('#'))
+            refines[target.substr(1)].emplace_back(n.attribute("property").value(), collapse_spaces(node_text(n)));
+    }
+    const auto properties = [&](pugi::xml_node n, std::string_view name) {
+        std::vector<std::string> values;
+        const auto found = refines.find(n.attribute("id").value());
+        if (found != refines.end())
+            for (const auto &[key, value] : found->second)
+                if (key == name && !value.empty())
+                    values.push_back(value);
+        return values;
+    };
+    const auto first_property = [&](pugi::xml_node n, std::string_view name) {
+        const auto values = properties(n, name);
+        return values.empty() ? std::string() : values.front();
+    };
+    const auto unique_push = [](Json &list, const Json &value) {
+        if (std::find(list.begin(), list.end(), value) == list.end())
+            list.push_back(value);
+    };
+
+    Json result = {{"title", ""},          {"subtitle", ""},  {"authors", Json::array()},
+                   {"contributors", Json::array()}, {"series", ""}, {"publisher", ""},
+                   {"published", ""},      {"languages", Json::array()}, {"subjects", Json::array()},
+                   {"identifiers", Json::array()},  {"description", ""}};
+    struct Person
+    {
+        std::string name;
+        int seq;
+    };
+    std::vector<Person> roled, unroled, editors;
+    std::vector<std::pair<std::string, std::string>> contributors;
+    pugi::xml_node first_title, main_title, subtitle;
+    std::string description, series, series_index, publication_date, other_date;
+    for (auto n : entries)
+    {
+        const auto name = local_name(n);
+        const auto text = collapse_spaces(node_text(n));
+        if (name == "title" && !text.empty())
+        {
+            const auto type = lower(first_property(n, "title-type"));
+            if (!first_title)
+                first_title = n;
+            if (type == "main" && !main_title)
+                main_title = n;
+            else if (type == "subtitle" && !subtitle)
+                subtitle = n;
+        }
+        else if ((name == "creator" || name == "contributor") && !text.empty())
+        {
+            auto roles = properties(n, "role");
+            for (auto &role : roles)
+                role = lower(role);
+            const auto opf_role = lower(attribute(n, "role"));
+            int seq = 0;
+            try
+            {
+                seq = std::stoi(first_property(n, "display-seq"));
+            }
+            catch (const std::exception &)
+            {
+            }
+            const auto has = [&](const char *role) {
+                return roles.empty() ? opf_role == role : std::find(roles.begin(), roles.end(), role) != roles.end();
+            };
+            if (name == "creator" && has("aut"))
+                roled.push_back({text, seq});
+            else if (name == "creator" && roles.empty() && opf_role.empty())
+                unroled.push_back({text, seq});
+            if (name == "creator" && has("edt"))
+                editors.push_back({text, seq});
+            for (const char *role : {"trl", "edt", "ill"})
+                if (has(role))
+                    contributors.emplace_back(text, role);
+        }
+        else if (name == "publisher" && !text.empty() && result["publisher"] == "")
+            result["publisher"] = text;
+        else if (name == "date" && !text.empty())
+        {
+            const auto event = lower(attribute(n, "event"));
+            if (event == "publication" && publication_date.empty())
+                publication_date = text;
+            else if (event != "modification" && event != "creation" && other_date.empty())
+                other_date = text;
+        }
+        else if (name == "language" && !text.empty() && lower(text) != "und")
+            unique_push(result["languages"], text);
+        else if (name == "subject")
+        {
+            for (size_t start = 0; start <= text.size();)
+            {
+                auto end = std::min(text.find(',', start), text.size());
+                const auto tag = collapse_spaces(text.substr(start, end - start));
+                if (!tag.empty())
+                    unique_push(result["subjects"], tag);
+                start = end + 1;
+            }
+        }
+        else if (name == "description" && !text.empty())
+            description += (description.empty() ? "" : "\n") + node_text(n);
+        else if (name == "identifier" && !text.empty())
+        {
+            std::string scheme = attribute(n, "scheme"), value = text;
+            bool from_value = false;
+            if (scheme.empty() || lower(value).starts_with("urn:"))
+            {
+                if (lower(value).starts_with("urn:"))
+                    value.erase(0, 4);
+                const auto colon = value.find(':');
+                scheme = colon == value.npos ? "" : value.substr(0, colon);
+                value = colon == value.npos ? "" : value.substr(colon + 1);
+                from_value = true;
+            }
+            scheme = lower(scheme);
+            if (scheme == "http" || scheme == "https")
+            {
+                if (!from_value)
+                    continue;
+                value = scheme + ":" + value;
+                scheme = "url";
+            }
+            if (scheme.starts_with("isbn"))
+            {
+                scheme = "isbn";
+                value = value.substr(value.rfind(':') == value.npos ? 0 : value.rfind(':') + 1);
+                std::string digits;
+                for (char c : value)
+                    if (std::isdigit(static_cast<unsigned char>(c)) || c == 'X' || c == 'x')
+                        digits += char(std::toupper(static_cast<unsigned char>(c)));
+                // Reject malformed numbers with the ISBN-10 / ISBN-13 check digits.
+                int sum = 0;
+                bool valid = digits.size() == 10 || digits.size() == 13;
+                for (size_t i = 0; valid && i < digits.size(); ++i)
+                {
+                    const bool x = digits[i] == 'X';
+                    if (x && (digits.size() != 10 || i != 9))
+                        valid = false;
+                    const int d = x ? 10 : digits[i] - '0';
+                    sum += digits.size() == 10 ? d * int(10 - i) : d * (i % 2 ? 3 : 1);
+                }
+                value = valid && sum % (digits.size() == 10 ? 11 : 10) == 0 ? digits : "";
+            }
+            // calibre and uuid identifiers only tie the file to a library.
+            if (!scheme.empty() && !value.empty() && scheme != "uuid" && scheme != "calibre")
+                unique_push(result["identifiers"], {{"scheme", scheme}, {"value", value}});
+        }
+        else if (name == "meta")
+        {
+            const std::string property = n.attribute("property").value(), key = n.attribute("name").value();
+            if (property == "belongs-to-collection" && !text.empty() && series.empty() &&
+                lower(first_property(n, "collection-type")) == "series")
+            {
+                series = text;
+                series_index = first_property(n, "group-position");
+            }
+            else if (key == "calibre:series" && result["series"] == "")
+                result["series"] = collapse_spaces(n.attribute("content").value());
+            else if (key == "calibre:series_index" && result.value("seriesIndex", Json()).is_null())
+                result["seriesIndex"] = n.attribute("content").value();
+        }
+    }
+    const auto title = main_title ? main_title : first_title;
+    if (title)
+        result["title"] = collapse_spaces(node_text(title));
+    if (subtitle && subtitle != title)
+        result["subtitle"] = collapse_spaces(node_text(subtitle));
+    auto &authors = !roled.empty() ? roled : !unroled.empty() ? unroled : editors;
+    std::stable_sort(authors.begin(), authors.end(), [](auto &a, auto &b) { return a.seq < b.seq; });
+    for (const auto &person : authors)
+        unique_push(result["authors"], person.name);
+    for (const auto &[person, role] : contributors)
+        if (std::find(result["authors"].begin(), result["authors"].end(), person) == result["authors"].end())
+            unique_push(result["contributors"], {{"name", person}, {"role", role}});
+    if (!series.empty())
+    {
+        result["series"] = series;
+        result["seriesIndex"] = series_index;
+    }
+    // A bare series index without a name carries no information.
+    if (result["series"] == "")
+        result.erase("seriesIndex");
+    else if (result.contains("seriesIndex"))
+    {
+        try
+        {
+            result["seriesIndex"] = std::stod(result["seriesIndex"].get<std::string>());
+        }
+        catch (const std::exception &)
+        {
+            result["seriesIndex"] = 1.0;
+        }
+    }
+    // Keep the calendar date; calibre treats years up to 101 as undefined.
+    auto date = publication_date.empty() ? other_date : publication_date;
+    std::smatch match;
+    if (std::regex_search(date, match, std::regex(R"(^(\d{4})(-\d{1,2}(-\d{1,2})?)?)")))
+        date = std::stoi(match[1]) > 101 ? match.str(0) : "";
+    result["published"] = date;
+    result["description"] = description_text(description);
+    return result;
 }
 } // namespace dr

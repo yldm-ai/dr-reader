@@ -9,8 +9,10 @@ import { LibraryBackToTop } from "./back-to-top.ts";
 import { SelectControl } from "./select-control.ts";
 import { Shelves } from "./shelves.js";
 import { readingPalette, resolveTheme } from "./reading-palette.ts";
+import { BookInfo } from "./book-info.ts";
 
 hydrate();
+const bookInfo = new BookInfo();
 const sortControl = new SelectControl($("sort"));
 const tooltips = new Tooltips();
 new LibraryBackToTop($("library-view"), $("library-back-to-top"), $("library-heading"));
@@ -28,6 +30,7 @@ const libraryOverlays = createLibraryOverlays(book => {
   $("delete-book-dialog").showModal();
 }, {
   open: book => openBook(book.id),
+  showInfo: book => bookInfo.show(book),
   shelves: () => shelves.items,
   addToShelf: async (book, id) => {
     try { await shelves.addBook(book.id, id); toast("已添加至分类书架", "success"); }
@@ -350,6 +353,7 @@ $("list-view").onclick = () => {
 $("back-library").onclick = returnLibrary;
 $("open-settings").onclick = () => settingsPanel.open("application");
 $("reader-app-settings").onclick = () => settingsPanel.open("application");
+$("reader-book-info").onclick = () => { if (reader.book) bookInfo.show(reader.book); };
 $("reader-settings").onclick = () => settingsPanel.open("reading");
 
 document.addEventListener("keydown", (event) => {

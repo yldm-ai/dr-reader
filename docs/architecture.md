@@ -4,7 +4,7 @@
 
 `ui` 只负责 HWND、非客户区、DPI 和 Direct2D 绘制，不读取书库，也不依赖 WebView2。`app` 组合窗口、WebView2 和 `engine`。`engine` 负责 EPUB 的所有持久内容处理，不包含界面或浏览器代码。
 
-WebView2 主页面发 `{id, method, params}` JSON 请求，C++ 返回 `{id, result}` 或 `{id, error}`。命令包含 `bootstrap`、`list`、`import`、`open`、`position`、`bookmark`、`search`、`settings`、`annotations`、`annotation.save`、`annotation.delete`、`lookup`、`copy`、`close`。文件选择器在 COM STA/UI 线程运行；导入、XML、拆分、检索和存储统一由后台串行队列处理，结果通过窗口消息回到 UI 线程。原生 WebView2 对象不跨线程调用。
+WebView2 主页面发 `{id, method, params}` JSON 请求，C++ 返回 `{id, result}` 或 `{id, error}`。命令包含 `bootstrap`、`list`、`import`、`open`、`position`、`bookmark`、`search`、`book.info`、`settings`、`annotations`、`annotation.save`、`annotation.delete`、`lookup`、`copy`、`close`。文件选择器在 COM STA/UI 线程运行；导入、XML、拆分、检索和存储统一由后台串行队列处理，结果通过窗口消息回到 UI 线程。原生 WebView2 对象不跨线程调用。
 
 ```mermaid
 flowchart LR
@@ -31,6 +31,14 @@ flowchart LR
 5. 确定每个原始文件的默认目标，以及每个 ID / name 锚点所在的输出文件。
 6. 用完整映射修复主阅读文档中的超链接，生成 remap 后的 EPUB3 nav / NCX 目录数据。图片、CSS 和字体保留原目录层级，拆分文件与源文件同目录，因此资源相对路径继续有效。
 7. 写入章节纯文本和 `book.json`，将 staging 整体移动为正式书籍目录。
+
+## 图书信息与字数统计
+
+首页右键菜单的“查看信息”和阅读工具栏的信息按钮（Segoe Fluent Icons U+E946）都调用 `book.info`。`Library::info` 每次从缓存的 OPF 重新读取元数据，因此旧书无需重新导入或迁移；`book.json` 中的书名、作者等只作为 OPF 无法读取时的回退。
+
+元数据的读取顺序参考 calibre `src/calibre/ebooks/metadata/opf3.py` 的 `read_title`、`read_authors`、`read_series`、`read_pubdate`、`read_identifiers`、`read_tags`、`read_comments`：先用 EPUB 3 `refines`（title-type、role、display-seq、collection-type、group-position），再回退到 OPF 2 的 `opf:role` / `opf:scheme` 和 `calibre:series`。作者只取 `aut` 角色，没有角色时取全部 creator，再没有时回退到编者；译者、编者和插画单独列出。ISBN 校验位不正确时丢弃，uuid 和 calibre 标识符不显示。HTML 简介转为纯文本段落。
+
+字数规则沿用 calibre `src/calibre/utils/wordcount.py` 的 `get_wordcount` 思路：东亚文字逐字计数，其他文字按词计数。calibre 把码位大于 U+3000 的字符一律算作一个字，本项目改为按文字类别判断：汉字、假名和重复记号逐字计数；连续的字母或数字算一个词，词中的 `'`、`’`、`-` 以及数字之间的 `.`、`,` 不拆词；标点、符号和 emoji 单独计数，从而得到“含标点”与“不含标点”两个总数。全角拉丁字母按单词计数，韩文按空格分词。统计时重新解析章节 XHTML，跳过 head、script、style、`rt` 与 `rp`，行内元素不插入分隔符，避免首字下沉 `<span>T</span>he` 被拆成两个词；XHTML 解析失败时才退回搜索文本。
 
 ## DOM 拆分策略
 

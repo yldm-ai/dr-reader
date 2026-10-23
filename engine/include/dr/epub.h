@@ -12,4 +12,7 @@ struct ImportLimits
 };
 // Destination must be a new staging directory. Extraction is bounded and path checked.
 Json import_epub(const fs::path &archive, const fs::path &destination, const ImportLimits &limits = {});
+// Descriptive OPF metadata of an extracted EPUB: title, subtitle, authors, contributors, series,
+// publisher, publication date, languages, subjects, identifiers and description.
+Json read_opf_metadata(const fs::path &content);
 } // namespace dr

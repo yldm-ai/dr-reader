@@ -60,6 +60,17 @@ export function installNativeMock(data = bootstrapFixture()) {
         queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { event: 'fullscreen', enabled: result } })));
       }
       if (method === 'book.stats') result = { chars: data.books[0].chapters.map(() => 2400) };
+      if (method === 'book.info') {
+        const book = data.books.find(item => item.id === params.id);
+        result = {
+          title: book.title, subtitle: '', authors: [book.author], contributors: [{ name: '测试译者', role: 'trl' }],
+          series: '测试系列', seriesIndex: 2, publisher: '原创出版社', published: '2024-05-01', languages: ['zh'],
+          subjects: ['小说', '测试'], identifiers: [{ scheme: 'isbn', value: '9787536692930' }],
+          description: '第一段简介\n第二段 <b>不是标签</b>', format: 'EPUB', fileBytes: 2.5 * 1024 * 1024,
+          addedAt: 1700000000, lastRead: 0, progress: 0, chapters: book.chapters.length,
+          words: { cjk: 123456, words: 789, punctuation: 4321, withPunctuation: 128566, withoutPunctuation: 124245 },
+        };
+      }
       if (method === 'titlebar') {
         data.titlebarHidden = params?.hidden ?? !data.titlebarHidden;
         result = data.titlebarHidden;

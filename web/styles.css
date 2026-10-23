@@ -2072,6 +2072,46 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   font-size: var(--text-secondary);
 }
 #annotation-dialog .annotation-actions .danger-button { padding-left: 0; }
+/* Book details: word counts lead, then calibre-style metadata rows and the description. */
+#book-info-dialog { width: min(480px, calc(100vw - 24px)); border-radius: 10px; }
+#book-info-dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 34px); padding: 16px; box-sizing: border-box; }
+#book-info-dialog .annotation-header {
+  align-items: center;
+  margin: -16px -16px 12px;
+  padding: 8px 8px 8px 16px;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+#book-info-dialog .annotation-header h2 { margin: 0; font-size: 15px; font-weight: 500; }
+#book-info-dialog .annotation-header .icon-button { width: 28px; height: 28px; padding: 6px; color: var(--muted); }
+#book-info-dialog .annotation-header .icon-button:hover { color: var(--text); }
+#book-info-dialog .annotation-actions { display: flex; margin-top: 14px; }
+#book-info-dialog .annotation-actions > span { flex: 1; }
+#book-info-dialog .annotation-actions .text-button { min-height: 30px; padding: 5px 12px; font-size: var(--text-secondary); }
+.book-info-body { flex: 1; min-height: 0; overflow: auto; }
+.book-info-heading { display: flex; align-items: flex-start; gap: 14px; }
+.book-info-cover { flex: none; width: 60px; height: 84px; object-fit: cover; border-radius: 2px 4px 4px 2px; box-shadow: 2px 3px 6px #0002; }
+.book-info-cover.cover-fallback { justify-content: flex-start; width: 60px; height: 84px; padding: 5px; font-size: 10px; line-height: 1.5; overflow: hidden; }
+.book-info-heading h3 { margin: 2px 0 4px; font-size: var(--text-section); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.book-info-subtitle, .book-info-authors { margin: 0; font-size: var(--text-secondary); color: var(--muted); overflow-wrap: anywhere; }
+.book-info-status { margin: 16px 0 0; font-size: var(--text-secondary); color: var(--muted); }
+.book-info-status.error { color: var(--danger); }
+.book-info-words { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0 14px; }
+.book-info-words > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: 8px; background: var(--hover); }
+.book-info-words span { font-size: 12px; color: var(--muted); }
+.book-info-words strong { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.book-info-words strong small { margin-left: 6px; font-size: 12px; font-weight: 400; color: var(--muted); }
+.book-info-words p { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--muted); }
+.book-info-fields { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px 16px; margin: 0; font-size: var(--text-secondary); line-height: 1.6; }
+.book-info-fields dt { color: var(--muted); white-space: nowrap; }
+.book-info-fields dd { margin: 0; overflow-wrap: anywhere; }
+.book-info-fields small { margin-left: 4px; color: var(--muted); }
+.book-info-tag { display: inline-block; margin: 0 4px 4px 0; padding: 0 8px; border-radius: 10px; background: var(--hover); font-size: 12px; line-height: 20px; }
+.book-info-description { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); font-size: var(--text-secondary); line-height: 1.75; }
+.book-info-description h4 { margin: 0 0 6px; font-size: var(--text-secondary); font-weight: 500; color: var(--muted); }
+.book-info-description p { margin: 0 0 6px; }
+#reader-book-info { --icon-size: 18px; }
 .danger-button {
   color: var(--danger);
   font-size: var(--text-secondary);
@@ -2653,6 +2693,8 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
   .reader-toolbar { gap: 6px; padding-right: 4px; }
   .reader-actions { gap: 0; }
   .reader-actions .text-button { gap: 5px; padding-inline: 5px; }
+  /* Compact action buttons keep room for the book information button. */
+  .reader-actions .icon-button { width: 32px; height: 32px; }
   .toolbar-divider { height: 14px; }
 }
 

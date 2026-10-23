@@ -26,6 +26,7 @@ export function createLibraryOverlays(onRemove, actions = {}) {
     return button;
   };
   const open = item(menu, "book-menu-open", "打开阅读", "book");
+  const details = item(menu, "book-menu-info", "查看信息", "book-info");
   const exportNotes = item(menu, "book-menu-export", "导出笔记", "note");
   const category = item(menu, "book-menu-category", "添加至分类", "library");
   category.insertAdjacentHTML("beforeend", `<span class="book-menu-trailing">${icon("chevron", "fluent")}</span>`);
@@ -151,6 +152,7 @@ export function createLibraryOverlays(onRemove, actions = {}) {
     }
   });
   open.onclick = () => choose(book => actions.open?.(book));
+  details.onclick = () => choose(book => actions.showInfo?.(book));
   exportNotes.onclick = () => choose(book => actions.exportNotes?.(book));
   remove.onclick = () => choose(onRemove);
   category.onclick = () => showSubmenu(true);
@@ -158,7 +160,7 @@ export function createLibraryOverlays(onRemove, actions = {}) {
   category.onpointerleave = () => { submenuTimer = setTimeout(hideSubmenu, 220); };
   submenu.onpointerenter = () => clearTimeout(submenuTimer);
   submenu.onpointerleave = () => { submenuTimer = setTimeout(hideSubmenu, 220); };
-  for (const button of [open, exportNotes, remove]) button.onpointerenter = hideSubmenu;
+  for (const button of [open, details, exportNotes, remove]) button.onpointerenter = hideSubmenu;
   menu.onkeydown = event => {
     const nested = submenu.contains(event.target);
     if (event.key === "ArrowRight" && event.target === category) {

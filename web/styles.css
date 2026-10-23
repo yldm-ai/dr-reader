@@ -1292,23 +1292,23 @@ input[type="range"] {
   font-style: normal;
   opacity: 0.8;
 }
-/* The reading drawer floats as a rounded card, like the table-of-contents panel. */
+/* The reading drawer floats beside the page as one flat surface; groups are separated by
+   hairlines rather than nested cards, so the controls stay the only foreground. */
 .settings-dialog {
-  --drawer-radius: 14px;
+  --drawer-radius: 10px;
   position: fixed;
   margin: 0;
   inset: 12px 12px 12px auto;
-  width: 440px;
+  width: 420px;
   height: auto;
   max-height: none;
   max-width: calc(100vw - 24px);
   border: 1px solid var(--border);
   border-radius: var(--drawer-radius);
-  /* A faintly tinted drawer lets each settings group sit on its own card. */
-  background: color-mix(in srgb, var(--text) 3%, var(--surface));
+  background: var(--surface);
   color: var(--text);
   padding: 0;
-  box-shadow: 0 12px 36px #00000029, 0 2px 6px #00000014;
+  box-shadow: var(--shadow-dialog);
   overflow: hidden;
 }
 .settings-dialog[open] {
@@ -1318,16 +1318,39 @@ input[type="range"] {
 .settings-dialog::backdrop {
   background: var(--scrim);
 }
+/* The drawer glides in from the right like the auto-hide sidebar does from the left: the same
+   220ms reveal curve, and a quicker ease-in-out when it leaves. `display` and `overlay` transition
+   discretely so the closing drawer stays in the top layer until it has slid away. */
+.settings-dialog {
+  transform: translateX(calc(100% + 24px));
+  transition: transform 260ms cubic-bezier(.4, 0, .2, 1), display 260ms allow-discrete, overlay 260ms allow-discrete;
+}
+.settings-dialog[open] {
+  transform: none;
+  transition: transform 220ms var(--ease-ui), display 220ms allow-discrete, overlay 220ms allow-discrete;
+}
+.settings-dialog::backdrop {
+  opacity: 0;
+  transition: opacity 260ms ease, display 260ms allow-discrete, overlay 260ms allow-discrete;
+}
+.settings-dialog[open]::backdrop { opacity: 1; transition-duration: 220ms; }
+@starting-style {
+  .settings-dialog[open] { transform: translateX(calc(100% + 24px)); }
+  .settings-dialog[open]::backdrop { opacity: 0; }
+}
+body[data-animations="false"] .settings-dialog,
+body[data-animations="false"] .settings-dialog::backdrop { transition: none; }
 .settings-header {
   --close-inset: 6px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--close-inset) var(--close-inset) 0 21px;
+  padding: var(--close-inset) var(--close-inset) var(--close-inset) 20px;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .settings-header h2 {
-  font-size: var(--text-section);
+  font-size: var(--text-body);
   font-weight: 600;
   margin: 0;
   line-height: 1.4;
@@ -1335,76 +1358,80 @@ input[type="range"] {
 /* The close button sits in the corner; its hover plate is concentric with the card's corner:
    outer radius minus the 1px border minus the inset. */
 .settings-header .icon-button {
-  width: 32px;
-  height: 32px;
-  border-radius: calc(var(--drawer-radius) - 1px - var(--close-inset));
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-control);
 }
 .settings-body {
   height: auto;
   overflow: auto;
-  padding: 2px 20px 28px;
+  padding: 0 0 16px;
   min-height: 0;
   flex: 1;
 }
+/* Dividers are inset to the content edge, so they never run under the overlay scrollbar's lane. */
 .settings-body section {
-  margin-top: 12px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  margin: 0 20px;
+  padding: 16px 0 18px;
 }
+.settings-body section + section { border-top: 1px solid var(--border); }
+/* Group labels read like Notion's menu headings: small, muted and out of the way. */
 .settings-body h3 {
-  font-size: var(--text-secondary);
-  font-weight: 600;
-  letter-spacing: .02em;
-  margin: 0 0 12px;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  color: var(--muted);
+  margin: 0 0 8px;
+  line-height: 1.5;
 }
 .theme-options {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
+/* Each swatch is a small page sample; the chosen one gets a 2px accent outline. */
 .theme-swatch {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
   flex: 1;
-  padding: 14px 8px 10px;
-  border-radius: 10px;
+  padding: 8px 6px 6px;
+  border-radius: 6px;
   border: 1px solid var(--border);
-  font-size: var(--text-secondary);
-  transition: box-shadow 140ms var(--ease-ui), border-color 140ms var(--ease-ui);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  transition: box-shadow 120ms var(--ease-ui), border-color 120ms var(--ease-ui);
 }
 .theme-swatch span {
   font-family: Georgia, serif;
-  font-size: 21px;
-  margin-bottom: 2px;
+  font-size: 16px;
+  line-height: 22px;
 }
+.theme-swatch:hover { border-color: var(--control-border); }
 .theme-swatch.selected {
-  border-color: var(--focus-border);
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 .theme-options.compact { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.theme-options.compact .theme-swatch { gap: 1px; padding: 7px 0 6px; border-radius: 8px; font-size: var(--text-caption); line-height: 16px; }
-.theme-options.compact .theme-swatch span { font-size: 15px; margin: 0; line-height: 20px; }
 .setting-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   justify-content: space-between;
   font-size: var(--text-body);
-  row-gap: 8px;
-  margin: 14px 0;
+  row-gap: 6px;
+  min-height: 32px;
+  margin: 8px 0;
   font-weight: 400;
 }
 .settings-body section > h3 + .setting-row { margin-top: 0; }
 .settings-body section > .setting-row:last-child { margin-bottom: 0; }
 .setting-row small {
   display: block;
-  margin-top: 5px;
+  margin-top: 2px;
   font-size: var(--text-caption);
   font-weight: 400;
   color: var(--muted);
-  line-height: 1.7;
+  line-height: 1.6;
 }
 .setting-row > span,
 .setting-row > output {
@@ -1429,29 +1456,31 @@ input[type="range"] {
 .setting-row input[type="search"],
 .dictionary-form > input {
   width: 100%;
-  min-height: 40px;
-  padding: 8px 10px;
+  height: 32px;
+  padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 3%, var(--surface));
   color: var(--text);
   font-size: var(--text-body);
 }
-.range-control {
-  display: flex;
-  width: 100%;
+.dictionary-form > input:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
+/* Sliders put the label and its editable value on one line and the full-width track beneath:
+   the wrapper dissolves into the row's grid so the track can span both columns. */
+.slider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 14px;
+  row-gap: 0;
 }
-.range-control input[type="range"] {
-  flex: 1;
-}
-/* Thin filled track and a soft round thumb; --fill is kept current by the settings panel. */
+.slider-row .range-control { display: contents; }
+.slider-row input[type="range"] { grid-column: 1 / -1; order: 1; }
+/* Thin filled track and a small flat thumb; --fill is kept current by the settings panel. */
 .settings-body input[type="range"] {
-  --range-track: color-mix(in srgb, var(--text) 14%, transparent);
+  --range-track: color-mix(in srgb, var(--text) 12%, transparent);
   -webkit-appearance: none;
   appearance: none;
-  height: 22px;
+  height: 20px;
   background: transparent;
 }
 .settings-body input[type="range"]::-webkit-slider-runnable-track {
@@ -1461,37 +1490,39 @@ input[type="range"] {
 }
 .settings-body input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  margin-top: -6px;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
   background: #fff;
-  box-shadow: 0 1px 3px #00000033;
-  transition: transform 120ms var(--ease-ui), box-shadow 120ms var(--ease-ui);
+  box-shadow: 0 1px 2px #00000026;
+  transition: box-shadow 120ms var(--ease-ui);
 }
-.settings-body input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); }
-.settings-body input[type="range"]:active::-webkit-slider-thumb { box-shadow: 0 1px 3px #00000033, 0 0 0 5px var(--accent-soft); }
+.settings-body input[type="range"]:active::-webkit-slider-thumb { box-shadow: 0 1px 2px #00000026, 0 0 0 4px var(--accent-soft); }
 .settings-body input[type="range"]:focus-visible { outline: none; }
 .settings-body input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--focus-outline); }
 .settings-body input:disabled { opacity: .45; cursor: default; }
+/* The value reads as plain text until hovered or edited, like an inline Notion property. */
 .range-number {
-  width: 64px !important;
-  height: 30px !important;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  width: 52px !important;
+  height: 26px !important;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
   color: var(--text);
   font-size: var(--text-secondary);
   font-variant-numeric: tabular-nums;
-  text-align: center;
+  text-align: right;
   -moz-appearance: textfield;
+  transition: background-color 120ms var(--ease-ui), border-color 120ms var(--ease-ui);
 }
-.range-value { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.range-unit { width: 22px; font-size: var(--text-caption); color: var(--muted); }
+.range-number:not(:disabled):hover { background: var(--hover); }
+.range-value { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.range-unit { min-width: 20px; font-size: var(--text-caption); color: var(--muted); }
 .range-number::-webkit-inner-spin-button, .range-number::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-.range-number:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
+.range-number:focus-visible { outline: none; background: var(--surface); border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
 .checkbox-row {
   flex-wrap: nowrap;
   gap: 16px;
@@ -1501,34 +1532,35 @@ input[type="range"] {
   font-size: var(--text-body);
   font-weight: 400;
 }
-/* On/off preferences are switches: larger targets and an immediately readable state. */
+/* On/off preferences are compact switches that read at a glance. */
 .checkbox-row input[type="checkbox"] {
   -webkit-appearance: none;
   appearance: none;
   position: relative;
   flex-shrink: 0;
-  width: 40px !important;
-  height: 22px !important;
+  width: 30px !important;
+  height: 18px !important;
   margin: 0;
-  border-radius: 11px;
-  background: color-mix(in srgb, var(--text) 22%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--text) 18%, transparent);
   cursor: pointer;
-  transition: background-color 160ms var(--ease-ui);
+  transition: background-color 140ms var(--ease-ui);
 }
 .checkbox-row input[type="checkbox"]::before {
   content: "";
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 16px;
-  height: 16px;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2px #00000040;
-  transition: transform 160ms var(--ease-ui);
+  box-shadow: 0 1px 1px #00000033;
+  transition: transform 140ms var(--ease-ui);
 }
 .checkbox-row input[type="checkbox"]:checked { background: var(--accent); }
-.checkbox-row input[type="checkbox"]:checked::before { transform: translateX(18px); }
+.checkbox-row input[type="checkbox"]:checked::before { transform: translateX(12px); }
+.checkbox-row input[type="checkbox"]:disabled { opacity: .45; cursor: default; }
 /* Multi-select lists keep checkboxes, drawn larger with rounded corners. */
 .action-options input[type="checkbox"], .shelf-books input[type="checkbox"], .dictionary-row input[type="checkbox"] {
   -webkit-appearance: none;
@@ -1560,13 +1592,13 @@ input[type="range"] {
 }
 .segmented-row, .select-row { flex-wrap: nowrap; gap: 16px; }
 .segmented-row > span, .select-row > span { flex-shrink: 0; color: var(--text); font-size: var(--text-body); }
-.select-row .select-control { width: 60%; }
+.select-row .select-control { width: 58%; }
 .segmented {
   display: flex;
-  width: 60%;
+  width: 58%;
   gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
+  padding: 2px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .segmented label { position: relative; flex: 1; min-width: 0; }
@@ -1584,49 +1616,63 @@ input[type="range"] {
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 30px;
-  border-radius: 7px;
+  height: 26px;
+  border-radius: 4px;
   font-size: var(--text-secondary);
   color: var(--muted);
   white-space: nowrap;
   transition: background-color 140ms var(--ease-ui), color 140ms var(--ease-ui), box-shadow 140ms var(--ease-ui);
 }
 .segmented label:hover > span { color: var(--text); }
-.segmented input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px #0000001f, 0 0 0 1px #0000000d; }
+.segmented input:checked + span { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent), 0 1px 2px #00000014; }
+.segmented input:disabled + span { opacity: .45; }
+.segmented label:has(input:disabled) { pointer-events: none; }
 /* On dark surfaces the chosen chip must read lighter than its track, not darker. */
 body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-checked="true"]) { background: #3a3a3a; }
 .segmented input:focus-visible + span { outline: 1px solid var(--focus-outline); outline-offset: -2px; }
 .segmented .ui-icon { width: 16px; height: 16px; }
 .action-options {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px 8px;
 }
 .action-options label {
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 10px;
-  font-size: var(--text-secondary);
-}
-.dictionary-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: 6px;
-  background: var(--bg);
+  font-size: var(--text-body);
+  cursor: pointer;
 }
+.action-options label:hover { background: var(--hover); }
+/* Inside settings the checkboxes match the 14px label text instead of the shelf picker's larger targets. */
+.app-settings :is(.action-options, .dictionary-row) input[type="checkbox"] { width: 16px; height: 16px; border-radius: 3px; }
+.app-settings :is(.action-options, .dictionary-row) input[type="checkbox"]:checked::after { width: 4px; height: 8px; }
+/* The add form sits inline under the list: name, address template, then its actions. */
+.dictionary-form {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.dictionary-form > .inline-error { grid-column: 1 / -1; }
+.dictionary-form .form-actions .primary { height: 32px; padding: 0 12px; }
+.dictionary-form .form-actions .text-button { height: 32px; }
 .dictionary-row {
   display: grid;
-  grid-template-columns: 1fr 34px 34px;
+  grid-template-columns: 1fr 28px 28px;
   align-items: center;
-  gap: 3px;
-  border-bottom: 1px solid var(--border);
-  padding: 8px 0;
+  gap: 2px;
+  margin: 0 -8px;
+  padding: 6px 4px 6px 8px;
+  border-radius: 6px;
 }
+.dictionary-row:hover { background: var(--hover); }
+.dictionary-row .icon-button { width: 28px; height: 28px; opacity: 0; }
+.dictionary-row:is(:hover, :focus-within) .icon-button { opacity: 1; }
 .dictionary-row > label {
   min-width: 0;
   display: flex;
@@ -1662,25 +1708,11 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   color: var(--danger);
   font-size: var(--text-caption);
 }
-.type-preview {
-  margin-top: 18px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px 20px;
-  background: var(--bg);
-  line-height: 1.9;
-}
-.type-preview p {
-  margin-bottom: 0;
-}
+/* Reset is a quiet footer action rather than a full-width button competing with the settings. */
 .reset-button {
-  width: 100%;
-  min-height: 38px;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-top: 14px;
-  background: var(--surface);
+  margin: 4px 0 0 12px;
+  color: var(--muted);
+  font-size: var(--text-secondary);
 }
 .selection-menu {
   position: fixed;
@@ -1985,23 +2017,6 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   max-height: 130px;
   overflow: auto;
 }
-.annotation-note-label {
-  display: block;
-  font-size: var(--text-body);
-  font-weight: 500;
-}
-.annotation-note-label textarea {
-  display: block;
-  width: 100%;
-  margin-top: 9px;
-  padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font: 400 var(--text-body)/1.8 var(--font-ui);
-  resize: vertical;
-}
 .annotation-style-row {
   display: flex;
   align-items: center;
@@ -2009,15 +2024,6 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   margin: 16px 0 23px;
   font-size: var(--text-secondary);
   color: var(--muted);
-}
-.annotation-style-row select {
-  margin-left: auto;
-  padding: 7px 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg);
-  color: var(--text);
-  font-size: var(--text-secondary);
 }
 .annotation-actions {
   display: grid;
@@ -2040,38 +2046,56 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
 #annotation-dialog .annotation-header h2 { margin: 0; font-size: 15px; font-weight: 500; }
 #annotation-dialog .annotation-header .icon-button { width: 28px; height: 28px; padding: 6px; color: var(--muted); }
 #annotation-dialog .annotation-header .icon-button:hover { color: var(--text); }
+/* A plain Notion-style quote: a neutral rule and the passage marked as it will be in the book. */
 #annotation-dialog blockquote {
   margin: 0 0 12px;
-  padding: 9px 11px;
+  padding: 0 0 0 12px;
+  border-left: 2px solid color-mix(in srgb, var(--text) 22%, transparent);
+  border-radius: 0;
+  background: none;
+  color: var(--text);
   max-height: 76px;
   font-size: var(--text-secondary);
-  line-height: 1.65;
+  line-height: 1.75;
 }
-#annotation-dialog .annotation-note-label { font-size: var(--text-secondary); font-weight: 400; }
+#annotation-quote[data-style="highlight"] > span { background: var(--mark); -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px; }
+#annotation-quote[data-style="underline"] > span { text-decoration: underline 2px var(--mark); text-underline-offset: 4px; }
 #annotation-note {
-  height: 132px;
-  min-height: 96px;
+  display: block;
+  width: 100%;
+  height: 120px;
+  min-height: 88px;
   max-height: min(320px, 40vh);
-  margin-top: 6px;
-  padding: 9px 10px;
-  font-size: var(--text-secondary);
-  line-height: 1.65;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 3%, var(--surface));
+  color: var(--text);
+  font: 400 var(--text-secondary)/1.7 var(--font-ui);
+  resize: vertical;
 }
+#annotation-note::placeholder { color: var(--muted); opacity: .8; }
 #annotation-note:focus-visible {
   outline: none;
   border-color: var(--focus-border);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
-#annotation-dialog .annotation-style-row { gap: 10px; margin: 12px 0 16px; }
-#annotation-dialog .annotation-style-row select { padding: 5px 7px; }
-#annotation-dialog .annotation-actions { display: flex; }
+/* Style and colour share one label column so the two rows align. */
+#annotation-dialog .annotation-style-row { gap: 12px; min-height: 30px; margin: 10px 0 0; }
+#annotation-dialog .annotation-style-row > span:first-child { flex: 0 0 32px; font-size: var(--text-caption); }
+#annotation-dialog .annotation-style-row .segmented { flex: 1; width: auto; }
+#annotation-dialog .annotation-color-row { margin: 6px 0 16px; }
+#annotation-dialog .annotation-color-row[data-disabled] .swatch-row { opacity: .35; }
+#annotation-dialog .annotation-color-row .color-dot:disabled { cursor: default; transform: none; }
+#annotation-dialog .annotation-actions { display: flex; padding-top: 12px; border-top: 1px solid var(--border); margin: 0 -16px; padding-inline: 16px; }
 #annotation-dialog .annotation-actions > span { flex: 1; }
 #annotation-dialog .annotation-actions :is(.primary, .text-button, .danger-button) {
-  min-height: 30px;
-  padding: 5px 10px;
+  min-height: 28px;
+  padding: 4px 10px;
   font-size: var(--text-secondary);
 }
-#annotation-dialog .annotation-actions .danger-button { padding-left: 0; }
+/* The hover plate extends left of the content edge so the label stays aligned with the text above. */
+#annotation-dialog .annotation-actions .danger-button { margin-left: -10px; }
 /* Book details: word counts lead, then calibre-style metadata rows and the description. */
 #book-info-dialog { width: min(480px, calc(100vw - 24px)); border-radius: 10px; }
 #book-info-dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 34px); padding: 16px; box-sizing: border-box; }
@@ -2117,6 +2141,14 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   font-size: var(--text-secondary);
   padding: 8px 4px;
 }
+/* Dialog actions get the same rounded hover plate as their neighbours, tinted to signal deletion. */
+.annotation-actions .danger-button {
+  padding-inline: 10px;
+  border-radius: var(--radius-control);
+  transition: background-color 120ms var(--ease-ui);
+}
+.annotation-actions .danger-button:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.annotation-actions .danger-button:active { background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .dictionary-picker {
   width: min(320px, calc(100vw - 32px));
   padding: 12px;
@@ -2163,9 +2195,10 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   }
 }
 .setting-note {
+  margin: 10px 0 0;
   font-size: var(--text-caption);
   color: var(--muted);
-  line-height: 1.9;
+  line-height: 1.7;
 }
 .toast {
   position: fixed;
@@ -2402,42 +2435,42 @@ body[data-animations="false"] .ui-tooltip { transition: none; }
 /* Application settings: a draggable in-app modal with a quiet, Notion-like layout.
    Reading typography remains a drawer. */
 .app-settings {
-  width: min(900px, calc(100vw - 64px));
+  width: min(880px, calc(100vw - 64px));
   height: min(640px, calc(100vh - 64px));
   max-width: none;
   max-height: none;
   margin: auto;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 24px 64px #00000033, 0 2px 8px #0000001a;
+  box-shadow: var(--shadow-dialog);
   overflow: hidden;
 }
 .app-settings[open] {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  animation: modal-enter 180ms var(--ease-ui);
+  grid-template-columns: 220px minmax(0, 1fr);
+  animation: modal-enter 160ms var(--ease-ui);
 }
-.app-settings::backdrop { background: #0f0f0f66; }
+.app-settings::backdrop { background: #0f0f0f52; }
 @keyframes modal-enter {
-  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  from { opacity: 0; transform: translateY(4px); }
 }
 body[data-animations="false"] .app-settings { animation: none; }
 .app-settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 20px 10px;
+  gap: 1px;
+  padding: 14px 8px;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
 }
 .app-settings-nav a {
   display: flex;
   align-items: center;
-  gap: 10px;
-  height: 34px;
+  gap: 8px;
+  height: 30px;
   padding: 0 10px;
   border-radius: 6px;
   color: var(--muted);
@@ -2449,8 +2482,8 @@ body[data-animations="false"] .app-settings { animation: none; }
 .app-settings-nav a .ui-icon { width: 18px; height: 18px; }
 .app-settings-nav a:hover { background: var(--hover); color: var(--text); }
 .app-settings-nav a[aria-current] { background: var(--selected); color: var(--text); font-weight: 500; }
-/* The title heads the navigation column and never scrolls with the groups. */
-.app-settings-title { margin: 2px 10px 14px; font-size: 20px; font-weight: 600; line-height: 1.3; }
+/* The title is the sidebar's group label, as in Notion's settings; it never scrolls. */
+.app-settings-title { margin: 4px 10px 6px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; line-height: 20px; }
 /* The top strip belongs to the close button: content and the scrollbar track start below it, so
    the hover plate never covers a card border or the scrollbar. */
 .app-settings-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-top: 44px; }
@@ -2464,28 +2497,36 @@ body[data-animations="false"] .app-settings { animation: none; }
   height: 28px !important;
   border-radius: 4px !important;
 }
-.app-settings-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 0 36px 36px; }
-.app-section + .app-section { margin-top: 30px; }
-.app-section h2 { margin: 0 0 10px; font-size: var(--text-section); font-weight: 600; line-height: 1.4; }
-.app-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.app-settings-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 0 56px 40px; }
+.app-section + .app-section { margin-top: 40px; }
+/* Each group heading carries a hairline beneath it; the rows below have no borders of their own. */
+.app-section h2 {
+  margin: 0 0 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-section);
+  font-weight: 500;
+  line-height: 1.4;
+}
 .app-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  min-height: 58px;
+  gap: 24px;
+  min-height: 52px;
   margin: 0;
-  padding: 14px 18px;
+  padding: 10px 0;
 }
-.app-row + .app-row { border-top: 1px solid var(--border); }
-.app-row:has(> #app-book-opening-label) > .select-control { width: 180px; flex: 0 0 180px; }
-.app-row-stack { flex-direction: column; align-items: stretch; gap: 12px; }
+.app-row:has(> #app-book-opening-label) > .select-control { width: 168px; flex: 0 0 168px; }
+.app-row-stack { flex-direction: column; align-items: stretch; gap: 10px; }
 .app-row-label { display: flex; flex-direction: column; color: var(--text); font-size: var(--text-body); line-height: 1.5; }
-.app-row-label small { margin-top: 2px; color: var(--muted); font-size: var(--text-caption); line-height: 1.6; }
-.app-settings .theme-options { max-width: 420px; }
-.app-settings .theme-swatch { padding: 10px 8px 8px; }
+.app-row-label small { margin-top: 1px; color: var(--muted); font-size: var(--text-caption); line-height: 1.6; }
+.app-settings .theme-options { display: grid; grid-template-columns: repeat(4, 96px); }
+.app-settings .theme-swatch { padding: 10px 6px 8px; }
 .app-settings .theme-swatch span { font-size: 18px; }
-.app-settings .segmented { width: auto; min-width: 250px; flex-shrink: 0; }
+.app-settings .segmented { width: auto; min-width: 230px; flex-shrink: 0; }
+.app-settings .select-trigger, .settings-dialog .select-trigger { min-height: 32px; padding: 4px 6px 4px 10px; border-radius: 6px; background: var(--surface); box-shadow: none; }
+.app-settings .select-trigger > .ui-icon, .settings-dialog .select-trigger > .ui-icon { width: 18px; height: 18px; }
 .app-row.about { justify-content: flex-start; gap: 12px; }
 .storage-path {
   display: block;
@@ -2525,7 +2566,9 @@ body[data-animations="false"] .app-settings { animation: none; }
   transition: border-color 120ms var(--ease-ui), background 120ms var(--ease-ui), box-shadow 120ms var(--ease-ui);
 }
 .select-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.select-trigger:hover { border-color: var(--control-border); }
+/* Hover and an open menu both deepen the fill as well as the edge. The :not(:disabled) also lifts
+   specificity above the per-context backgrounds (toolbar, settings) so this always wins. */
+.select-trigger:not(:disabled):is(:hover, [aria-expanded="true"]) { border-color: var(--control-border); background: var(--hover); }
 .select-trigger[aria-expanded="true"] { border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
 .select-trigger:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
 .select-trigger > .ui-icon { width: 20px; height: 20px; color: var(--muted); transition: transform 160ms var(--ease-ui); }
@@ -2595,7 +2638,9 @@ body[data-animations="false"] .app-settings { animation: none; }
 .expand-toolbar { right: 10px; width: 32px !important; height: 32px !important; border-radius: 16px !important; }
 .expand-toolbar :is(svg, .ui-icon) { width: 18px; height: 18px; }
 .corner-library { left: 10px; padding: 0 13px 0 10px; gap: 6px; }
-.reader-view[data-toolbar="false"]:is([data-corner="end"], [data-corner="both"]) .expand-toolbar,
+/* Reading settings sits just left of the expand button: 10px edge + 32px button + 6px gap. */
+.corner-settings { right: 48px; padding: 0 13px 0 10px; gap: 6px; }
+.reader-view[data-toolbar="false"]:is([data-corner="end"], [data-corner="both"]) :is(.expand-toolbar, .corner-settings),
 .reader-view[data-toolbar="false"]:is([data-corner="start"], [data-corner="both"]) .corner-library,
 .reader-view[data-toolbar="false"] .corner-button:focus-visible {
   opacity: 1;
@@ -2616,8 +2661,6 @@ body[data-animations="false"] :is(.reader-toolbar, .corner-button) { transition:
 .reader-view[data-full-width="true"] .reading-area { padding: 0; }
 .reader-view[data-full-width="true"] .page-surface { max-width: none; }
 .reader-view .page-surface, .reader-view #book-frame, .reader-view .reader-loading { background: var(--reading-paper, var(--paper)); }
-.reading-presets { display: flex; flex-wrap: wrap; gap: 8px; }
-.reading-presets button { border: 1px solid var(--border); border-radius: 16px; padding: 5px 14px; background: var(--bg); font-size: var(--text-secondary); }
 
 /* Snapshot frames keep real EPUB layout and allow both sheets to move concurrently. */
 .page-motion { position: absolute; inset: 0; z-index: 8; overflow: hidden; pointer-events: none; isolation: isolate; perspective: 1600px; }
@@ -2727,7 +2770,8 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
 #shelf-cover-preview .cover-fallback { font-size: 12px; padding: 8px; }
 #shelf-cover-preview :is(.cover-image, .cover-fallback) { max-height: 110px; }
 .shelf-cover-controls { display: grid; gap: 10px; min-width: 0; flex: 1; }
-.shelf-cover-controls select { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); }
+.shelf-cover-controls select { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--surface); transition: border-color 120ms var(--ease-ui), background-color 120ms var(--ease-ui); }
+.shelf-cover-controls select:hover { border-color: var(--control-border); background: var(--hover); }
 .shelf-cover-controls .text-button { justify-self: start; }
 .shelf-books label > span { min-width: 0; }
 .list-mode .book-add { display: grid; grid-template-columns: 65px minmax(0, 1fr) 130px 100px; align-items: center; gap: 24px; max-width: none; padding: 15px 0; border-bottom: 1px solid var(--border); }

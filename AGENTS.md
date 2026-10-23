@@ -8,3 +8,23 @@
 - 用触发问题的原书在独立测试书库中复现并验证，同时补充相关回归测试。原始 EPUB 保持只读；处理已导入内容时保留阅读进度、分类和笔记，不通过删除图书来规避缓存或迁移问题。
 
 实体处理可参考 `src/calibre/ebooks/oeb/parse_utils.py` 的 `parse_html`、`src/calibre/__init__.py` 的 `xml_replace_entities`：在 XML 解析前把 HTML 命名实体转换成 XML 可处理的形式，避免序列化后变成字面文本，并避免重复解码已转义的正文。
+
+## UI Design
+
+All user interfaces MUST follow the
+design guidelines in @docs/DESIGN.md.
+
+Design philosophy:
+- Notion-inspired minimalism
+- Content-first layout
+- Neutral color palette
+- Precise typography and spacing
+- Subtle interactive feedback
+- Consistent component system
+
+Avoid:
+- Generic AI-generated dashboard aesthetics
+- Excessive cards and borders
+- Gradients and glassmorphism
+- Oversized border-radius
+- Decorative shadows and animations

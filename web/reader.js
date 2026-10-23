@@ -40,6 +40,7 @@ export class Reader {
     this.attachTocHover();
     this.attachTocAutoHide();
     this.attachFooterAutoHide();
+    this.trackActivation(window);
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
       if (event.target.closest(".reading-area")) this.beginPageTap(event);
@@ -89,6 +90,7 @@ export class Reader {
       this.reflow();
     };
     $("corner-library").onclick = () => $("back-library").click();
+    $("corner-settings").onclick = () => $("reader-settings").click();
     $("reader-view").addEventListener("pointermove", event => this.trackCorners(event.clientX, event.clientY));
     $("reader-view").addEventListener("pointerleave", () => this.trackCorners(-1, -1));
     $("page-surface").addEventListener("click", event => { if (event.target.id === "page-surface") this.pageTap(event, $("page-surface").clientWidth, $("page-surface").getBoundingClientRect().left); });
@@ -151,6 +153,7 @@ export class Reader {
         this.syncDialogColors();
       });
     };
+    $("annotation-style").onchange = () => this.syncDialogColors();
     $("annotation-form").addEventListener("submit", (event) => {
       if (event.submitter?.id !== "annotation-save") return;
       event.preventDefault();
@@ -691,6 +694,7 @@ export class Reader {
         toast("无法打开这个链接");
       }
     });
+    this.trackActivation(doc.defaultView);
     doc.addEventListener("pointerdown", event => { this.beginPageTap(event); this.hideSelection(); this.hideNotePeek(); });
     doc.addEventListener("pointermove", event => {
       const rect = $("book-frame").getBoundingClientRect();
@@ -833,7 +837,11 @@ export class Reader {
     const margin = paged
       ? `padding:0!important;${columns}margin:${edges.top}px ${edges.right}px ${edges.bottom}px ${edges.left}px!important;width:calc(var(--dr-page-width,100vw) - ${horizontal}px)!important;height:calc(100vh - ${vertical}px)!important;column-gap:${horizontal}px!important;column-fill:auto!important;overflow:visible!important;`
       : `margin:0!important;padding:${edges.top}px ${edges.right}px ${edges.bottom}px ${edges.left}px!important;height:auto!important;width:auto!important;column-count:auto!important;column-width:auto!important;column-gap:normal!important;overflow:visible!important;`;
-    this.style.textContent = `html{background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? `calc(100vh - ${vertical}px)` : "100vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:1px}`;
+    // The chosen size is also the root size, as calibre's viewer applies its base font size to the
+    // document element (src/pyj/read_book/settings.pyj, apply_font_size): books that size text in
+    // rem, such as Kindle conversions, then scale with it instead of staying at the 16px default
+    // while only the inherited line height grows.
+    this.style.textContent = `html{font-size:${reading.fontSize}px!important;background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? `calc(100vh - ${vertical}px)` : "100vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:1px}`;
     if (this.atEnd()) this.style.textContent += `html{height:100%!important;overflow:hidden!important}body{display:flex!important;align-items:center!important;justify-content:center!important;margin:0!important;padding:0!important;width:100vw!important;height:100vh!important;columns:auto!important;user-select:none!important}#dr-end{font-family:"Microsoft YaHei","微软雅黑",sans-serif!important;font-size:clamp(64px,12vmin,120px)!important;font-weight:400!important;line-height:1!important;letter-spacing:0!important}`;
     this.reflow();
   }
@@ -915,13 +923,22 @@ export class Reader {
   }
 
   /**
-   * With the toolbar collapsed, the top-left corner reveals 书库 and the top-right corner the
-   * expand button; both fade out shortly after the pointer leaves. x and y are window pixels.
+   * With the toolbar collapsed, the top-left corner reveals 书库 and the top-right corner 阅读设置
+   * and the expand button; they fade out shortly after the pointer leaves. x and y are window pixels.
+   * The top-right trigger is a 6px strip under the title bar, as wide as the 阅读设置 and expand
+   * buttons, so reaching for the page does not flash them; once shown, they stay while the
+   * pointer is over them.
    */
   trackCorners(x, y) {
     if (this.settings?.showToolbar !== false || !this.book) return;
-    const top = y >= 0 && y < 72;
-    const corner = top && x < 180 ? "start" : top && x > innerWidth - 120 ? "end" : "";
+    const shown = $("reader-view").dataset.corner;
+    const overEnd = ["end", "both"].includes(shown) && ["corner-settings", "expand-toolbar"].some(id => {
+      const r = $(id).getBoundingClientRect();
+      return x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6;
+    });
+    // Hidden buttons keep their layout box, so the strip follows the label's real width.
+    const endStrip = y >= 0 && y < 6 && x >= $("corner-settings").getBoundingClientRect().left;
+    const corner = y >= 0 && y < 72 && x < 180 ? "start" : endStrip || overEnd ? "end" : "";
     if (corner) {
       clearTimeout(this.peekTimer);
       this.showCorners(corner);
@@ -936,8 +953,42 @@ export class Reader {
     $("reader-view").dataset.corner = corner;
   }
 
+  /**
+   * Remembers when the app loses and regains focus. Window.cpp eats the activating click through
+   * WM_MOUSEACTIVATE, but WebView2's own child window may answer that message without asking us,
+   * so the page also ignores the press that brought the app back to the foreground.
+   * Both the shell and each chapter frame report blur/focus; focus moving between them keeps
+   * document.hasFocus() true and is not a deactivation.
+   */
+  trackActivation(target) {
+    if (!target || target.drActivationTracked) return;
+    target.drActivationTracked = true;
+    target.addEventListener("blur", () => setTimeout(() => {
+      if (!document.hasFocus()) this.inactive = true;
+    }, 0));
+    target.addEventListener("focus", () => {
+      if (!this.inactive) return;
+      this.inactive = false;
+      this.activatedAt = performance.now();
+    });
+  }
+
+  /** True for the first press after the app comes back to the foreground; it is consumed. */
+  takeActivationPress() {
+    const activating = this.inactive || performance.now() - (this.activatedAt ?? -Infinity) < 400;
+    this.inactive = false;
+    this.activatedAt = -Infinity;
+    return activating;
+  }
+
   beginPageTap(event) {
     clearTimeout(this.tapTimer);
+    if (event.button === 0 && this.takeActivationPress()) {
+      // Activation only: no page turn, link, note or selection menu from this press.
+      this.tapDismissed = true;
+      this.tapStart = null;
+      return;
+    }
     const tip = event.target.closest?.(".dr-note-tip");
     const editsNote = Boolean(tip && this.annotationLayer?.ranges.has(tip.dataset.id));
     const dismissed = event.button === 0 && event.isPrimary !== false && this.dismissPagePopups();
@@ -1697,11 +1748,12 @@ export class Reader {
         (annotation) => annotation.id === this.selection.annotationId,
       ) || null;
     this.dialogColor = normalizeColor(this.editingAnnotation?.color || this.palette()[0]);
-    $("annotation-quote").textContent =
-      this.editingAnnotation?.quote || this.selection.text;
+    const quote = document.createElement("span");
+    quote.textContent = this.editingAnnotation?.quote || this.selection.text;
+    $("annotation-quote").replaceChildren(quote);
     $("annotation-note").value = this.editingAnnotation?.note || "";
-    $("annotation-style").value =
-      this.editingAnnotation?.style || "highlight";
+    const style = this.editingAnnotation?.style || "highlight";
+    for (const radio of document.getElementsByName("annotation-style")) radio.checked = radio.value === style;
     $("annotation-delete").hidden = !this.editingAnnotation;
     $("annotation-title").textContent = this.editingAnnotation
       ? "编辑标注"
@@ -1714,11 +1766,29 @@ export class Reader {
     setTimeout(() => $("annotation-note").focus(), 0);
   }
 
+  dialogStyle() {
+    return document.querySelector("[name=annotation-style]:checked")?.value || "highlight";
+  }
+
+  /** Marks the chosen swatch and paints the quoted passage the way it will appear in the book. */
   syncDialogColors() {
     const current = this.dialogColor && normalizeColor(this.dialogColor);
-    $("annotation-swatches")
-      ?.querySelectorAll("[data-color]")
+    const swatches = $("annotation-swatches");
+    if (!swatches) return;
+    swatches.querySelectorAll("[data-color]")
       .forEach((button) => button.classList.toggle("selected", button.dataset.color === current));
+    const style = this.dialogStyle();
+    const quote = $("annotation-quote");
+    quote.dataset.style = style;
+    const dark = document.body.dataset.theme === "dark";
+    if (current) {
+      // Same colours as the selection menu: highlights use the fill, underlines the ink.
+      const colors = paint(current, dark ? "#191919" : "#ffffff", dark);
+      quote.style.setProperty("--mark", style === "underline" ? colors.ink : colors.fill);
+    }
+    // A note without a mark has no colour to choose.
+    swatches.closest(".annotation-color-row").toggleAttribute("data-disabled", style === "note");
+    swatches.querySelectorAll("button").forEach((button) => (button.disabled = style === "note"));
   }
 
   async saveFromDialog() {
@@ -1742,7 +1812,7 @@ export class Reader {
         ...anchor,
         note: $("annotation-note").value.trim(),
         color: this.dialogColor,
-        style: $("annotation-style").value,
+        style: this.dialogStyle(),
       });
       this.doc.getSelection()?.removeAllRanges();
       this.selection = null;

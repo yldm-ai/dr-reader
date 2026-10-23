@@ -92,6 +92,33 @@ try {
     results.push(`${width}px: PASS (${pages} pages)`);
     frame.remove();
   }
+  // Kindle-converted books size text in rem on spans inside each paragraph, with an em line
+  // height on the paragraph. The reading size must scale that text, not just its line spacing.
+  {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'display:block;border:0;width:760px;height:480px';
+    const ready = new Promise(resolve => frame.onload = resolve);
+    frame.srcdoc = `<style>p.body{font-size:1rem;line-height:1.66em}span.copy{font-size:1rem}span.small{font-size:.75rem}</style>
+      <div class="text"><p class="body"><span class="copy">这是原创的根字号测试文字。</span><span class="small">小字</span></p></div>`;
+    document.body.append(frame);
+    await ready;
+    const doc = frame.contentDocument;
+    const reader = Object.create(Reader.prototype);
+    Object.assign(reader, {
+      doc, style: doc.head.appendChild(doc.createElement('style')),
+      motion: { setAllowed() {}, prepare() {} }, hideSelection() {}, reflow() {},
+    });
+    for (const publisherStyles of [false, true]) {
+      for (const fontSize of [18, 30]) {
+        reader.apply({ ...settings, reading: { ...settings.reading, fontSize, publisherStyles } });
+        const size = selector => parseFloat(getComputedStyle(doc.querySelector(selector)).fontSize);
+        check(size('span.copy') === fontSize && size('span.small') === fontSize * .75,
+          `rem text must follow the reading size ${fontSize}px (publisher styles ${publisherStyles}): ${size('span.copy')}px / ${size('span.small')}px`);
+      }
+    }
+    results.push('rem-sized publisher text: PASS');
+    frame.remove();
+  }
   document.getElementById('result').textContent = 'PASS\n' + results.join('\n');
   document.documentElement.dataset.result = 'pass';
 } catch (error) {

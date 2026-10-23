@@ -317,7 +317,7 @@ try {
         }
         await app.locator('#reader-settings').click();
         await page.emulateMedia({ colorScheme: 'dark' });
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('type-preview')).backgroundColor === 'rgb(25, 25, 25)');
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
         await app.locator('[data-setting-theme="reading"][data-value="sepia"]').click();
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'sepia');
         await page.emulateMedia({ colorScheme: 'light' });
@@ -404,8 +404,6 @@ try {
         await app.locator('#reader-settings').click();
         await app.locator('[data-setting-theme="reading"][data-value="dark"]').click();
         await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
-        const preview = await app.locator('#type-preview').evaluate(el => getComputedStyle(el).backgroundColor);
-        if (preview !== 'rgb(25, 25, 25)') throw Error('reading preview must use the same dark paper as the EPUB');
         await app.locator('#setting-fontWeight-trigger').click();
         await capture('reading-settings-dark.png');
         await app.locator('#setting-fontWeight-trigger').press('Escape');
@@ -599,7 +597,7 @@ try {
         if (paper !== 'rgb(25, 25, 25)') throw Error('application theme must not override the independent reading theme');
         await app.locator('#reader-settings').click();
         await app.locator('[data-setting-theme="reading"][data-value="light"]').click();
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('type-preview')).backgroundColor === 'rgb(255, 255, 255)');
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(255, 255, 255)');
         await app.locator('[data-close="reading-settings"]').click();
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
@@ -667,7 +665,7 @@ try {
         const shell = await page.locator('iframe').boundingBox();
         await page.mouse.move(shell.x + shell.width / 2, shell.y + shell.height / 2);
         await app.locator('#expand-toolbar').waitFor({ state: 'hidden' });
-        await page.mouse.move(shell.x + shell.width - 30, shell.y + 20);
+        await page.mouse.move(shell.x + shell.width - 8, shell.y + 3);
         await app.locator('#expand-toolbar').waitFor({ state: 'visible' });
         await app.locator('#expand-toolbar').click();
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.showToolbar === true);
@@ -694,8 +692,15 @@ try {
         await appFrame.evaluate(el => el.style.width = '1200px');
         await app.waitForFunction(() => innerWidth === 1200);
         await app.locator('#reader-settings').click();
-        await app.locator('#immersive-reading').click();
+        if (await app.locator('#setting-immersive').inputValue() !== 'keep') throw Error('immersive reading must open on "keep as is"');
+        // Older text-only presets switched the sidebar off; the new one must bring it back unpinned.
+        await app.locator('#setting-showToc').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.showToc === false);
+        await app.locator('#setting-immersive-trigger').click();
+        await app.getByRole('option', { name: '只看正文' }).click();
         await app.waitForFunction(() => document.getElementById('reader-view').dataset.toolbar === 'false');
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.showToc === true &&
+          window.nativeProbe.data.settings.reading.tocPinned === false && !document.getElementById('toc-reveal-zone').hidden);
         for (const [key, value] of [['paddingTop', '20'], ['paddingBottom', '80'], ['paddingLeft', '10'], ['paddingRight', '90']])
           await app.locator(`#number-${key}`).fill(value);
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.paddingRight === 90);
@@ -719,7 +724,8 @@ try {
         const beforeTap = await pageNumber();
         await book.locator('html').click({ position: { x: size.width - 5, y: size.height * .5 } });
         await app.waitForFunction(previous => parseInt(document.getElementById('page-indicator').textContent) === previous + 1, beforeTap);
-        await book.locator('html').click({ position: { x: 5, y: size.height * .5 } });
+        // Text-only reading keeps the sidebar's 8px reveal strip, so the left tap lands just past it.
+        await book.locator('html').click({ position: { x: 24, y: size.height * .5 } });
         await app.waitForFunction(previous => parseInt(document.getElementById('page-indicator').textContent) === previous, beforeTap);
         await book.evaluate(() => {
           const text = document.querySelector('p').firstChild;
@@ -822,6 +828,23 @@ try {
         if (await app.evaluate(() => window.nativeProbe.data.fullscreen)) throw Error('Alt+Enter must not enter fullscreen');
         await book.locator('html').press('Alt+Enter');
         await app.waitForFunction(() => document.body.dataset.titlebar === 'shown');
+        // "窗口内全屏" hides the title bar like Alt+Enter; "显示阅读界面" brings it back. The preset
+        // is not remembered, so the dropdown reopens on "保持现状".
+        await page.keyboard.press('F8');
+        await app.locator('#reading-settings').waitFor({ state: 'visible' });
+        if (await app.locator('#setting-immersive').inputValue() !== 'keep') throw Error('immersive preset must reset when the drawer reopens');
+        await app.locator('#setting-immersive-trigger').click();
+        await app.getByRole('option', { name: '窗口内全屏' }).click();
+        await app.waitForFunction(() => document.body.dataset.titlebar === 'hidden');
+        if (await app.evaluate(() => window.nativeProbe.data.fullscreen)) throw Error('window fullscreen must not enter system fullscreen');
+        await app.locator('#setting-immersive-trigger').click();
+        await app.getByRole('option', { name: '显示阅读界面' }).click();
+        await app.waitForFunction(() => document.body.dataset.titlebar === 'shown' && document.getElementById('reader-view').dataset.toolbar === 'true');
+        // Back to text-only reading for the collapsed-toolbar checks below.
+        await app.locator('#setting-immersive-trigger').click();
+        await app.getByRole('option', { name: '只看正文' }).click();
+        await app.waitForFunction(() => document.getElementById('reader-view').dataset.toolbar === 'false');
+        await app.locator('[data-close="reading-settings"]').click();
         await page.keyboard.press('F11');
         await app.waitForFunction(() => document.body.dataset.fullscreen === 'true');
         await page.keyboard.press('Escape');
@@ -834,9 +857,29 @@ try {
         await at(size.width * .5, size.height * .5);
         await page.waitForTimeout(700);
         if (await corner() !== 'hidden,hidden') throw Error('collapsed toolbar must not leave buttons on screen');
-        await at(size.width - 30, 20);
+        // Only a 6px strip under the title bar, as wide as the right-hand buttons, reveals them.
+        const stripLeft = await app.evaluate(() => document.getElementById('corner-settings').getBoundingClientRect().left);
+        for (const [x, y] of [[size.width - 8, 8], [stripLeft - 12, 3]]) {
+          await at(x, y);
+          await page.waitForTimeout(300);
+          if (await corner() !== 'hidden,hidden') throw Error(`the top-right trigger must be the 6px strip over the buttons, not ${x},${y}`);
+        }
+        await at(stripLeft + 4, 3);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('expand-toolbar')).visibility === 'visible');
+        await at(size.width * .5, size.height * .5);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('expand-toolbar')).visibility === 'hidden');
+        await at(size.width - 8, 3);
         await app.waitForFunction(() => getComputedStyle(document.getElementById('expand-toolbar')).visibility === 'visible');
         if (await corner() !== 'hidden,visible') throw Error('top-right corner must reveal only the expand button');
+        // The top-right corner also offers reading settings beside the expand button.
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('corner-settings')).visibility === 'visible');
+        const cornerRects = await app.evaluate(() => ['corner-settings', 'expand-toolbar'].map(id => document.getElementById(id).getBoundingClientRect().toJSON()));
+        if (cornerRects[0].right > cornerRects[1].left || cornerRects[0].top !== cornerRects[1].top)
+          throw Error(`reading settings must sit beside the expand button: ${JSON.stringify(cornerRects)}`);
+        await app.locator('#corner-settings').click();
+        await app.locator('#reading-settings').waitFor({ state: 'visible' });
+        await app.locator('[data-close="reading-settings"]').click();
+        await at(size.width - 8, 3);
         await at(40, 20);
         await app.waitForFunction(() => getComputedStyle(document.getElementById('corner-library')).visibility === 'visible');
         await at(size.width * .5, size.height * .5);

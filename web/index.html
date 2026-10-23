@@ -180,6 +180,7 @@
           </div>
         </header>
         <!-- Revealed by hovering the top-right corner while collapsed, where the collapse button was. -->
+        <button id="corner-settings" class="text-button corner-button corner-settings" type="button" title="阅读设置 (F8)"><span data-icon="cookie"></span>阅读设置</button>
         <button id="expand-toolbar" class="icon-button corner-button expand-toolbar" type="button" title="展开工具栏" aria-label="展开工具栏" aria-controls="reader-toolbar" aria-expanded="false"><span data-icon="expand"></span></button>
         <div class="reader-workspace">
           <div id="toc-reveal-zone" class="toc-reveal-zone" aria-hidden="true"></div>
@@ -294,16 +295,20 @@
           <h2 id="annotation-title">记笔记</h2>
           <button value="cancel" class="icon-button" aria-label="关闭笔记"><span data-icon="close"></span></button>
         </div>
-        <blockquote id="annotation-quote"></blockquote>
-        <label class="annotation-note-label">笔记<textarea id="annotation-note" rows="4" maxlength="32768" placeholder="写下此刻的想法…"></textarea></label>
+        <!-- The quote previews the chosen mark: highlighted, underlined or plain. -->
+        <blockquote id="annotation-quote" data-style="highlight"></blockquote>
+        <textarea id="annotation-note" rows="4" maxlength="32768" placeholder="写下此刻的想法…" aria-label="笔记"></textarea>
         <div class="annotation-style-row">
+          <span id="annotation-style-label">样式</span>
+          <div id="annotation-style" class="segmented" role="radiogroup" aria-labelledby="annotation-style-label">
+            <label><input type="radio" name="annotation-style" value="highlight" checked><span>高亮</span></label
+            ><label><input type="radio" name="annotation-style" value="underline"><span>下划线</span></label
+            ><label><input type="radio" name="annotation-style" value="note"><span>仅笔记</span></label>
+          </div>
+        </div>
+        <div class="annotation-style-row annotation-color-row">
           <span>颜色</span>
           <div id="annotation-swatches" class="annotation-colors swatch-row"></div>
-          <select id="annotation-style" aria-label="标注样式">
-            <option value="highlight">高亮</option>
-            <option value="underline">下划线</option>
-            <option value="note">仅笔记</option>
-          </select>
         </div>
         <div class="annotation-actions">
           <button id="annotation-delete" type="button" class="danger-button" hidden>删除标注</button>

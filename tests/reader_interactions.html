@@ -94,6 +94,47 @@ try {
   await saveProbe.saveSelection('yellow', 'highlight');
   check(savedStyle === 'highlight' && !toast.hidden, 'highlight feedback must remain available');
 
+  // The note dialog picks its mark from a visible segmented control and previews it on the quote.
+  const editing = { ...annotation, id: 'dialog-style', style: 'underline', note: '旧笔记' };
+  saveProbe.annotations = [editing];
+  saveProbe.selection = { annotationId: editing.id, text: editing.quote };
+  saveProbe.renderHighlightPalette();
+  saveProbe.openAnnotationDialog();
+  const quote = document.getElementById('annotation-quote');
+  check(document.querySelector('[name=annotation-style][value=underline]').checked && quote.dataset.style === 'underline' &&
+    quote.textContent === editing.quote, 'the dialog must reflect the edited mark');
+  const noteOnly = document.querySelector('[name=annotation-style][value=note]');
+  noteOnly.click();
+  // The constructor normally wires this change handler; the probe skips the constructor.
+  saveProbe.syncDialogColors();
+  check(quote.dataset.style === 'note' && document.querySelector('#annotation-swatches button').disabled,
+    'a note without a mark disables the colours');
+  let savedNote;
+  saveProbe.saveAnnotation = async value => { savedNote = value; };
+  await saveProbe.saveFromDialog();
+  check(savedNote.style === 'note' && savedNote.note === '旧笔记' && !document.getElementById('annotation-dialog').open,
+    'the chosen segmented style must be saved');
+
+  // A click that brings the app back to the foreground only activates it; the next one taps.
+  const press = () => ({ button: 0, isPrimary: true, target: document.body, clientX: 300, clientY: 200, preventDefault() {} });
+  const realHasFocus = document.hasFocus;
+  reader.trackActivation(window);
+  document.hasFocus = () => true;
+  window.dispatchEvent(new Event('blur'));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  reader.beginPageTap(press());
+  check(reader.tapStart && !reader.tapDismissed, 'focus moving into a chapter frame is not a deactivation');
+  document.hasFocus = () => false;
+  window.dispatchEvent(new Event('blur'));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  document.hasFocus = realHasFocus;
+  window.dispatchEvent(new Event('focus'));
+  reader.beginPageTap(press());
+  check(!reader.tapStart && reader.tapDismissed, 'the activating press must not start a page tap');
+  check(reader.consumeDismissedTap(new MouseEvent('click')), 'the activating click must be consumed');
+  reader.beginPageTap(press());
+  check(reader.tapStart && !reader.tapDismissed, 'the press after activation must tap normally');
+
   const dictionaries = [{ id: 'one', name: '测试词典一' }, { id: 'two', name: '测试词典二' }];
   let pending = reader.chooseDictionary(dictionaries);
   let dialog = document.querySelector('.dictionary-picker');

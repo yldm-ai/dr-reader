@@ -100,27 +100,30 @@ std::vector<fs::path> Application::pick_books()
     dialog->SetFileTypes(1, filters);
     dialog->SetTitle(L"添加 EPUB 到书库");
     DWORD options = 0;
-    dialog->GetOptions(&options);
-    dialog->SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+    if (FAILED(dialog->GetOptions(&options)) ||
+        FAILED(dialog->SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM)))
+        throw std::runtime_error("无法启用图书多选");
     auto hr = dialog->Show(window_.handle());
     if (hr == HRESULT_FROM_WIN32(ERROR_CANCELLED))
         return files;
     if (FAILED(hr))
         throw std::runtime_error("文件选择失败");
     Microsoft::WRL::ComPtr<IShellItemArray> items;
-    dialog->GetResults(&items);
     DWORD count = 0;
-    items->GetCount(&count);
+    if (FAILED(dialog->GetResults(&items)) || FAILED(items->GetCount(&count)))
+        throw std::runtime_error("无法取得选中的图书列表");
+    files.reserve(count);
     for (DWORD i = 0; i < count; ++i)
     {
         Microsoft::WRL::ComPtr<IShellItem> item;
-        items->GetItemAt(i, &item);
+        if (FAILED(items->GetItemAt(i, &item)))
+            throw std::runtime_error("无法取得选中的图书");
         LPWSTR path = nullptr;
-        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
-        {
-            files.emplace_back(path);
-            CoTaskMemFree(path);
-        }
+        if (FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &path)))
+            throw std::runtime_error("无法取得选中图书的文件路径");
+        fs::path selected(path);
+        CoTaskMemFree(path);
+        files.push_back(std::move(selected));
     }
     return files;
 }
@@ -246,6 +249,8 @@ void Application::receive(const Json &request)
                 }
                 else if (method == "import")
                 {
+                    // Reference: calibre gui2/actions/add.py AddAction.add_books/_add_books.
+                    // Independently use our Win32 selection and serial worker to import the full batch.
                     Json errors = Json::array();
                     for (auto &path : files)
                     {

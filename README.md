@@ -4,7 +4,7 @@ Windows 本地 EPUB 阅读器。C++20 + Win32 / Direct2D / DirectWrite + WebView
 
 ## 运行
 
-已经构建的程序：`build/bin/Release/dr-reader.exe`。保持同目录下的 `web/` 和 `resources/` 一起使用。首次启动会添加原创示例书《给阅读留一盏灯》；通过“添加图书”导入自己的无 DRM EPUB，支持多选。
+已经构建的程序：`build/bin/Release/dr-reader.exe`。保持同目录下的 `web/` 和 `resources/` 一起使用。首次启动会添加原创示例书《给阅读留一盏灯》；通过“添加电子书”导入自己的无 DRM EPUB。在文件选择窗口中按住 Ctrl 或 Shift 多选，确认后会自动逐本导入；单本失败不影响其余图书，完成后统一显示失败原因。
 
 ```powershell
 ./build/bin/Release/dr-reader.exe

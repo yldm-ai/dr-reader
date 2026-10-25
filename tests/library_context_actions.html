@@ -36,7 +36,7 @@ try {
   context();
   await new Promise(resolve => setTimeout(resolve, 450));
   check(!titleFlashes && menu.matches(':popover-open'), 'right click focus must never flash the title tooltip');
-  check(menu.querySelectorAll(':scope > button').length === 6, 'all six actions are present');
+  check(menu.querySelectorAll(':scope > button').length === 7, 'all seven actions are present');
   const infoDialog = doc.getElementById('book-info-dialog');
   click('book-menu-info');
   check(!menu.matches(':popover-open') && infoDialog.open, 'view info closes the menu and opens the details dialog');
@@ -85,6 +85,22 @@ try {
   context(); click('book-menu-export');
   await until(() => doc.getElementById('toast').textContent.includes('磁盘不可写'));
   win.nativeProbe.data.exportError = '';
+  context(); click('book-menu-import');
+  await until(() => doc.getElementById('toast').textContent.includes('已导入 2 条笔记或标注'));
+  check(!menu.matches(':popover-open') && doc.getElementById('busy').hidden, 'import dismisses menus and clears busy state');
+  check(win.nativeProbe.requests.find(request => request.method === 'notes.import').params.id === 'fixture', 'import targets the selected book');
+  check(doc.getElementById('toast').textContent.includes('跳过 1 条已有笔记（保留本地版本）'), 'duplicate handling is explained');
+  win.nativeProbe.data.notesImportResult = { cancelled: true };
+  const beforeImportCancel = doc.getElementById('toast').textContent;
+  const beforeImportRequests = win.nativeProbe.requests.length;
+  context(); click('book-menu-import');
+  await until(() => win.nativeProbe.requests.length > beforeImportRequests && doc.getElementById('busy').hidden);
+  check(doc.getElementById('toast').textContent === beforeImportCancel, 'cancelling import is silent');
+  win.nativeProbe.data.notesImportError = '笔记不属于这本图书';
+  context(); click('book-menu-import');
+  await until(() => doc.getElementById('toast').textContent.includes('笔记不属于这本图书'));
+  check(doc.getElementById('busy').hidden, 'failed import clears busy state');
+  win.nativeProbe.data.notesImportError = '';
   // Hiding moves the book to the private shelf, which is created if the store predates it.
   context();
   check(doc.getElementById('book-menu-hide').textContent.includes('隐藏图书'), 'visible books offer hiding');

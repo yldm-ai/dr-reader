@@ -61,16 +61,38 @@ AnnotationStore::AnnotationStore(const fs::path& path){fs::create_directories(pa
  }catch(...){sqlite3_close(db_);db_=nullptr;throw;}}
 AnnotationStore::~AnnotationStore(){if(db_)sqlite3_close(db_);}
 Json AnnotationStore::list(const std::string& book)const{std::string sql=std::string("SELECT ")+columns+" FROM annotations WHERE book_id=? ORDER BY chapter,start_offset,created_at";Statement s(db_,sql.c_str());s.text(1,book);Json result=Json::array();while(s.row())result.push_back(read_annotation(s));return result;}
-Json AnnotationStore::save(const std::string& book,const Json& a){auto start=a.at("start").get<int64_t>(),end=a.at("end").get<int64_t>();auto quote=a.at("quote").get<std::string>(),note=a.value("note",std::string()),color=a.value("color",std::string("yellow")),style=a.value("style",std::string("highlight"));
+Json AnnotationStore::save(const std::string& book,const Json& a){return save_record(book,a,false);}
+Json AnnotationStore::save_record(const std::string& book,const Json& a,bool importing){auto start=a.at("start").get<int64_t>(),end=a.at("end").get<int64_t>();auto quote=a.at("quote").get<std::string>(),note=a.value("note",std::string()),color=a.value("color",std::string("yellow")),style=a.value("style",std::string("highlight"));
  const auto quote_length=utf16_length(quote);
  if(start<0||end<=start||end>2147483647||end-start>16000||quote.empty()||quote_length>32768||utf16_length(note)>32768)throw std::runtime_error("选中文字或笔记超出可保存范围");
  if(quote_length!=static_cast<size_t>(end-start))throw std::runtime_error("标注文本偏移不一致");
  if(!valid_color(color))throw std::runtime_error("无效高亮颜色");if(style!="highlight"&&style!="underline"&&style!="note")throw std::runtime_error("无效标注样式");
  auto prefix=a.value("prefix",std::string()),suffix=a.value("suffix",std::string());if(prefix.size()>512||suffix.size()>512)throw std::runtime_error("标注上下文过长");auto id=a.value("id",std::string());
- if(id.empty()){Statement random(db_,"SELECT lower(hex(randomblob(16)))");random.row();id=random.string(0);}else{Statement exists(db_,"SELECT 1 FROM annotations WHERE book_id=? AND id=?");exists.text(1,book);exists.text(2,id);if(!exists.row())throw std::runtime_error("这条笔记不存在或不属于当前书籍");}
+ if(importing){
+  if(id.empty()||id.size()>128)throw std::runtime_error("无效笔记 ID");
+  for(auto key:{"createdAt","updatedAt"})if(!a.at(key).is_number_integer()||a.at(key)<0||a.at(key)>253402300799LL)throw std::runtime_error("无效笔记时间");
+  if(a.at("updatedAt")<a.at("createdAt"))throw std::runtime_error("笔记修改时间早于创建时间");
+  Statement exists(db_,("SELECT "+std::string(columns)+" FROM annotations WHERE id=?").c_str());exists.text(1,id);
+  if(exists.row()){
+   auto local=read_annotation(exists);
+   if(local.at("bookId")!=book)throw std::runtime_error("笔记 ID 已被其他图书使用");
+   return local; // Import adds missing records; it never overwrites local edits.
+  }
+ }else if(id.empty()){Statement random(db_,"SELECT lower(hex(randomblob(16)))");random.row();id=random.string(0);}else{Statement exists(db_,"SELECT 1 FROM annotations WHERE book_id=? AND id=?");exists.text(1,book);exists.text(2,id);if(!exists.row())throw std::runtime_error("这条笔记不存在或不属于当前书籍");}
  Statement s(db_,R"(INSERT INTO annotations(id,book_id,chapter,href,start_offset,end_offset,quote,prefix,suffix,note,color,style) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET chapter=excluded.chapter,href=excluded.href,start_offset=excluded.start_offset,end_offset=excluded.end_offset,quote=excluded.quote,prefix=excluded.prefix,suffix=excluded.suffix,note=excluded.note,color=excluded.color,style=excluded.style,updated_at=unixepoch() WHERE annotations.book_id=excluded.book_id)");
  s.text(1,id);s.text(2,book);s.integer(3,a.at("chapter"));s.text(4,a.at("href"));s.integer(5,start);s.integer(6,end);s.text(7,quote);s.text(8,prefix);s.text(9,suffix);s.text(10,note);s.text(11,color);s.text(12,style);s.row();
+ if(importing){Statement times(db_,"UPDATE annotations SET created_at=?,updated_at=? WHERE id=? AND book_id=?");times.integer(1,a.at("createdAt"));times.integer(2,a.at("updatedAt"));times.text(3,id);times.text(4,book);times.row();}
  std::string sql=std::string("SELECT ")+columns+" FROM annotations WHERE id=? AND book_id=?";Statement saved(db_,sql.c_str());saved.text(1,id);saved.text(2,book);if(!saved.row())throw std::runtime_error("未能保存笔记");return read_annotation(saved);}
+Json AnnotationStore::import_annotations(const std::string& book,const Json& annotations){
+ execute(db_,"BEGIN IMMEDIATE");
+ try{
+  const auto before=list(book).size();
+  for(const auto& annotation:annotations)save_record(book,annotation,true);
+  const auto added=list(book).size()-before;
+  execute(db_,"COMMIT");
+  return {{"imported",added},{"skipped",annotations.size()-added}};
+ }catch(...){sqlite3_exec(db_,"ROLLBACK",nullptr,nullptr,nullptr);throw;}
+}
 void AnnotationStore::remove(const std::string& book,const std::string& id){Statement s(db_,"DELETE FROM annotations WHERE book_id=? AND id=?");s.text(1,book);s.text(2,id);s.row();if(sqlite3_changes(db_)!=1)throw std::runtime_error("标注不存在或已被删除");}
 void AnnotationStore::remove_book(const std::string& book){
  execute(db_,"BEGIN IMMEDIATE");

@@ -28,3 +28,7 @@ Avoid:
 - Gradients and glassmorphism
 - Oversized border-radius
 - Decorative shadows and animations
+
+## 功能实现的规则
+
+遇到不熟悉的功能，不要立即从零实现。先检索 GitHub 上维护活跃、许可证明确的同类开源项目，比较实现思路、依赖和已知问题。优先借鉴经过验证的设计，不要直接复制不兼容或来源不明的代码。

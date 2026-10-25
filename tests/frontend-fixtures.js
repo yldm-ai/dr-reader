@@ -33,6 +33,13 @@ export function installNativeMock(data = bootstrapFixture()) {
         }
         result = data.exportResult || { saved: true };
       }
+      if (method === 'notes.import') {
+        if (data.notesImportError) {
+          queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { id, error: data.notesImportError } })));
+          return;
+        }
+        result = data.notesImportResult || { imported: 2, skipped: 1 };
+      }
 
       if (method === 'shelves.save') { data.shelves = structuredClone(params.shelves); result = structuredClone(data.shelves); }
       if (method === 'bootstrap') result = structuredClone(data);

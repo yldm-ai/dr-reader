@@ -379,6 +379,66 @@ std::string Library::export_notes(const std::string &id) const
     const auto book = get(id);
     const auto notes = annotations_->list(id);
     if (notes.empty()) return {};
+    Json chapters = Json::array();
+    for (const auto &chapter : book.at("chapters")) chapters.push_back(chapter.at("href"));
+    // Design reference: calibre gui2/viewer/highlights.py Export.exported_data and
+    // db/annotations.py merge_annot_lists. This independent format uses our content ID,
+    // chapter resources and UTF-16 text anchors rather than calibre's EPUB CFI data.
+    Json archive = {{"type", "dr-reader-notes"}, {"version", 1}, {"exportedAt", now()},
+                    {"book", {{"id", id}, {"title", book.value("title", "")},
+                              {"author", book.value("author", "")}, {"chapters", chapters}}},
+                    {"annotations", notes}};
+    auto data = archive.dump(2) + "\n";
+    if (notes.size() > 10000 || data.size() > notes_max_bytes)
+        throw std::runtime_error("笔记数量或文件大小超出备份范围（最多 10000 条、32 MiB）");
+    return data;
+}
+Json Library::import_notes(const std::string &id, std::string_view data)
+{
+    const auto book = get(id);
+    if (data.size() > notes_max_bytes) throw std::runtime_error("笔记文件不能超过 32 MiB");
+    try
+    {
+        const auto archive = Json::parse(data, [](int depth, Json::parse_event_t, Json &) {
+            if (depth > 32) throw std::runtime_error("笔记文件嵌套过深");
+            return true;
+        });
+        if (!archive.is_object() || archive.at("type") != "dr-reader-notes")
+            throw std::runtime_error("请选择 DR Reader 导出的 .drnotes 笔记文件，Markdown 不支持导入");
+        if (!archive.at("version").is_number_integer() || archive.at("version") != 1)
+            throw std::runtime_error("不支持此笔记文件版本，请升级 DR Reader");
+        if (archive.at("book").at("id") != id)
+            throw std::runtime_error("笔记不属于这本图书，请在导出笔记时使用的同一 EPUB 上导入");
+        Json chapters = Json::array();
+        for (const auto &chapter : book.at("chapters")) chapters.push_back(chapter.at("href"));
+        if (archive.at("book").at("chapters") != chapters)
+            throw std::runtime_error("图书章节布局与笔记备份不一致，无法安全恢复位置");
+        const auto &notes = archive.at("annotations");
+        if (!notes.is_array() || notes.size() > 10000)
+            throw std::runtime_error("笔记列表无效或超过 10000 条");
+        for (const auto &note : notes)
+        {
+            for (auto key : {"id", "bookId", "href", "quote", "prefix", "suffix", "note", "color", "style"})
+                if (!note.at(key).is_string()) throw std::runtime_error("笔记文本字段无效");
+            for (auto key : {"chapter", "start", "end"})
+                if (!note.at(key).is_number_integer() || note.at(key) < 0 || note.at(key) > 2147483647)
+                    throw std::runtime_error("笔记位置无效");
+            const auto chapter = note.at("chapter").get<size_t>();
+            if (note.at("bookId") != id || chapter >= chapters.size() || note.at("href") != chapters[chapter])
+                throw std::runtime_error("笔记章节不属于当前图书");
+        }
+        return annotations_->import_annotations(id, notes);
+    }
+    catch (const Json::exception &)
+    {
+        throw std::runtime_error("笔记文件格式无效，请选择 DR Reader 导出的 .drnotes 文件；旧 Markdown 无法恢复标注位置");
+    }
+}
+std::string Library::export_notes_markdown(const std::string &id) const
+{
+    const auto book = get(id);
+    const auto notes = annotations_->list(id);
+    if (notes.empty()) return {};
     const auto escaped = [](const std::string &text) {
         std::string result;
         for (char c : text)

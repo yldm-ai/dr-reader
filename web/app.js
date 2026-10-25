@@ -53,6 +53,17 @@ const libraryOverlays = createLibraryOverlays(book => {
       else if (result.saved) toast("笔记已导出", "success");
     } catch (error) { toast(`导出失败：${error.message}`, "error"); }
   },
+  importNotes: async book => {
+    busy(true, "正在导入阅读笔记…");
+    try {
+      const result = await call("notes.import", { id: book.id });
+      if (!result.cancelled) {
+        const skipped = result.skipped ? `，跳过 ${result.skipped} 条已有笔记（保留本地版本）` : "";
+        toast(`已导入 ${result.imported} 条笔记或标注${skipped}`, "success");
+      }
+    } catch (error) { toast(`导入笔记失败：${error.message}`, "error"); }
+    finally { busy(false); }
+  },
 });
 
 const reader = new Reader((book) => {

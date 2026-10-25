@@ -1,12 +1,15 @@
 #pragma once
 #include "dr/epub.h"
 #include "dr/annotations.h"
+#include <cstddef>
 #include <memory>
+#include <string_view>
 namespace dr
 {
 class Library
 {
   public:
+    static constexpr size_t notes_max_bytes = 32 * 1024 * 1024;
     explicit Library(fs::path root);
     Json list() const;
     Json shelves() const;
@@ -26,6 +29,8 @@ class Library
     Json save_settings(const Json &settings);
     Json annotations(const std::string& id) const;
     std::string export_notes(const std::string& id) const;
+    std::string export_notes_markdown(const std::string& id) const;
+    Json import_notes(const std::string& id,std::string_view data);
     Json save_annotation(const std::string& id,const Json& annotation);
     void remove_annotation(const std::string& id,const std::string& annotation_id);
     std::string lookup_url(const std::string& dictionary,const std::string& text) const;

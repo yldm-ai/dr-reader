@@ -3,6 +3,7 @@
 #include "dr/settings.h"
 #include "dr/splitter.h"
 #include "dr/wordcount.h"
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <miniz.h>
@@ -508,11 +509,105 @@ int main()
         library.save_annotation(id, {{"chapter", 1}, {"href", annotation_href},
                                     {"start", 0}, {"end", 8}, {"quote", "结尾文字\n第二行"},
                                     {"style", "underline"}, {"note", "重点 *内容* <tag>\n下一行"}});
-        const auto markdown = library.export_notes(id);
+        const auto markdown = library.export_notes_markdown(id);
         require(markdown.starts_with("# 测试书\n") && markdown.find("> 结尾文字\n> 第二行") != markdown.npos &&
                     markdown.find("标注：下划线") != markdown.npos && markdown.find("重点 \\*内容\\* \\<tag\\>") != markdown.npos,
                 "Markdown export contains the book, quoted passage, mark type and safely escaped multiline note");
         rejects([&] { library.export_notes("../invalid"); }, "export rejects an unsafe book ID");
+        {
+            library.save_annotation(id, {{"chapter", 1}, {"href", annotation_href},
+                {"start", 8}, {"end", 10}, {"quote", "🚀"}, {"prefix", "正文前"}, {"suffix", "正文后"},
+                {"style", "highlight"}, {"color", "#ddedea"}, {"note", "中文与 emoji 🚀\n<tag> & \"引号\""}});
+            library.save_annotation(id, {{"chapter", 1}, {"href", annotation_href},
+                {"start", 10}, {"end", 12}, {"quote", "笔记"}, {"style", "note"}, {"note", "只留笔记"}});
+            const auto original = library.annotations(id);
+            const auto backup = library.export_notes(id);
+            const auto archive = dr::Json::parse(backup);
+            require(archive["type"] == "dr-reader-notes" && archive["version"] == 1 &&
+                        archive["book"]["id"] == id && archive["annotations"] == original,
+                    "versioned backup preserves all annotation data");
+            dr::Json restored_snapshot;
+            {
+                dr::Library restored(root / "notes-restore");
+                require(restored.import_book(epub)["id"] == id, "backup targets the same original EPUB in another library");
+                restored.save_position(id, {{"chapter", 1}, {"ratio", 0.37}});
+                restored.save_shelves(literature);
+                restored.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.6}, {"title", "保留书签"}});
+                const auto local = restored.save_annotation(id, {{"chapter", 1}, {"href", annotation_href},
+                    {"start", 20}, {"end", 22}, {"quote", "本地"}, {"note", "保留已有笔记"}});
+                const auto book_before = restored.get(id), shelves_before = restored.shelves();
+                require(restored.import_notes(id, backup) == dr::Json({{"imported", 3}, {"skipped", 0}}),
+                        "import restores every annotation in a separate library");
+                auto notes = restored.annotations(id);
+                require(notes.size() == 4 && std::find(notes.begin(), notes.end(), local) != notes.end(),
+                        "import adds notes without deleting local notes");
+                for (const auto &note : original)
+                    require(std::find(notes.begin(), notes.end(), note) != notes.end(),
+                            "round trip preserves IDs, UTF-16 offsets, contexts, styles, colors, text and timestamps");
+                require(restored.import_notes(id, backup) == dr::Json({{"imported", 0}, {"skipped", 3}}),
+                        "repeated import is idempotent");
+                auto edited = original[0]; edited["note"] = "本地修改优先";
+                const auto saved_edit = restored.save_annotation(id, edited);
+                restored.import_notes(id, backup);
+                notes = restored.annotations(id);
+                require(std::find(notes.begin(), notes.end(), saved_edit) != notes.end(), "old backup never overwrites local edits");
+                auto invalid = archive;
+                invalid["version"] = 2;
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "unknown backup version rejected");
+                invalid = archive; invalid["book"]["id"] = "another-book";
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "backup for another EPUB rejected");
+                invalid = archive; invalid["book"]["chapters"][0] = "different-layout.xhtml";
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "changed chapter layout rejected");
+                invalid = archive; invalid["annotations"][0]["href"] = "wrong-chapter.xhtml";
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "foreign chapter anchor rejected");
+                invalid = archive; invalid["annotations"][0]["start"] = 0.5;
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "fractional text positions rejected");
+                invalid = archive; invalid["annotations"][0]["createdAt"] = uint64_t(-1);
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "overflowing timestamp rejected even for duplicate ID");
+                // The first row is inserted before the second fails SQLite-side validation.
+                // Both rows must roll back, including with the same import retried later.
+                invalid = archive;
+                invalid["annotations"] = dr::Json::array({original[0], original[1]});
+                invalid["annotations"][0]["id"] = "rollback-first";
+                invalid["annotations"][1]["id"] = "rollback-second";
+                invalid["annotations"][1]["color"] = "invalid-color";
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "invalid batch fails atomically");
+                require(restored.annotations(id) == notes, "a failed batch leaves no partial annotation writes");
+                invalid["annotations"][1]["color"] = original[1]["color"];
+                require(restored.import_notes(id, invalid.dump()) == dr::Json({{"imported", 2}, {"skipped", 0}}),
+                        "a corrected batch can be retried after rollback");
+                invalid = archive; invalid["annotations"] = dr::Json::array();
+                require(restored.import_notes(id, invalid.dump()) == dr::Json({{"imported", 0}, {"skipped", 0}}),
+                        "empty backup is a no-op");
+                require(restored.import_notes(id, std::string("\xef\xbb\xbf") + backup)["skipped"] == 3,
+                        "UTF-8 BOM backup is accepted");
+                invalid = archive;
+                invalid["annotations"] = dr::Json::array({original[0], original[0]});
+                for (auto &note : invalid["annotations"]) note["id"] = "duplicate-within-file";
+                require(restored.import_notes(id, invalid.dump()) == dr::Json({{"imported", 1}, {"skipped", 1}}),
+                        "duplicate IDs inside a backup are imported once");
+                {
+                    dr::AnnotationStore store(root / "notes-restore" / "reader.sqlite3");
+                    auto foreign = original[0]; foreign.erase("id");
+                    const auto saved_foreign = store.save("another-book", foreign);
+                    invalid = archive; invalid["annotations"][0]["id"] = saved_foreign["id"];
+                    const auto before_collision = restored.annotations(id);
+                    rejects([&] { restored.import_notes(id, invalid.dump()); }, "ID collision with another book rejected");
+                    require(restored.annotations(id) == before_collision && store.list("another-book")[0] == saved_foreign,
+                            "ID collision preserves both books");
+                }
+                rejects([&] { restored.import_notes(id, "{broken json"); }, "broken backup rejected");
+                rejects([&] { restored.import_notes(id, markdown); }, "legacy Markdown is not guessed into positions");
+                rejects([&] { restored.import_notes(id, std::string(dr::Library::notes_max_bytes + 1, ' ')); },
+                        "oversized backup rejected");
+                require(restored.get(id) == book_before && restored.shelves() == shelves_before,
+                        "import preserves reading position, bookmarks, categories and metadata");
+                require(library.annotations(id) == original, "source library is unchanged by restoration");
+                restored_snapshot = restored.annotations(id);
+            }
+            dr::Library reopened(root / "notes-restore");
+            require(reopened.annotations(id) == restored_snapshot, "restored annotations persist after reopening the library");
+        }
         library.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}});
         rejects([&] { library.remove_book("../library"); }, "reject unsafe deletion ID");
         require(library.list().size() == 1, "invalid deletion preserves library");

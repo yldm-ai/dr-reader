@@ -2708,6 +2708,10 @@ body > .page-surface { max-width: none; }
   pointer-events: none;
   background: linear-gradient(to right, transparent, #00000008 45%, #0000000c 50%, #00000008 55%, transparent);
 }
+/* Keep the resting spine visible above the soft-turn snapshots throughout the turn. */
+.reader-view[data-layout="double"] .page-surface:has(> .page-motion-turn)::after {
+  z-index: 9;
+}
 
 .icon-button, .text-button, .nav-item, .toc-tabs button, .theme-swatch, .select-option {
   transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);

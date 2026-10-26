@@ -198,6 +198,7 @@ export class ReaderMotion {
     // last one, so the landing pose is never painted. A backward sheet then jumps
     // the last ~40px when the live page returns. Hold the final pose briefly.
     const render = flip.getRender();
+    let landingShadowOpacity = 1;
     // StPageFlip positions pages and shadows with 3D transforms even when nothing
     // is rotated. Any 3D layer under a page drops its text from ClearType to
     // grayscale, so it thins as the turn starts and sharpens again when the live
@@ -222,6 +223,7 @@ export class ReaderMotion {
       // Shadows only ever mirror (rotateY 180deg) around their own edge.
       for (const shadow of host.querySelectorAll<HTMLElement>(
         '.stf__outerShadow, .stf__innerShadow, .stf__hardShadow, .stf__hardInnerShadow')) {
+        if (spread && density === 'soft') shadow.style.opacity = String(landingShadowOpacity);
         shadow.style.transform = shadow.style.transform
           .replace(/translate3d\((\S+), (\S+), 0px\)/, 'translate($1, $2)').replace('rotateY(180deg)', 'scaleX(-1)');
       }
@@ -229,6 +231,25 @@ export class ReaderMotion {
     const startAnimation = render.startAnimation.bind(render);
     let first: (() => void) | undefined;
     render.startAnimation = (frames, time, done) => {
+      if (spread && density === 'soft') {
+        // StPageFlip's exact edge endpoint degenerates its line intersections and
+        // leaves the previous valid curl on screen. Land just inside the edge;
+        // the flat-pose normalization above then aligns it with the live spread.
+        const { pageWidth, height } = render.getRect();
+        const margin = height / 10, inset = .1;
+        const flipper = flip.getFlipController();
+        frames = frames.map((_, index) => {
+          const t = index / Math.max(1, frames.length - 1);
+          return () => {
+            const edge = margin + (inset - margin) * t;
+            flipper.do({ x: pageWidth - margin + (inset - 2 * pageWidth + margin) * t,
+              y: corner === 'bottom' ? height - edge : edge });
+            // The inner gradient has fixed opacity stops even when the library's
+            // shadow strength reaches zero. Fade the whole shadow before cleanup.
+            landingShadowOpacity = Math.min(1, (1 - t) / .1);
+          };
+        });
+      }
       if (unturn) {
         // Retrace the library's forward path backwards. Its corner is held height/10
         // inside the page, which tilts the fold toward the chosen corner; a corner

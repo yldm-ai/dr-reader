@@ -191,6 +191,34 @@ try {
   check(frame.contentWindow.scrollX === 3000 && frame.style.visibility === '',
     'a reversed wheel burst must finish on its accumulated destination');
   // Two-page spreads turn as StPageFlip's own landscape book, soft or hard, in both directions.
+  const { PageFlip } = await import('page-flip/dist/js/page-flip.module.js');
+  const getRender = PageFlip.prototype.getRender;
+  const inspected = new WeakSet();
+  const checkedLandings = new WeakSet();
+  let landed = 0;
+  PageFlip.prototype.getRender = function () {
+    const render = getRender.call(this);
+    if (!inspected.has(render)) {
+      inspected.add(render);
+      const start = render.startAnimation.bind(render);
+      render.startAnimation = (frames, time, done) => start(frames.map(draw => () => {
+        draw();
+        const engine = host.querySelector('.stpageflip-host');
+        if (draw !== frames.at(-1) || engine?.dataset.density !== 'soft' || checkedLandings.has(render)) return;
+        checkedLandings.add(render);
+        render.drawFrame();
+        const flap = [...engine.querySelectorAll('.stf__item')].find(item => item.style.zIndex === '5');
+        const matrix = new DOMMatrix(getComputedStyle(flap).transform);
+        const expectedX = engine.dataset.direction === 'forward' ? 0 : 490;
+        check(Math.abs(matrix.e - expectedX) < 1 && Math.abs(matrix.f) < 1 && Math.abs(matrix.b) < .001,
+          'the last soft-spread frame must land flat before showing the live page');
+        check([...engine.querySelectorAll('.stf__outerShadow, .stf__innerShadow')]
+          .every(shadow => getComputedStyle(shadow).opacity === '0'), 'curl shadows must vanish before cleanup');
+        landed++;
+      }), time, done);
+    }
+    return render;
+  };
   host.style.width = '980px';
   const spreadHtml = `<style>html{overflow:hidden}body{margin:0;display:flex;width:2940px;height:360px;background:#fffaf3}section{flex:0 0 490px;box-sizing:border-box;padding:30px;font:20px 'Microsoft YaHei'}</style>${
     Array.from({ length: 6 }, (_, i) => `<section><h1>第 ${i + 1} 页</h1></section>`).join('')}`;
@@ -199,7 +227,8 @@ try {
       await load(spreadHtml);
       frame.contentWindow.scrollTo(980, 0);
       const target = direction > 0 ? 1960 : 0;
-      pending = motion.change(host, effect, 500, direction, () => frame.contentWindow.scrollTo(target, 0), false, 'top', true);
+      pending = motion.change(host, effect, 500, direction, () => frame.contentWindow.scrollTo(target, 0), false,
+        direction > 0 ? 'top' : 'bottom', true);
       await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
       const engine = host.querySelector('.stpageflip-host');
       check(engine.dataset.orientation === 'landscape' && engine.dataset.layout === 'double' && engine.dataset.pageCount === '4',
@@ -213,6 +242,8 @@ try {
         `${effect} ${direction}: a finished spread turn must show the live spread`);
     }
   }
+  PageFlip.prototype.getRender = getRender;
+  check(landed === 2, 'both soft-spread directions must paint their flat landing frame');
   host.style.width = '600px';
   motion.setAllowed(false);
   await motion.change(host, 'slide', 600, 1, () => updates++);

@@ -33,7 +33,13 @@ export class BookOpening {
   private context?: CanvasRenderingContext2D;
   private resize?: ResizeObserver;
   private frame = 0;
-  private started = performance.now();
+  private readonly created = performance.now();
+  private started = this.created;
+  /** The clock starts once frames arrive steadily (see draw). */
+  private running = false;
+  private steadyFrames = 0;
+  private lastFrame?: number;
+  private closeRequested = false;
   private endingAt?: number;
   private resolve?: () => void;
   private completion: Promise<void>;
@@ -71,9 +77,14 @@ export class BookOpening {
       this.finishing = true;
       void this.fadeBook(this.book);
     }
-    if (this.canvas && this.endingAt === undefined)
-      this.endingAt = Math.max(performance.now(), this.started + 900);
+    // The collapse time is fixed in draw, once the clock has started.
+    if (this.canvas) this.closeRequested = true;
     return this.completion;
+  }
+
+  /** Whether an opaque opening animation covers the window (so views can switch beneath it). */
+  get covering(): boolean {
+    return Boolean(this.canvas || this.cover || this.book);
   }
 
   cancel(): void {
@@ -199,7 +210,18 @@ export class BookOpening {
   private draw = (now: number): void => {
     const canvas = this.canvas, ctx = this.context;
     if (!canvas || !ctx) return;
-    const elapsed = (now - this.started) / 1000;
+    // Hold the first pose until three frames in a row arrive on time (at most 400 ms).
+    // With a cold GPU shader cache (first run, or after a WebView2 or driver update) the
+    // first frames compile the canvas, drop-shadow and reader programs and stall for
+    // 60–120 ms; a running clock would freeze the expanding circles and then jump ahead.
+    if (!this.running) {
+      this.steadyFrames = this.lastFrame !== undefined && now - this.lastFrame < 25 ? this.steadyFrames + 1 : 0;
+      this.lastFrame = now;
+      if (this.steadyFrames >= 3 || now - this.created > 400) { this.running = true; this.started = now; }
+    }
+    if (this.running && this.closeRequested && this.endingAt === undefined)
+      this.endingAt = Math.max(now, this.started + 900);
+    const elapsed = this.running ? (now - this.started) / 1000 : 0;
     const closing = this.endingAt !== undefined && now >= this.endingAt;
     const exit = closing ? 1 - transition((now - this.endingAt!) / 650, .3, .7) : 1;
     if (closing) this.host.style.opacity = String(exit);

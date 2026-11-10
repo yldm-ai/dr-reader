@@ -261,6 +261,11 @@ async function openBook(id, coverElement = null) {
   $("busy").style.setProperty("--opening-ink", paper.text);
   busy(true, "正在打开电子书…");
   const rect = coverElement?.getBoundingClientRect();
+  const showReader = () => {
+    $("library-view").hidden = true;
+    document.querySelector(".sidebar").hidden = true;
+    $("reader-view").hidden = false;
+  };
   const opening = new BookOpening($("busy"), settings?.application.bookOpeningEnabled ?? settings?.application.animations ?? true, settings?.application.bookOpeningAnimation, {
     title: selected?.title, author: selected?.author,
     image: selected?.cover ? bookUrl(selected, selected.cover) : undefined,
@@ -268,11 +273,13 @@ async function openBook(id, coverElement = null) {
       ? coverElement.naturalWidth / coverElement.naturalHeight : rect?.height ? rect.width / rect.height : undefined,
     rect: rect?.width && rect?.height ? rect : undefined,
   });
+  // Under an opaque opening, switch views before the animation starts: with a cold GPU
+  // shader cache the reader's first raster stalls a frame, which BookOpening absorbs before
+  // its clock starts instead of freezing the expanding circles.
+  if (opening.covering) showReader();
   try {
     const book = await call("open", { id });
-    $("library-view").hidden = true;
-    document.querySelector(".sidebar").hidden = true;
-    $("reader-view").hidden = false;
+    showReader();
     await reader.open(book, settings);
     await opening.finish();
   } catch (error) {

@@ -93,6 +93,19 @@ try {
   check(!host.querySelector('.book-opening'), 'a cancelled cover must not block loading');
   for (const effect of ['none', 'book', 'cover']) await new BookOpening(host, effect === 'none', effect).finish();
   check(!host.querySelector('.book-opening'), 'none and disabled effects must not delay loading');
+
+  // A stalled first frame (a cold GPU shader cache) must not eat into the expansion.
+  const stalled = new BookOpening(host, true);
+  check(stalled.covering, 'the circles cover the window, so the reader may be shown beneath them');
+  const stallEnd = performance.now() + 150;
+  while (performance.now() < stallEnd) { /* simulate a 150 ms frame stall */ }
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  check(!stalled.running, 'the clock must wait while frames arrive late');
+  await new Promise(resolve => setTimeout(resolve, 250));
+  check(stalled.running && stalled.started >= stallEnd, 'the expansion must start after the stall, from its first pose');
+  const stalledDone = stalled.finish(); stalled.cancel(); await stalledDone;
+  check(!new BookOpening(host, false).covering && !new BookOpening(host, true, 'none').covering,
+    'without an opaque opening the library must stay visible until the book is ready');
   document.getElementById('result').textContent = 'PASS';
   document.documentElement.dataset.result = 'pass';
 } catch (error) {

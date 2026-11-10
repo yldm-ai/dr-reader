@@ -218,6 +218,7 @@ void Application::receive(const Json &request)
         webview_.send({{"id", id}, {"result", hidden}});
         return;
     }
+    if (method.starts_with("agent.") && receive_agent(id, method, params)) return;
     if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;
     fs::path notes_file;
@@ -388,6 +389,70 @@ void Application::receive(const Json &request)
                              { webview_.send({{"id", id}, {"error", error}}); });
             }
         });
+}
+// Reading assistance through local agent CLIs. Answers stream back as `agent` events keyed by
+// the page's request id; each request ends with a `done` or `error` event.
+bool Application::receive_agent(const Json &id, const std::string &method, const Json &params)
+{
+    static constexpr AgentKind kinds[] = {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode};
+    try
+    {
+        if (method == "agent.detect")
+        {
+            // Looking through PATH touches the disk and registry; keep it off the UI thread.
+            enqueue([this, id] {
+                Json result = Json::object();
+                for (auto kind : kinds)
+                {
+                    auto found = AgentRunner::find(kind);
+                    result[agent_id(kind)] = found ? Json{{"path", utf8(found->path)}} : Json(nullptr);
+                }
+                window_.post([this, id, result] { webview_.send({{"id", id}, {"result", result}}); });
+            });
+            return true;
+        }
+        if (method == "agent.cancel")
+        {
+            if (agents_) agents_->cancel(params.at("request").get<std::string>());
+            webview_.send({{"id", id}, {"result", true}});
+            return true;
+        }
+        if (method != "agent.ask") return false;
+        const auto request = params.at("request").get<std::string>();
+        const auto prompt = params.at("prompt").get<std::string>();
+        const auto choice = params.value("agent", std::string("auto"));
+        const auto model = params.value("model", std::string());
+        if (request.empty() || request.size() > 64) throw std::runtime_error("提问标识无效");
+        if (prompt.empty() || prompt.size() > (1u << 20)) throw std::runtime_error("问题为空或附带的正文过长");
+        std::optional<AgentExecutable> agent;
+        if (choice == "auto")
+        {
+            for (auto kind : kinds)
+                if ((agent = AgentRunner::find(kind))) break;
+            if (!agent) throw std::runtime_error("没有找到 Codex、Claude Code 或 opencode，请先安装其中一个并登录");
+        }
+        else
+        {
+            auto kind = agent_kind(choice);
+            if (!kind) throw std::runtime_error("不支持的 Agent");
+            agent = AgentRunner::find(*kind);
+            if (!agent) throw std::runtime_error(std::string("没有找到 ") + agent_label(*kind) + "，请确认已安装并能在终端中运行");
+        }
+        if (!agents_)
+            agents_ = std::make_unique<AgentRunner>([this](const AgentUpdate &update) {
+                static constexpr const char *types[] = {"text", "status", "done", "error"};
+                Json event{{"event", "agent"}, {"request", update.request},
+                           {"type", types[static_cast<int>(update.type)]}, {"text", update.text}};
+                window_.post([this, event = std::move(event)] { webview_.send(event); });
+            });
+        agents_->start(request, *agent, model, prompt);
+        webview_.send({{"id", id}, {"result", {{"agent", agent_id(agent->kind)}, {"label", agent_label(agent->kind)}}}});
+    }
+    catch (const std::exception &error)
+    {
+        webview_.send({{"id", id}, {"error", error.what()}});
+    }
+    return true;
 }
 int Application::run(HINSTANCE instance)
 {

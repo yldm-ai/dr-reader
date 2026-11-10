@@ -1,4 +1,5 @@
 #include "dr/library.h"
+#include "dr/agent.h"
 #include "dr/annotations.h"
 #include "dr/settings.h"
 #include "dr/splitter.h"
@@ -39,6 +40,87 @@ void zip(const dr::fs::path &path, const std::vector<std::pair<std::string, std:
                 "zip add");
     require(mz_zip_writer_finalize_archive(&z) != 0, "zip finish");
     mz_zip_writer_end(&z);
+}
+// Event lines are trimmed copies of real output from codex-cli 0.167, Claude Code 2.1 and opencode 1.19.
+void agent_checks()
+{
+    using dr::AgentEvent;
+    using dr::AgentKind;
+    auto texts = [](const std::vector<AgentEvent> &events) {
+        std::string text;
+        for (auto &event : events)
+            if (event.type == AgentEvent::Type::Text) text += event.text;
+        return text;
+    };
+    {
+        dr::AgentStream claude(AgentKind::Claude);
+        require(claude.line(R"({"type":"system","subtype":"init","tools":[],"mcp_servers":[]})").empty(), "claude init is silent");
+        std::string answer;
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}},"parent_tool_use_id":null})"));
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"书中"}},"parent_tool_use_id":null})"));
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"x"}},"parent_tool_use_id":null})"));
+        answer += texts(claude.line(R"({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"写道"}},"parent_tool_use_id":"tool_1"})"));
+        answer += texts(claude.line(R"({"type":"assistant","message":{"content":[{"type":"text","text":"书中"}]}})"));
+        auto retry = claude.line(R"({"type":"system","subtype":"api_retry","attempt":2,"max_retries":10})");
+        require(retry.size() == 1 && retry[0].type == AgentEvent::Type::Status, "claude retry is progress");
+        require(claude.line("not json at all").empty() && !claude.succeeded(), "claude ignores noise");
+        claude.line(R"({"type":"result","subtype":"success","is_error":false,"result":"书中"})");
+        require(answer == "书中" && claude.succeeded(), "claude streams text deltas only once");
+        dr::AgentStream failing(AgentKind::Claude);
+        auto failed = failing.line(R"({"type":"result","subtype":"success","is_error":true,"result":"API Error: 503"})");
+        require(failing.failed() && failed.at(0).type == AgentEvent::Type::Error && failing.last_error() == "API Error: 503", "claude errors fail");
+    }
+    {
+        dr::AgentStream codex(AgentKind::Codex);
+        codex.line(R"({"type":"thread.started","thread_id":"01a1"})");
+        auto warning = codex.line(R"({"type":"item.completed","item":{"id":"item_0","type":"error","message":"Code Mode is unavailable"}})");
+        require(warning.empty() && !codex.failed(), "codex warning items are not failures");
+        auto first = texts(codex.line(R"({"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"第一段"}})"));
+        auto second = texts(codex.line(R"({"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"第二段"}})"));
+        require(first == "第一段" && second == "\n\n第二段", "codex messages become paragraphs");
+        require(!codex.succeeded(), "codex waits for its turn");
+        codex.line(R"({"type":"turn.completed","usage":{"input_tokens":1}})");
+        require(codex.succeeded(), "codex turn completion succeeds");
+        dr::AgentStream failing(AgentKind::Codex);
+        failing.line(R"({"type":"error","message":"The 'x' model is not supported"})");
+        failing.line(R"({"type":"turn.failed","error":{"message":"The 'x' model is not supported"}})");
+        require(failing.failed() && failing.last_error() == "The 'x' model is not supported", "codex turn failure");
+    }
+    {
+        dr::AgentStream opencode(AgentKind::OpenCode);
+        opencode.line(R"({"type":"step_start","part":{"type":"step-start"}})");
+        auto first = texts(opencode.line(R"({"type":"text","part":{"id":"prt_1","type":"text","text":"甲"}})"));
+        auto second = texts(opencode.line(R"({"type":"text","part":{"id":"prt_2","type":"text","text":"乙"}})"));
+        opencode.line(R"({"type":"step_finish","part":{"reason":"tool-calls","type":"step-finish"}})");
+        require(first == "甲" && second == "\n\n乙" && !opencode.succeeded(), "opencode parts and intermediate steps");
+        opencode.line(R"({"type":"step_finish","part":{"reason":"stop","type":"step-finish"}})");
+        require(opencode.succeeded(), "opencode stop finishes");
+        dr::AgentStream failing(AgentKind::OpenCode);
+        failing.line(R"({"type":"error","error":{"name":"UnknownError","data":{"message":"Unexpected server error."}}})");
+        require(failing.failed() && failing.last_error() == "Unexpected server error.", "opencode error");
+    }
+    // Arguments: tool-free, read-only, prompt on stdin, no cmd.exe metacharacters.
+    auto codex = dr::agent_arguments(AgentKind::Codex, "gpt-6.1", {"node_repl", "bad name"});
+    require(codex.back() == "-" && std::count(codex.begin(), codex.end(), "mcp_servers.node_repl.enabled=false") == 1 &&
+                std::none_of(codex.begin(), codex.end(), [](auto &arg) { return arg.find("bad name") != arg.npos; }),
+            "codex reads stdin and disables valid MCP names");
+    auto claude = dr::agent_arguments(AgentKind::Claude, "");
+    require(std::find(claude.begin(), claude.end(), "--no-session-persistence") != claude.end() &&
+                std::find(claude.begin(), claude.end(), "--model") == claude.end(),
+            "claude does not persist sessions and keeps its default model");
+    for (auto kind : {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode})
+        for (auto &arg : dr::agent_arguments(kind, "anthropic/claude-sonnet-5"))
+            require(arg.find_first_of("&|<>^%!\"") == arg.npos, "agent arguments are cmd-safe");
+    rejects([] { dr::agent_arguments(AgentKind::OpenCode, "x & calc"); }, "model names cannot inject commands");
+    auto names = dr::codex_mcp_server_names("model = \"x\"\n[mcp_servers.node_repl]\n[mcp_servers.node_repl.env]\n  [mcp_servers.\"quoted-one\"]\n[mcp_servers.bad$name]\n[plugins.\"a@b\"]\n");
+    require(names == std::vector<std::string>{"node_repl", "quoted-one"}, "codex MCP server names");
+    // Settings accept the agent choice and per-CLI models, and reject unsafe model names.
+    auto settings = dr::patch_settings(dr::default_settings(), {{"application", {{"agent", "claude"}, {"agentModels", {{"claude", "opus"}}}}}});
+    require(settings["application"]["agent"] == "claude" && settings["application"]["agentModels"]["claude"] == "opus" &&
+                settings["application"]["agentModels"]["codex"] == "" && settings["application"]["selectionActions"]["ask"] == true,
+            "agent settings");
+    rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agent", "gemini"}}}}); }, "unknown agent");
+    rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agentModels", {{"codex", "a;b"}}}}}}); }, "unsafe model");
 }
 } // namespace
 int main()
@@ -641,6 +723,7 @@ int main()
         auto huge = root / "huge.epub";
         zip(huge, {{"huge.txt", std::string(5000, 'z')}});
         rejects([&] { dr::import_epub(huge, root / "limited", {1024, 2048, 100}); }, "expansion limit");
+        agent_checks();
         dr::fs::remove_all(root);
         std::cout << "All EPUB, DOM split, URI, link, persistence, annotations, settings and archive checks passed.\n";
         return 0;

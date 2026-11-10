@@ -2,7 +2,7 @@
 set(DR_WEBVIEW2_VERSION "1.0.2903.40" CACHE STRING "Pinned WebView2 SDK")
 FetchContent_Declare(webview2 URL "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/${DR_WEBVIEW2_VERSION}" DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(webview2)
-add_executable(dr-reader WIN32 src/main.cpp src/application.cpp src/webview.cpp app.rc)
+add_executable(dr-reader WIN32 src/main.cpp src/application.cpp src/webview.cpp src/agent_runner.cpp app.rc)
 target_include_directories(dr-reader PRIVATE src "${webview2_SOURCE_DIR}/build/native/include")
 target_link_libraries(dr-reader PRIVATE dr_engine dr_shell "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib" ole32 shell32 shlwapi comdlg32 version)
 target_link_options(dr-reader PRIVATE /MANIFEST:NO)
@@ -11,9 +11,11 @@ find_program(DR_PNPM_EXECUTABLE NAMES pnpm.cmd pnpm REQUIRED)
 file(GLOB_RECURSE DR_FRONTEND_SOURCES CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/web/*.ts"
   "${PROJECT_SOURCE_DIR}/web/*.css" "${PROJECT_SOURCE_DIR}/web/*.html")
+# MSBuild decodes custom-build output with the OEM code page whatever chcp says, so Vite's UTF-8
+# "✓ built in" would show as "Γ£ô"; DR_ASCII_LOG makes vite.config.ts print ASCII instead.
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/frontend.stamp"
   BYPRODUCTS "${PROJECT_SOURCE_DIR}/dist/index.html"
-  COMMAND "${DR_PNPM_EXECUTABLE}" run build
+  COMMAND ${CMAKE_COMMAND} -E env DR_ASCII_LOG=1 "${DR_PNPM_EXECUTABLE}" run build
   COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/frontend.stamp"
   WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   DEPENDS ${DR_FRONTEND_SOURCES} "${PROJECT_SOURCE_DIR}/package.json"

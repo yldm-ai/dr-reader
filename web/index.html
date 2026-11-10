@@ -206,7 +206,8 @@
               <button data-tab="toc" class="active">目录</button
               ><button data-tab="marks">书签</button
               ><button data-tab="notes">笔记</button
-              ><button data-tab="search">搜索</button>
+              ><button data-tab="search">搜索</button
+              ><button data-tab="ask">问书</button>
             </div>
             <button id="pin-toc" class="icon-button toc-pin" aria-label="固定侧边栏" aria-pressed="false" title="固定侧边栏"><span data-icon="pin"></span></button>
             </div>
@@ -232,6 +233,7 @@
                 <p class="panel-hint">由 C++ 在本地检索正文。</p>
               </div>
             </div>
+            <div id="ask-content" hidden></div>
             </div>
           </aside>
           <section class="reading-area">
@@ -291,6 +293,7 @@
         <button id="selection-note-delete" class="selection-action danger-button" hidden><span data-icon="delete" data-icon-set="fluent"></span><span class="selection-action-label">删除笔记</span></button>
         <button id="selection-copy" class="selection-action"><span data-icon="copy" data-icon-set="fluent"></span><span class="selection-action-label">复制</span></button>
         <button id="selection-search" class="selection-action"><span data-icon="search" data-icon-set="fluent"></span><span class="selection-action-label">书内搜索</span></button>
+        <button id="selection-ask" class="selection-action"><span data-icon="ask" data-icon-set="fluent"></span><span class="selection-action-label">问 AI</span></button>
         <button id="selection-dictionary" class="selection-action dictionary-action"><span class="selection-action-label">查词</span><span data-icon="chevron"></span></button>
       </div>
       <!-- The five most recent colours, then the custom colour picker. -->

@@ -36,7 +36,7 @@ try {
   check(page() === 1, 'reader starts at first page');
   await gesture(1);
   await until(() => !doc.querySelector('.page-motion'));
-  check(page() === 2, 'a real-time smooth swipe with inertia turns just one page');
+  check(page() === 2, `a real-time smooth swipe with inertia turns just one page (on page ${page()})`);
   await sleep(700);
   check(page() === 2, 'no queued turns continue after the gesture finishes');
   await gesture(1);

@@ -2818,3 +2818,66 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
   transform: translateY(0); opacity: 1; pointer-events: auto;
 }
 body[data-animations="false"] .reader-footer { transition: none; }
+
+/* 问书: a conversation with a local agent CLI about the open book. Answers read like body text,
+   questions sit in a quiet tinted block, and the composer stays at the bottom of the panel. */
+#ask-content:not([hidden]) { display: flex; flex-direction: column; min-height: calc(100% - 48px); }
+.ask-thread { flex: 1; padding: 4px 4px 12px; }
+.ask-turn { margin: 0 0 14px; font-size: var(--text-body); line-height: 1.75; color: var(--text); }
+.ask-user { padding: 8px 10px; border-radius: 6px; background: var(--hover); }
+.ask-user p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-turn-quote, .ask-quote-text {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  margin: 0 0 6px; padding-left: 8px; border-left: 2px solid var(--border);
+  color: var(--muted); font-size: var(--text-secondary); line-height: 1.6; white-space: pre-wrap;
+}
+.ask-answer { padding: 0 2px; }
+.ask-answer-body { overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown pre { margin: 0 0 8px; }
+.markdown ul, .markdown ol { padding-left: 20px; }
+.markdown li + li { margin-top: 2px; }
+.markdown h4 { margin: 12px 0 4px; font-size: var(--text-body); font-weight: 600; }
+.markdown blockquote { padding-left: 10px; border-left: 2px solid var(--border); color: var(--muted); }
+.markdown code { padding: 1px 4px; border-radius: 3px; background: var(--hover); font: 12.5px/1.6 Consolas, "Cascadia Mono", monospace; }
+.markdown pre { padding: 8px 10px; border-radius: 6px; background: var(--hover); overflow-x: auto; }
+.markdown pre code { padding: 0; background: none; }
+.markdown hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+.ask-meta { display: flex; align-items: center; gap: 8px; min-height: 28px; color: var(--muted); font-size: var(--text-caption); }
+.ask-meta .text-button { height: 24px; padding: 0 6px; font-size: var(--text-caption); }
+.ask-error { color: var(--danger); overflow-wrap: anywhere; }
+.ask-form {
+  position: sticky; bottom: 0; margin: 0 -8px -16px; padding: 8px 8px 12px;
+  background: var(--surface); border-top: 1px solid var(--border);
+}
+.ask-quote { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 6px; }
+.ask-quote[hidden] { display: none; }
+.ask-quote-text { flex: 1; margin: 2px 0 0; }
+.ask-quote-remove { width: 24px; height: 24px; }
+.ask-input {
+  display: block; width: 100%; min-height: 64px; max-height: 180px; resize: vertical; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text);
+  font: inherit; font-size: var(--text-body); line-height: 1.6;
+}
+.ask-input:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
+.ask-actions { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.ask-actions .text-button { height: 28px; padding: 0 8px; font-size: var(--text-secondary); }
+.ask-hint { flex: 1; color: var(--muted); font-size: var(--text-caption); text-align: right; }
+.ask-send { width: 30px; height: 30px; background: var(--primary); color: var(--on-primary); }
+.ask-send:hover { background: var(--primary-hover); color: var(--on-primary); }
+.ask-panel[data-busy="true"] .ask-send { background: var(--text); }
+
+/* AI 助读 settings */
+.app-text-input {
+  width: 220px; flex: 0 0 220px; height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: var(--text-body);
+}
+.app-text-input:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: 0 0 0 2px var(--focus-ring); }
+.app-text-input:disabled { color: var(--muted); background: var(--hover); }
+.agent-status { margin: 0; padding: 0; list-style: none; }
+.agent-status li { display: flex; align-items: baseline; gap: 10px; padding: 3px 0; font-size: var(--text-body); }
+.agent-status li span { flex: 0 0 96px; }
+.agent-status li small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-caption); }
+.agent-status li[data-found="false"] span { color: var(--muted); }
+.app-row:has(> #app-agent-label) > .select-control { width: 220px; flex: 0 0 220px; }
+.ask-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

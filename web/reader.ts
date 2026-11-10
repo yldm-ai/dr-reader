@@ -19,6 +19,9 @@ import { ColorPicker } from "./color-picker.ts";
 import { bookPages, chapterTextLength } from "./book-pages.ts";
 import { htmlFromXhtml } from "./xhtml.ts";
 import { tocAnchor, tocSelectionIndex } from "./toc-selection.ts";
+import { AgentChat } from "./agent-chat.ts";
+import { excerptAround } from "./agent-prompt.ts";
+import type { ReadingContext } from "./agent-prompt.ts";
 import { shortTitle } from "./title.ts";
 import { DEFAULT_PALETTE, normalizeColor, paint, pushColor } from "./highlight-colors.ts";
 import type { ReadingSettings } from "./settings-state.ts";
@@ -77,6 +80,7 @@ export class Reader {
   chapterCache = new ChapterCache();
   motion = new ReaderMotion();
   colorPicker: ColorPicker;
+  chat: AgentChat;
   observer: ResizeObserver;
   titleObserver?: ResizeObserver;
   selection: Selection | null = null;
@@ -207,6 +211,14 @@ export class Reader {
     $("selection-copy").onclick = () => this.copySelection();
     $("selection-search").onclick = () => this.searchSelection();
     $("selection-dictionary").onclick = () => this.lookupSelection();
+    $("selection-ask").onclick = () => this.askSelection();
+    this.chat = new AgentChat($("ask-content"), {
+      context: () => this.readingContext(),
+      agent: () => {
+        const agent = this.appSettings?.agent ?? "auto";
+        return { agent, model: agent === "auto" ? "" : this.appSettings?.agentModels?.[agent] ?? "" };
+      },
+    });
     $("annotation-swatches").onclick = (event) => {
       const button = (event.target as Element).closest("button");
       if (!button) return;
@@ -362,6 +374,7 @@ export class Reader {
     this.setTocExpanded(false);
     $("toc-panel").hidden = false;
     this.tab("toc");
+    this.chat?.reset();
     this.toc();
     this.marks();
     $<HTMLInputElement>("book-search-input").value = "";
@@ -393,10 +406,11 @@ export class Reader {
       .forEach((button) =>
         button.classList.toggle("active", button.dataset.tab === name),
       );
-    for (const key of ["toc", "marks", "notes", "search"])
+    for (const key of ["toc", "marks", "notes", "search", "ask"])
       $(`${key}-content`).hidden = key !== name;
     if (name === "notes") this.notes();
     if (name === "search") $<HTMLInputElement>("book-search-input").focus();
+    if (name === "ask") this.chat.focus();
     if (name === "toc") this.updateTocIndicator();
   }
 
@@ -823,6 +837,12 @@ export class Reader {
     await doc.fonts?.ready;
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     if (doc !== this.doc) return;
+    // apply() above scheduled a reflow for this document; the measurement below supersedes it.
+    // Left pending, it fired just after loading ended and restored the old position under the
+    // reader's first page turn, so a turn made right after a chapter opened was lost. A changed
+    // viewport still needs that reflow to re-apply the layout.
+    const view = doc.defaultView!;
+    if (this.layoutViewport === `${view.innerWidth}x${view.innerHeight}`) clearTimeout(this.reflowTimer);
     this.measure();
     this.restore();
     this.loading = false;
@@ -1543,6 +1563,7 @@ export class Reader {
     $("selection-note-delete").hidden = !existing?.note;
     $("selection-copy").hidden = !actions.copy;
     $("selection-search").hidden = !actions.search;
+    $("selection-ask").hidden = !actions.ask;
     const dictionaries =
       this.appSettings.dictionaries?.filter(
         (dictionary) => dictionary.enabled,
@@ -1953,6 +1974,28 @@ export class Reader {
     if (size !== this.settings?.fontSize) this.onReadingSetting?.({ fontSize: size });
   }
 
+  /** The book, chapter and chapter text around the reading position, for a question to an agent. */
+  readingContext(): ReadingContext | null {
+    if (!this.book) return null;
+    const chapter = this.book.chapters[this.chapter];
+    const text = this.doc?.body && !this.atEnd() ? textIndex(this.doc).text : "";
+    const { text: excerpt, partial } = excerptAround(text, this.ratio);
+    return { title: this.book.title, author: this.book.author, chapterTitle: chapter?.title, excerpt, partial };
+  }
+
+  /** 问 AI: opens the 问书 tab with the selected passage attached to the next question. */
+  askSelection() {
+    if (!this.selection) return;
+    const quote = this.selection.text;
+    this.hideSelection();
+    this.doc?.getSelection()?.removeAllRanges();
+    $("toc-panel").hidden = false;
+    this.onReadingSetting?.({ showToc: true });
+    this.setTocExpanded(true);
+    this.tab("ask");
+    this.chat.attach(quote);
+  }
+
   searchSelection() {
     if (!this.selection) return;
     const query = this.selection.text.replace(/\s+/g, " ").slice(0, 256);
@@ -2054,6 +2097,7 @@ export class Reader {
     this.appliedReading = null;
     this.book = null;
     this.annotations = [];
+    this.chat?.reset();
     $<HTMLIFrameElement>("book-frame").srcdoc = "";
   }
 }

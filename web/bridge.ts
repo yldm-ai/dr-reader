@@ -28,6 +28,12 @@ if (window.chrome?.webview)
     if (data.error) item.reject(new Error(data.error));
     else item.resolve(data.result);
   });
+/** Subscribes to messages the host pushes with `event: name` (not replies to `call`). */
+export function onHostEvent(name: string, handler: (message: HostMessage) => void): void {
+  window.chrome?.webview?.addEventListener("message", ({ data }) => {
+    if (data?.event === name) handler(data);
+  });
+}
 /** Calls a native method; `T` is the caller's view of the JSON result. */
 export function call<T = unknown>(method: string, params: object = {}): Promise<T> {
   return new Promise<T>((resolve, reject) => {

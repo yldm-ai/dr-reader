@@ -11,6 +11,10 @@ export interface Fixture extends Bootstrap {
   notesImportResult?: unknown;
   fullscreen?: boolean;
   titlebarHidden?: boolean;
+  /** Ends every agent answer with this error instead of success. */
+  agentError?: string;
+  /** Streams one chunk and then waits until the page cancels. */
+  agentSlow?: boolean;
 }
 export interface HostRequest { method: string; params: any }
 
@@ -19,7 +23,7 @@ export function bootstrapFixture(): Fixture {
   const settings = {
     version: 2,
     application: { theme: 'light', shell: 'direct2d', animations: false, bookOpeningEnabled: false, bookOpeningAnimation: 'circles',
-      selectionActions: { highlight: true, underline: true, note: true, copy: true, search: true, dictionary: true },
+      selectionActions: { highlight: true, underline: true, note: true, copy: true, search: true, dictionary: true, ask: true },
       dictionaries: [{ id: 'one', name: '测试词典', url: 'https://example.com/?q={text}', enabled: true }] },
     reading: { theme: 'sepia', mode: 'paged', fontFamily: 'serif', fontSize: 20, fontWeight: 400,
       lineHeight: 1.9, paragraphSpacing: 1, letterSpacing: 0, textIndent: 0, alignment: 'justify',
@@ -102,6 +106,17 @@ export function installNativeMock(data: Fixture = bootstrapFixture()) {
         result = hidden;
         reply({ event: 'titlebar', hidden });
       }
+      if (method === 'agent.detect') result = { codex: { path: 'C:/fake/codex.exe' }, claude: null, opencode: { path: 'C:/fake/opencode.cmd' } };
+      if (method === 'agent.ask') {
+        // A fake CLI: the answer streams in Markdown chunks, then ends like the native runner.
+        const request = params.request;
+        const agent = (event: Record<string, unknown>) => reply({ event: 'agent', request, ...event });
+        const chunks = ['**要点**：这是', '原创的测试回答。', '\n\n- 第一条\n- 第二条'];
+        chunks.slice(0, data.agentSlow ? 1 : chunks.length).forEach((text, index) => setTimeout(() => agent({ type: 'text', text }), 20 * (index + 1)));
+        if (!data.agentSlow) setTimeout(() => agent(data.agentError ? { type: 'error', text: data.agentError } : { type: 'done', text: '' }), 100);
+        result = { agent: 'codex', label: 'Codex' };
+      }
+      if (method === 'agent.cancel') reply({ event: 'agent', request: params.request, type: 'error', text: '已停止回答' });
       if (method === 'settings') {
         for (const group of ['reading', 'application'] as const) if (params[group]) Object.assign(data.settings[group], params[group]);
         result = structuredClone(data.settings);

@@ -2,6 +2,7 @@
 #include "dr/library.h"
 #include "dr/window.h"
 #include "webview.h"
+#include "agent_runner.h"
 #include <condition_variable>
 #include <queue>
 #include <thread>
@@ -22,6 +23,7 @@ class Application
     fs::path pick_notes_path(const std::string &title, bool &markdown);
     fs::path pick_notes_import_path();
     void apply_settings(const Json &settings);
+    bool receive_agent(const Json &id, const std::string &method, const Json &params);
     Window window_;
     WebView webview_;
     Library library_;
@@ -32,5 +34,7 @@ class Application
     std::condition_variable_any wake_;
     std::queue<std::function<void()>> queue_;
     std::jthread thread_;
+    // Declared last, so it is destroyed first: its runs still post to the window while stopping.
+    std::unique_ptr<AgentRunner> agents_;
 };
 } // namespace dr

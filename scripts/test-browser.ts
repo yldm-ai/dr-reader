@@ -17,7 +17,7 @@ await server.listen();
 const port = (server.httpServer.address() as AddressInfo).port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
-  for (const name of ['toc_motion', 'toc_anchors', 'reader_touchpad', 'library_context_actions', 'library_back_to_top', 'library_sort', 'toc_hierarchy', 'icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
+  for (const name of ['toc_motion', 'toc_anchors', 'reader_touchpad', 'library_context_actions', 'library_back_to_top', 'library_sort', 'toc_hierarchy', 'icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'agent_chat', 'production_smoke']) {
     if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors: string[] = [];
@@ -98,6 +98,20 @@ try {
           document.getElementById('library-back-to-top').click();
           return document.getElementById('library-view').scrollTop === 0;
         })) throw Error('reduced motion must return to the top instantly');
+      }
+      if (name === 'agent_chat') {
+        const app = page.frames().find(frame => frame.parentFrame());
+        await app.locator('.ask-input').fill('用一句话概括这一章。');
+        await app.locator('.ask-input').press('Enter');
+        await app.locator('.ask-copy').waitFor();
+        for (const theme of ['light', 'dark']) {
+          await app.evaluate(value => { document.body.dataset.theme = value; }, theme);
+          await app.locator('#toc-panel').screenshot({ path: resolve(directory, `agent-chat-${theme}.png`) });
+        }
+        await app.evaluate(() => { document.body.dataset.theme = 'light'; });
+        await app.locator('#reader-app-settings').click();
+        await app.locator('#app-section-agent').scrollIntoViewIfNeeded();
+        await app.locator('#app-section-agent').screenshot({ path: resolve(directory, 'agent-settings.png') });
       }
       if (name === 'toc_hierarchy') {
         const panel = page.locator('#toc-panel');
@@ -394,7 +408,7 @@ try {
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           const ok = dialog.matches(':modal') && !document.getElementById('app').hidden && head() === before &&
             document.querySelector<HTMLElement>('.app-settings-nav a[aria-current]')?.dataset.section === 'about' &&
-            document.querySelectorAll('.app-settings-nav a').length === 3;
+            document.querySelectorAll('.app-settings-nav a').length === 4;
           scroll.scrollTop = 0;
           return ok;
         })) throw Error('application settings must be a fixed modal whose title stays put while its groups scroll');

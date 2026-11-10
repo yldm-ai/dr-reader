@@ -93,3 +93,13 @@ pnpm 锁定开发依赖，Vite 以 `web/index.html` 为入口，构建到 `dist/
 阅读设置存储五个界面区域的可见性、背景铺满、正文铺满和四个独立留白值。旧版 `paddingX` / `paddingY` 迁移为左右/上下相同的边距；边距以 px 保存，在极窄视口中按比例限制，至少保留 80 px 正文空间。分页步长始终为 iframe 的整数 viewport 宽度，左右不对称的留白通过列间距之和保持一致。
 
 左右各 30% 的点击区用于翻页，中央用于找回隐藏的工具入口。仅处理短时、未拖动的主指针点击，文字选择、链接和标注优先；F8 始终可恢复阅读设置。全屏状态为会话状态，由 C++ 保存并恢复 WINDOWPLACEMENT 和窗口样式；WebView2 的原生 AcceleratorKeyPressed 拦截 Alt+Enter（过滤重复按键），投递到窗口线程后再改变尺寸，避免同步回调内重入。Alt+Enter 参照 Ndx 的无边框窗口隐藏标题栏：保留 `WS_OVERLAPPEDWINDOW`，`WM_NCCALCSIZE` 把标题栏高度并入客户区并保留两侧和底边的隐形调整边框（WebView2 子窗口覆盖客户区，客户区内的命中测试无法提供调整边），切换前后按内容区的屏幕位置反推窗口矩形，使正文不移动，恢复时保证标题栏留在工作区内。最大化窗口保持占满工作区。F11 和工具栏进入监视器全屏；D2D 和系统云母外壳都支持两者。
+
+## AI 助读（本机 Agent CLI）
+
+阅读页侧栏的「问书」和选词菜单的「问 AI」复用本机已安装并登录的 Codex CLI、Claude Code 或 opencode 回答关于当前书籍的问题。思路参考 NeoRead（`apps/server/internal/neoread/cli.go`、`claude.go`、`codex.go`；该项目没有声明许可证，因此只借鉴做法、独立实现），opencode 为本项目自行接入。
+
+- 每个问题都是一次全新、无状态的 CLI 运行：prompt 经 stdin 传入，之前的对话在 prompt 中按预算重放（`web/agent-prompt.ts`），不写入用户的 CLI 会话列表（Claude `--no-session-persistence`、Codex `--ephemeral`）。
+- 只读、不调用工具：Claude `--tools ""`、不加载 MCP 与项目设置；Codex 只读沙箱、`approval_policy=never`、关闭工具类 feature，并按名称关闭用户 `config.toml` 中的 MCP 服务器；opencode 通过 `OPENCODE_CONFIG_CONTENT` 关闭全部工具并拒绝所有权限。保留用户级配置，以便沿用其登录、网关和默认模型。
+- `app/src/agent_runner.cpp` 在注册表最新 PATH 与常见安装目录中查找可执行文件（npm 的 `.cmd` 通过 cmd.exe 启动，参数不含 cmd 元字符），在空的临时目录中无窗口运行，并放入 Job 对象：停止、15 分钟超时或退出应用时连同子进程一起结束。
+- `engine/src/agent.cpp` 把三种 JSONL 输出统一为文本、进度与错误；只有供应商的成功终止事件加正常退出才算回答完成。事件样例来自 codex-cli 0.167、Claude Code 2.1 和 opencode 1.19 的实测输出，见 `tests/engine_tests.cpp`。
+- 回答以 Markdown 显示（`web/markdown.ts`），先整体转义再生成固定标签，模型输出无法注入元素或链接。可用 `build/bin/Release/dr-agent.exe <codex|claude|opencode> [model] [--cancel-after ms] < prompt.txt` 单独验证本机 CLI。

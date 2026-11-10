@@ -38,7 +38,10 @@ export interface Annotation extends TextAnchor {
 }
 
 export interface Dictionary { id: string; name: string; url: string; enabled: boolean }
-export type SelectionAction = 'highlight' | 'underline' | 'note' | 'copy' | 'search' | 'dictionary';
+export type SelectionAction = 'highlight' | 'underline' | 'note' | 'copy' | 'search' | 'dictionary' | 'ask';
+/** Local agent CLIs that can answer questions about the book. */
+export type AgentId = 'codex' | 'claude' | 'opencode';
+export type AgentChoice = 'auto' | AgentId;
 export type BookOpeningAnimation = 'circles' | 'book' | 'cover' | 'none';
 export type LibrarySort = 'added' | 'read' | 'title' | 'author';
 
@@ -53,6 +56,10 @@ export interface ApplicationSettings {
   dictionaries: Dictionary[];
   highlightColors?: string[];
   underlineColor?: string;
+  /** Which agent CLI answers reading questions; 'auto' takes the first one installed. */
+  agent?: AgentChoice;
+  /** Optional model per CLI; empty uses the CLI's own default. */
+  agentModels?: Partial<Record<AgentId, string>>;
 }
 
 export interface Settings { version?: number; application: ApplicationSettings; reading: ReadingSettings }

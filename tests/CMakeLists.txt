@@ -4,7 +4,10 @@ target_link_libraries(dr-engine-tests PRIVATE dr_engine miniz dr_sqlite)
 add_test(NAME engine COMMAND dr-engine-tests)
 add_executable(dr-epub ../tools/epub_cli.cpp)
 target_link_libraries(dr-epub PRIVATE dr_engine)
-set_target_properties(dr-epub dr-engine-tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_executable(dr-agent ../tools/agent_cli.cpp ../app/src/agent_runner.cpp)
+target_link_libraries(dr-agent PRIVATE dr_engine)
+target_compile_definitions(dr-agent PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+set_target_properties(dr-epub dr-engine-tests dr-agent PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # JavaScript navigation tests use Node's built-in runner; no npm dependencies.
 find_program(DR_NODE_EXECUTABLE NAMES node)
@@ -17,5 +20,7 @@ if(DR_NODE_EXECUTABLE)
       --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/reader_navigation_tests.ts")
     add_test(NAME frontend-state COMMAND "${DR_NODE_EXECUTABLE}"
       --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/frontend_state_tests.ts")
+    add_test(NAME agent-chat COMMAND "${DR_NODE_EXECUTABLE}"
+      --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/agent_tests.ts")
   endif()
 endif()

@@ -657,6 +657,30 @@ try {
           return tip.matches(':popover-open') && tip.classList.contains('visible') && tip.textContent.startsWith('书内搜索');
         });
         await page.mouse.move(5, 400);
+        // The toolbar title is chrome: not selectable, and only an ellipsised title shows its full name.
+        if (await app.evaluate(() => getComputedStyle(document.getElementById('reader-book-title')).userSelect) !== 'none')
+          throw Error('reader toolbar title must not be selectable');
+        const toolbarTitle = await app.evaluate(() => {
+          const title = document.getElementById('reader-book-title');
+          if (title.scrollWidth <= title.clientWidth && title.hasAttribute('data-tooltip')) return null;
+          title.style.maxWidth = '48px';
+          return title.textContent.replace(/^《|》$/gu, '');
+        });
+        if (toolbarTitle === null) throw Error('an untruncated toolbar title must not show a hover tip');
+        await app.waitForFunction(() => document.getElementById('reader-book-title').hasAttribute('data-tooltip'));
+        await app.locator('#reader-book-title').hover();
+        await app.waitForFunction(text => {
+          const tip = document.querySelector('.ui-tooltip');
+          return tip.matches(':popover-open') && tip.textContent.includes(text);
+        }, toolbarTitle);
+        const tipBox = await app.evaluate(() => {
+          const tip = document.querySelector('.ui-tooltip').getBoundingClientRect();
+          const title = document.getElementById('reader-book-title').getBoundingClientRect();
+          return Math.abs(tip.left + tip.width / 2 - (title.left + title.width / 2)) < 2 || tip.left <= 4;
+        });
+        if (!tipBox) throw Error('toolbar title tip must centre under the title text');
+        await page.mouse.move(5, 400);
+        await app.evaluate(() => { document.getElementById('reader-book-title').style.maxWidth = ''; });
         await app.waitForFunction(() => !document.querySelector('.ui-tooltip').matches(':popover-open'));
         // The far-right button collapses the toolbar into a single expand button and persists it.
         await app.locator('#collapse-toolbar').click();

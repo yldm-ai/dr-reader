@@ -283,7 +283,16 @@ export class Reader {
     const title = $("reader-book-title");
     const displayTitle = shortTitle(book.title);
     title.textContent = /《[^》]*》/u.test(book.title) ? displayTitle : `《${displayTitle}》`;
-    title.title = book.title;
+    // Only a shortened or ellipsised title gets a hover tip (tooltip.ts) with the full name;
+    // the toolbar can narrow later, so the check is repeated whenever the title resizes.
+    const shortened = displayTitle !== book.title.trim();
+    const syncTitleTip = () => {
+      title.title = shortened || title.scrollWidth > title.clientWidth ? book.title : "";
+    };
+    this.titleObserver?.disconnect();
+    this.titleObserver = new ResizeObserver(syncTitleTip);
+    this.titleObserver.observe(title);
+    syncTitleTip();
     this.setTocExpanded(false);
     $("toc-panel").hidden = false;
     this.tab("toc");

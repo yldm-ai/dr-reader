@@ -11,6 +11,9 @@ type Transition = {
   disposeFlip?: () => void;
 };
 
+/** Distance (CSS px) over which the spread spine fades as a soft flap's corner reaches it. */
+const SPINE_FADE = 36;
+
 /** Two read-only EPUB snapshots; the live document commits exactly once underneath. */
 export class ReaderMotion {
   private allowed = true;
@@ -199,6 +202,8 @@ export class ReaderMotion {
     // the last ~40px when the live page returns. Hold the final pose briefly.
     const render = flip.getRender();
     let landingShadowOpacity = 1;
+    // The spine copy that covered the old snapshot; it moves into the engine at the reveal.
+    const spine = overlay.querySelector<HTMLElement>(':scope > .stpageflip-spine');
     // StPageFlip positions pages and shadows with 3D transforms even when nothing
     // is rotated. Any 3D layer under a page drops its text from ClearType to
     // grayscale, so it thins as the turn starts and sharpens again when the live
@@ -242,11 +247,15 @@ export class ReaderMotion {
           const t = index / Math.max(1, frames.length - 1);
           return () => {
             const edge = margin + (inset - margin) * t;
-            flipper.do({ x: pageWidth - margin + (inset - 2 * pageWidth + margin) * t,
-              y: corner === 'bottom' ? height - edge : edge });
+            const x = pageWidth - margin + (inset - 2 * pageWidth + margin) * t;
+            flipper.do({ x, y: corner === 'bottom' ? height - edge : edge });
             // The inner gradient has fixed opacity stops even when the library's
             // shadow strength reaches zero. Fade the whole shadow before cleanup.
             landingShadowOpacity = Math.min(1, (1 - t) / .1);
+            // The soft flap slides over the spine instead of hinging on it. The crease
+            // fades as the flap's free corner (x, relative to the spine) closes in, stays
+            // hidden under it, and returns as the sheet settles, so it never pops.
+            if (spine) spine.style.opacity = String(Math.max(0, Math.min(1, Math.max(x / SPINE_FADE, (t - .9) / .1))));
           };
         });
       }
@@ -300,6 +309,8 @@ export class ReaderMotion {
       // The resting spread of an uncurl is the previous page. Pose the fully turned
       // first frame now so the paint that reveals the engine still shows the old page.
       if (unturn) { first?.(); render.drawFrame(); }
+      // Same paint as the reveal: the spine stays on top of the engine's pages and shadows.
+      if (spine) host.querySelector('.stf__block')?.append(spine);
       oldPage.remove(); newPage.remove();
       if (signal.aborted) onAbort();
     });
@@ -331,6 +342,12 @@ export class ReaderMotion {
     this.active = transaction;
     let committed: Promise<void> | undefined;
     const commit = () => committed ??= Promise.resolve().then(update);
+    // A spread turn keeps the spine over the old snapshot until turnPage hands it to the pages.
+    if (spread && effect.startsWith('turn')) {
+      const spine = document.createElement('div');
+      spine.className = 'stpageflip-spine';
+      overlay.append(spine);
+    }
     try {
       const oldPage = await this.snapshot(frame, overlay, transaction.controller.signal);
       overlay.style.visibility = 'visible';

@@ -171,9 +171,9 @@ button {
   height: 100vh;
   overflow: hidden;
 }
-/* The library home is application chrome, not readable content: labels, titles and counts
-   are not selectable. Text fields stay editable and selectable. */
-:is(.sidebar, .library-view, .book-context-menu) { -webkit-user-select: none; user-select: none; }
+/* The library home and the reader toolbar are application chrome, not readable content:
+   labels, titles and counts are not selectable. Text fields stay editable and selectable. */
+:is(.sidebar, .library-view, .book-context-menu, .reader-toolbar, .corner-button) { -webkit-user-select: none; user-select: none; }
 :is(.sidebar, .library-view) :is(input, textarea) { -webkit-user-select: text; user-select: text; }
 .sidebar {
   width: 224px;
@@ -937,6 +937,7 @@ body[data-animations="false"] .selection-menu {
   height: 18px;
   border-left: 1px solid var(--border);
 }
+/* Shrinks to its text so the hover tip centres under the title, not the empty toolbar. */
 .reader-book-title {
   font-size: var(--text-body);
   white-space: nowrap;
@@ -944,8 +945,9 @@ body[data-animations="false"] .selection-menu {
   text-overflow: ellipsis;
   color: var(--muted);
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   font-weight: 400;
+  cursor: default;
 }
 .reader-actions {
   justify-self: end;
@@ -2338,6 +2340,8 @@ body[data-animations="false"] .toast { animation: none; }
   position: fixed;
   inset: auto;
   margin: 0;
+  /* Short tips stay on one line; long ones (full book titles) wrap instead of being cut again. */
+  width: max-content;
   max-width: min(320px, calc(100vw - 8px));
   padding: 3px 7px;
   border: 1px solid #0000001a;
@@ -2346,9 +2350,8 @@ body[data-animations="false"] .toast { animation: none; }
   color: #242424;
   box-shadow: 0 2px 8px #00000014;
   font: 400 12px/16px var(--font-ui);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
   pointer-events: none;
   opacity: 0;
   transform: translateY(-2px);
@@ -2708,10 +2711,22 @@ body > .page-surface { max-width: none; }
   pointer-events: none;
   background: linear-gradient(to right, transparent, #00000008 45%, #0000000c 50%, #00000008 55%, transparent);
 }
-/* Keep the resting spine visible above the soft-turn snapshots throughout the turn. */
-.reader-view[data-layout="double"] .page-surface:has(> .page-motion-turn)::after {
-  z-index: 9;
+/* During a spread turn the page-surface spine sits under the overlay, so the overlay carries
+   one copy of it. StPageFlip's soft flap slides across the spine rather than hinging on it,
+   so the copy stays on top and motion.ts fades it out as the flap reaches the spine and back
+   in as the flap lands; first and last frames match the live spine. */
+.stpageflip-spine {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 18px);
+  width: 36px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, #00000008 45%, #0000000c 50%, #00000008 55%, transparent);
 }
+/* Above StPageFlip's pages (1–5) and curl shadows (10). */
+.stpageflip-host .stpageflip-spine { z-index: 11; }
 
 .icon-button, .text-button, .nav-item, .toc-tabs button, .theme-swatch, .select-option {
   transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);

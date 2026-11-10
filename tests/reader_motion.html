@@ -195,6 +195,7 @@ try {
   const getRender = PageFlip.prototype.getRender;
   const inspected = new WeakSet();
   const checkedLandings = new WeakSet();
+  const spineFaded = new WeakSet();
   let landed = 0;
   PageFlip.prototype.getRender = function () {
     const render = getRender.call(this);
@@ -204,6 +205,8 @@ try {
       render.startAnimation = (frames, time, done) => start(frames.map(draw => () => {
         draw();
         const engine = host.querySelector('.stpageflip-host');
+        const spine = engine?.querySelector('.stpageflip-spine');
+        if (engine?.dataset.density === 'soft' && spine?.style.opacity === '0') spineFaded.add(render);
         if (draw !== frames.at(-1) || engine?.dataset.density !== 'soft' || checkedLandings.has(render)) return;
         checkedLandings.add(render);
         render.drawFrame();
@@ -214,6 +217,9 @@ try {
           'the last soft-spread frame must land flat before showing the live page');
         check([...engine.querySelectorAll('.stf__outerShadow, .stf__innerShadow')]
           .every(shadow => getComputedStyle(shadow).opacity === '0'), 'curl shadows must vanish before cleanup');
+        check(engine.querySelector('.stpageflip-spine')?.style.opacity === '1',
+          'the spine must be fully back on the landing frame so cleanup does not pop it in');
+        check(spineFaded.has(render), 'the spine must fade while the soft flap slides over it');
         landed++;
       }), time, done);
     }
@@ -237,6 +243,11 @@ try {
       const halves = [...engine.querySelectorAll('.stpageflip-page .motion-page')];
       check(halves.length === 4 && halves.every((pane, i) => pane.style.width === '980px' && pane.style.left === (i % 2 ? '-490px' : '0px')),
         `${effect} ${direction}: each half page must crop its side of the spread snapshot`);
+      // One spine copy rides above the engine's pages and curl shadows, so its first and last
+      // frames match the live spine; soft flaps fade it while they slide across (checked at landing).
+      const spines = host.querySelectorAll('.stpageflip-spine');
+      check(spines.length === 1 && spines[0].parentElement === engine.querySelector('.stf__block') &&
+        Number(getComputedStyle(spines[0]).zIndex) > 10, `${effect} ${direction}: the spine must sit above the turning pages and shadows`);
       await pending;
       check(!host.querySelector('.page-motion') && frame.style.visibility === '' && frame.contentWindow.scrollX === target,
         `${effect} ${direction}: a finished spread turn must show the live spread`);

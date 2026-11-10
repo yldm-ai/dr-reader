@@ -15,7 +15,7 @@ try {
   panel.style.cssText = 'position:fixed;left:24px;top:24px;bottom:24px;width:280px';
   document.body.dataset.theme = 'dark';
   document.body.dataset.animations = 'true';
-  const { Reader } = await import('../web/reader.js');
+  const { Reader } = await import('../web/reader.ts');
   const reader = Object.create(Reader.prototype);
   Object.assign(reader, { chapter: 0, book: {
     chapters: [{ href: 'cover.html' }, { href: 'deep.html' }, { href: 'group.html' }],

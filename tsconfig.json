@@ -5,8 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
-    "allowJs": true,
-    "checkJs": false,
+    // Node runs the tests and scripts by stripping types, so only erasable syntax is allowed and
+    // type-only imports must say so.
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,

@@ -10,6 +10,7 @@ import { htmlFromXhtml } from '../web/xhtml.ts';
 import { materialPaths } from '../web/material-icons.ts';
 import { configureIconFonts, icon, fluentGlyph } from '../web/icons.ts';
 import { shortTitle } from '../web/title.ts';
+import type { ReadingSettings } from '../web/settings-state.ts';
 
 test('book titles past twenty characters end in an ellipsis', () => {
   assert.equal(shortTitle('仙逆'), '仙逆');
@@ -72,7 +73,7 @@ test('chapter cache evicts least recently used chapters and bounds decoded memor
   assert.equal(cache.get('c'), 'x'.repeat(7));
 });
 test('transport object changes do not require reflow, typography changes do', () => {
-  const reading = { fontFamily: 'serif', fontSize: 20, mode: 'paged' };
+  const reading = { fontFamily: 'serif', fontSize: 20, mode: 'paged' } as ReadingSettings;
   assert.ok(sameReading(reading, structuredClone(reading)));
   assert.equal(sameReading(reading, { ...reading, fontSize: 21 }), false);
   assert.equal(sameReading(undefined, reading), false);

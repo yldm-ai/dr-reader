@@ -1,4 +1,21 @@
-export function bootstrapFixture() {
+import type { HostMessage } from '../web/bridge.ts';
+import type { Annotation, Book, Bootstrap, Settings, Shelf } from '../web/types.ts';
+
+/** Bootstrap data plus the switches a test uses to steer the mock host. */
+export interface Fixture extends Bootstrap {
+  annotations?: Annotation[];
+  shelves?: Shelf[];
+  exportError?: string;
+  exportResult?: unknown;
+  notesImportError?: string;
+  notesImportResult?: unknown;
+  fullscreen?: boolean;
+  titlebarHidden?: boolean;
+}
+export interface HostRequest { method: string; params: any }
+
+export function bootstrapFixture(): Fixture {
+  // The fixture leaves out settings and book fields the UI must tolerate missing.
   const settings = {
     version: 2,
     application: { theme: 'light', shell: 'direct2d', animations: false, bookOpeningEnabled: false, bookOpeningAnimation: 'circles',
@@ -9,33 +26,35 @@ export function bootstrapFixture() {
       width: 760, paddingX: 44, paddingY: 38, paddingTop: 38, paddingBottom: 38, paddingLeft: 44, paddingRight: 44,
       showToolbar: true, showToc: true, showChapterTitle: true, showPagination: true, showProgress: true,
       fullBackground: false, fullWidth: false, animation: 'none', animationDuration: 220, turnDuration: 800, layout: 'single', doubleAnimation: 'turn',publisherStyles: false },
-  };
+  } as Settings;
   const book = { id: 'fixture', title: '阅读与时光', author: '测试作者', addedAt: 1,
     lastRead: 0, progress: 0, chapters: [{ href: 'chapter.html', title: '第一章' }, { href: 'second.html', title: '第二章' }],
-    toc: [{ href: 'chapter.html', title: '第一章', chapter: 0, children: [] },
-      { href: 'second.html', title: '第二章', chapter: 1, children: [] }], bookmarks: [] };
-  return { settings, defaults: structuredClone(settings), books: [book], dataPath: 'test-only',
+    toc: [{ href: 'chapter.html', title: '第一章', chapter: 0, children: [] as never[] },
+      { href: 'second.html', title: '第二章', chapter: 1, children: [] as never[] }], bookmarks: [] as Book['bookmarks'] };
+  return { settings, defaults: structuredClone(settings), books: [book as Book], dataPath: 'test-only',
     fonts: ['Microsoft YaHei', '宋体', 'Microsoft YaHei', ...Array.from({ length: 180 }, (_, i) => `Test Font ${i}`)] };
 }
-export function installNativeMock(data = bootstrapFixture()) {
+export function installNativeMock(data: Fixture = bootstrapFixture()) {
   const messages = new EventTarget();
-  const requests = [];
+  const requests: HostRequest[] = [];
+  const reply = (message: HostMessage) => queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: message })));
   window.chrome ||= {};
   window.chrome.webview = {
-    addEventListener: (...args) => messages.addEventListener(...args),
-    postMessage({ id, method, params }) {
+    addEventListener: (type, listener) => messages.addEventListener(type, listener as unknown as EventListener),
+    postMessage(message) {
+      const { id, method, params } = message as { id: number } & HostRequest;
       requests.push({ method, params });
-      let result = true;
+      let result: unknown = true;
       if (method === 'notes.export') {
         if (data.exportError) {
-          queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { id, error: data.exportError } })));
+          reply({ id, error: data.exportError });
           return;
         }
         result = data.exportResult || { saved: true };
       }
       if (method === 'notes.import') {
         if (data.notesImportError) {
-          queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { id, error: data.notesImportError } })));
+          reply({ id, error: data.notesImportError });
           return;
         }
         result = data.notesImportResult || { imported: 2, skipped: 1 };
@@ -62,9 +81,9 @@ export function installNativeMock(data = bootstrapFixture()) {
         result = structuredClone(data.books[0]);
       }
       if (method === 'fullscreen') {
-        data.fullscreen = params?.enabled ?? !data.fullscreen;
-        result = data.fullscreen;
-        queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { event: 'fullscreen', enabled: result } })));
+        const enabled = data.fullscreen = params?.enabled ?? !data.fullscreen;
+        result = enabled;
+        reply({ event: 'fullscreen', enabled });
       }
       if (method === 'book.stats') result = { chars: data.books[0].chapters.map(() => 2400) };
       if (method === 'book.info') {
@@ -79,15 +98,15 @@ export function installNativeMock(data = bootstrapFixture()) {
         };
       }
       if (method === 'titlebar') {
-        data.titlebarHidden = params?.hidden ?? !data.titlebarHidden;
-        result = data.titlebarHidden;
-        queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { event: 'titlebar', hidden: result } })));
+        const hidden = data.titlebarHidden = params?.hidden ?? !data.titlebarHidden;
+        result = hidden;
+        reply({ event: 'titlebar', hidden });
       }
       if (method === 'settings') {
-        for (const group of ['reading', 'application']) if (params[group]) Object.assign(data.settings[group], params[group]);
+        for (const group of ['reading', 'application'] as const) if (params[group]) Object.assign(data.settings[group], params[group]);
         result = structuredClone(data.settings);
       }
-      queueMicrotask(() => messages.dispatchEvent(new MessageEvent('message', { data: { id, result } })));
+      reply({ id, result });
     },
   };
   return { requests, data };

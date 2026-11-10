@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { WheelPaging } from '../web/wheel-paging.ts';
-const event = (deltaY, extra = {}) => ({ deltaX: 0, deltaY, deltaMode: 0, ...extra });
+const event = (deltaY: number, extra: { deltaX?: number; deltaMode?: number; momentum?: boolean } = {}) => ({ deltaX: 0, deltaY, deltaMode: 0, ...extra });
 
 test('a smooth swipe ignores a long decaying tail, then rearms after quiet', () => {
   const paging = new WheelPaging();

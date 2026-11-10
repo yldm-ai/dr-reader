@@ -1,4 +1,4 @@
-import { call, bookUrl, escape } from './bridge.js';
+import { call, bookUrl, escape } from './bridge.ts';
 import { icon } from './icons.ts';
 import { dragDialog } from './drag-dialog.ts';
 

@@ -3,6 +3,7 @@ import { chromium } from 'playwright-core';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { AddressInfo } from 'node:net';
 
 const edge = process.env.DR_EDGE_PATH || [
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -13,16 +14,16 @@ const directory = resolve('build/browser-tests');
 await mkdir(directory, { recursive: true });
 const server = await createServer({ configFile: 'vite.tests.config.ts', server: { port: 0 } });
 await server.listen();
-const port = server.httpServer.address().port;
+const port = (server.httpServer.address() as AddressInfo).port;
 const browser = await chromium.launch({ executablePath: edge, headless: true });
 try {
   for (const name of ['toc_motion', 'toc_anchors', 'reader_touchpad', 'library_context_actions', 'library_back_to_top', 'library_sort', 'toc_hierarchy', 'icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'production_smoke']) {
     if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
-    const errors = [];
+    const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    if (name === 'reader_motion') await page.exposeFunction('captureMotion', label => page.locator('#page-surface').screenshot({ path: resolve(directory, `${label}.png`) }));
-    if (name === 'book_opening') await page.exposeFunction('captureOpening', label => page.screenshot({ path: resolve(directory, `${label}.png`) }));
+    if (name === 'reader_motion') await page.exposeFunction('captureMotion', (label: string) => page.locator('#page-surface').screenshot({ path: resolve(directory, `${label}.png`) }));
+    if (name === 'book_opening') await page.exposeFunction('captureOpening', (label: string) => page.screenshot({ path: resolve(directory, `${label}.png`) }));
     try {
       await page.goto(`http://127.0.0.1:${port}/tests/${name}.html`);
       await page.waitForSelector('html[data-result]', { timeout: 18000, state: 'attached' });
@@ -71,7 +72,7 @@ try {
         await app.locator('#book-shelf-menu').hover();
         await page.waitForTimeout(260);
         if (!await app.locator('#book-shelf-menu').isVisible()) throw Error('submenu must stay open while crossing the gap');
-        await app.locator('#toast').evaluate(el => { el.hidden = true; });
+        await app.locator('#toast').evaluate((el: HTMLElement) => { el.hidden = true; });
         await page.locator('iframe').screenshot({ path: resolve(directory, 'book-menu-light.png') });
         await app.evaluate(() => { document.body.dataset.theme = 'dark'; });
         await page.locator('iframe').screenshot({ path: resolve(directory, 'book-menu-dark.png') });
@@ -80,9 +81,9 @@ try {
         // Keyboard opening must offer every operation in a predictable order.
         await app.locator('.book-card').first().press('Shift+F10');
         await app.locator('#book-menu-open').press('ArrowDown');
-        if (!await app.locator('#book-menu-info').evaluate(el => el === document.activeElement)) throw Error('keyboard menu navigation must reach info');
+        if (!await app.locator('#book-menu-info').evaluate((el: HTMLElement) => el === document.activeElement)) throw Error('keyboard menu navigation must reach info');
         await app.locator('#book-menu-info').press('ArrowDown');
-        if (!await app.locator('#book-menu-export').evaluate(el => el === document.activeElement)) throw Error('keyboard menu navigation must reach export');
+        if (!await app.locator('#book-menu-export').evaluate((el: HTMLElement) => el === document.activeElement)) throw Error('keyboard menu navigation must reach export');
         await app.locator('#book-menu-export').press('Escape');
       }
       if (name === 'library_back_to_top') {
@@ -111,7 +112,7 @@ try {
         const app = page.frames().find(frame => frame.parentFrame());
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
-        await page.locator('iframe').evaluate(frame => { frame.srcdoc = frame.srcdoc.replace('icons=mdl2', 'icons=none'); });
+        await page.locator('iframe').evaluate((frame: HTMLIFrameElement) => { frame.srcdoc = frame.srcdoc.replace('icons=mdl2', 'icons=none'); });
         await page.waitForFunction(() => document.querySelector('iframe').contentDocument?.querySelector('.book-card'));
         const refreshed = page.frames().find(frame => frame.parentFrame());
         if (await refreshed.locator('.fluent-icon').count()) throw Error('missing icon fonts must use SVG for every icon');
@@ -120,7 +121,7 @@ try {
         await refreshed.locator('.book-card').first().click();
         await refreshed.locator('#reader-loading').waitFor({ state: 'hidden' });
         if (!await refreshed.evaluate(() => {
-          const doc = document.getElementById('book-frame').contentDocument, tip = doc.querySelector('.dr-note-tip');
+          const doc = (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument, tip = doc.querySelector('.dr-note-tip');
           const style = tip && doc.defaultView.getComputedStyle(tip, '::before');
           return style && style.maskImage.includes('data:image/svg+xml') && style.content === '""';
         })) throw Error('fontless note tip must use vector mask without adding anchor text');
@@ -150,12 +151,12 @@ try {
         await app.locator('#reader-search').focus();
         await hidden();
         await app.locator('#reader-settings').click();
-        const set = async (key, value) => {
+        const set = async (key: string, value: boolean) => {
           await app.evaluate(({ key, value }) => {
-            const input = document.getElementById(`setting-${key}`); input.checked = value;
+            const input = document.getElementById(`setting-${key}`) as HTMLInputElement; input.checked = value;
             input.dispatchEvent(new Event('change', { bubbles: true }));
           }, { key, value });
-          await app.waitForFunction(({ key, value }) => window.nativeProbe.data.settings.reading[key] === value, { key, value });
+          await app.waitForFunction(({ key, value }) => (window.nativeProbe.data.settings.reading as unknown as Record<string, unknown>)[key] === value, { key, value });
         };
         await set('showProgress', false); await set('showBookPages', false);
         if (!await app.locator('#setting-autoHideProgress').isDisabled()) throw Error('auto hide must be disabled without footer content');
@@ -179,7 +180,7 @@ try {
         const app = page.frames().find(frame => frame.parentFrame());
         const toast = app.locator('#toast');
         await toast.hover();
-        for (const scheme of ['light', 'dark']) {
+        for (const scheme of ['light', 'dark'] as const) {
           await page.emulateMedia({ colorScheme: scheme });
           await app.waitForFunction(theme => document.body.dataset.theme === theme, scheme);
           const shape = await toast.evaluate(el => {
@@ -194,6 +195,15 @@ try {
         }
         await app.locator('.toast-close').click();
         await toast.waitFor({ state: 'hidden' });
+        // Keyboard focus inside a notification pauses its countdown, as hovering does; leaving resumes it.
+        await page.mouse.move(5, 995);
+        await app.evaluate(() => document.getElementById('import-side').click());
+        await toast.waitFor({ state: 'visible' });
+        await app.locator('.toast-close').focus();
+        await page.waitForTimeout(3200);
+        if (await toast.isHidden()) throw Error('focus inside a notification must pause its countdown');
+        await app.locator('#library-search').focus();
+        await toast.waitFor({ state: 'hidden', timeout: 4000 });
         await app.locator('#open-settings').click();
         const errorMessage = '无法保存设置：这是一条用于检查长消息换行和暗色提示的测试文字。'.repeat(20);
         await app.evaluate(message => {
@@ -202,7 +212,7 @@ try {
         }, errorMessage);
         await toast.waitFor({ state: 'visible' });
         if (await toast.getAttribute('data-kind') !== 'error') throw Error('error must use an error notification');
-        if (!await app.locator('#application-settings').evaluate(el => el.open)) throw Error('notification must preserve open modal');
+        if (!await app.locator('#application-settings').evaluate((el: HTMLDialogElement) => el.open)) throw Error('notification must preserve open modal');
         await toast.hover();
         if (!await toast.evaluate(el => {
           const box = el.getBoundingClientRect(), text = el.querySelector('.toast-message');
@@ -258,7 +268,7 @@ try {
         await page.locator('iframe').screenshot({ path: resolve(directory, 'settings-soft-focus-dark.png') });
         await page.emulateMedia({ colorScheme: 'light' });
         await app.locator('#application-settings-close').click();
-        if (!await app.locator('#application-settings').evaluate(el => el.open)) throw Error('outside close button must only dismiss dropdown first');
+        if (!await app.locator('#application-settings').evaluate((el: HTMLDialogElement) => el.open)) throw Error('outside close button must only dismiss dropdown first');
         const dialog = app.locator('#application-settings');
         const heading = app.locator('#application-settings-title');
         const original = await dialog.boundingBox(), handle = await heading.boundingBox();
@@ -277,7 +287,7 @@ try {
         await page.mouse.down();
         await page.mouse.move(1390, 990, { steps: 5 });
         await page.mouse.up();
-        if (!await dialog.evaluate(el => {
+        if (!await dialog.evaluate((el: HTMLDialogElement) => {
           const rect = el.getBoundingClientRect();
           return el.open && rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
         })) throw Error('dragging beyond edge must stay on screen and not dismiss dialog');
@@ -307,26 +317,26 @@ try {
       }
       if (name === 'system_theme') {
         const app = page.frames().find(frame => frame.parentFrame());
-        for (const scheme of ['light', 'dark', 'light']) {
+        for (const scheme of ['light', 'dark', 'light'] as const) {
           await page.emulateMedia({ colorScheme: scheme });
           await app.waitForFunction(theme => document.body.dataset.theme === theme, scheme);
-          await app.waitForFunction(color => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === color,
+          await app.waitForFunction(color => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === color,
             scheme === 'dark' ? 'rgb(25, 25, 25)' : 'rgb(255, 255, 255)');
           if (!await app.evaluate(() => window.nativeProbe.data.settings.application.theme === 'system' && window.nativeProbe.data.settings.reading.theme === 'system'))
             throw Error('OS changes must preserve system preferences');
         }
         await app.locator('#reader-settings').click();
         await page.emulateMedia({ colorScheme: 'dark' });
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
+        await app.waitForFunction(() => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
         await app.locator('[data-setting-theme="reading"][data-value="sepia"]').click();
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'sepia');
         await page.emulateMedia({ colorScheme: 'light' });
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(255, 250, 243)');
+        await app.waitForFunction(() => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === 'rgb(255, 250, 243)');
         await app.locator('[data-close="reading-settings"]').click();
         await app.locator('#reader-app-settings').click();
         await app.locator('[data-setting-theme="application"][data-value="dark"]').click();
         await app.waitForFunction(() => window.nativeProbe.data.settings.application.theme === 'dark');
-        for (const scheme of ['dark', 'light']) await page.emulateMedia({ colorScheme: scheme });
+        for (const scheme of ['dark', 'light'] as const) await page.emulateMedia({ colorScheme: scheme });
         if (await app.locator('body').getAttribute('data-theme') !== 'dark') throw Error('manual theme must override system');
         await app.locator('[data-setting-theme="application"][data-value="system"]').click();
         await app.waitForFunction(() => document.body.dataset.theme === 'light');
@@ -337,9 +347,9 @@ try {
         await app.locator('#shelf-add').click();
         await app.locator('#shelf-name').fill('本地封面');
         await app.locator('#shelf-cover-file').setInputFiles({ name: 'cover.png', mimeType: 'image/png', buffer: Buffer.from(await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 240; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#668078'; ctx.fillRect(0, 0, 160, 240); return canvas.toDataURL('image/png').split(',')[1]; }), 'base64') });
-        await app.waitForFunction(() => document.querySelector('#shelf-cover-preview img')?.src.startsWith('data:image/webp'), null, { timeout: 10000 });
+        await app.waitForFunction(() => document.querySelector<HTMLImageElement>('#shelf-cover-preview img')?.src.startsWith('data:image/webp'), null, { timeout: 10000 });
         await page.locator('iframe').screenshot({ path: resolve(directory, 'shelf-editor.png') });
-        const cancelWidth = await app.locator('#shelf-cancel').evaluate(el => el.getBoundingClientRect().width);
+        const cancelWidth = await app.locator('#shelf-cancel').evaluate((el: HTMLElement) => el.getBoundingClientRect().width);
         if (cancelWidth > 100) throw Error('shelf cancel must be compact');
         await app.locator('#shelf-save').click();
         await app.waitForFunction(() => window.nativeProbe.data.shelves.length === 2);
@@ -349,10 +359,10 @@ try {
       if (name === 'production_smoke') {
         const app = page.frames().find(frame => frame.parentFrame());
         await app.locator('#setting-fontFamily-trigger').click();
-        const capture = name => page.locator('iframe').screenshot({ path: resolve(directory, name), animations: 'disabled' });
+        const capture = (name: string) => page.locator('iframe').screenshot({ path: resolve(directory, name), animations: 'disabled' });
         await capture('reading-settings.png');
         await app.locator('.select-search input').press('Escape');
-        if (!await app.locator('#reading-settings').evaluate(el => el.open)) throw Error('Escape closed the whole drawer');
+        if (!await app.locator('#reading-settings').evaluate((el: HTMLDialogElement) => el.open)) throw Error('Escape closed the whole drawer');
         await app.locator('[data-close="reading-settings"]').click();
         await app.locator('#reader-app-settings').click();
         await app.locator('[data-setting-theme="application"][data-value="dark"]').click();
@@ -365,25 +375,25 @@ try {
           const channels = colors[key].slice(1).match(/../g).map(value => parseInt(value, 16));
           if (Math.max(...channels) - Math.min(...channels) > 1) throw Error(`dark surface ${key} must be neutral gray`);
         }
-        const luminance = hex => hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255)
+        const luminance = (hex: string) => hex.slice(1).match(/../g).map(value => parseInt(value, 16) / 255)
           .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
           .reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
-        const ratio = (a, b) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
+        const ratio = (a: string, b: string) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
         for (const [a, b] of [['--text', '--bg'], ['--muted', '--surface'], ['--on-primary', '--primary']]) {
-          const expand = color => color.length === 4 ? '#' + [...color.slice(1)].map(c => c + c).join('') : color;
+          const expand = (color: string) => color.length === 4 ? '#' + [...color.slice(1)].map(c => c + c).join('') : color;
           if (ratio(expand(colors[a]), expand(colors[b])) < 4.5) throw Error(`${a}/${b} text contrast is too low`);
         }
         await capture('application-settings-dark.png');
         // Application settings are an in-app modal over the page; only its content scrolls.
         if (!await app.evaluate(async () => {
-          const dialog = document.getElementById('application-settings'), scroll = document.getElementById('application-settings-scroll');
+          const dialog = (document.getElementById('application-settings') as HTMLDialogElement), scroll = document.getElementById('application-settings-scroll');
           const head = () => document.getElementById('application-settings-title').getBoundingClientRect().top;
           if (!document.getElementById('application-settings-title').closest('.app-settings-nav')) return false;
           const before = head();
           scroll.scrollTop = scroll.scrollHeight;
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
           const ok = dialog.matches(':modal') && !document.getElementById('app').hidden && head() === before &&
-            document.querySelector('.app-settings-nav a[aria-current]')?.dataset.section === 'about' &&
+            document.querySelector<HTMLElement>('.app-settings-nav a[aria-current]')?.dataset.section === 'about' &&
             document.querySelectorAll('.app-settings-nav a').length === 3;
           scroll.scrollTop = 0;
           return ok;
@@ -395,7 +405,7 @@ try {
           return close.bottom <= scroll.top && (!track || close.bottom <= track.top);
         })) throw Error('the close button must not cover the scrolling groups or their scrollbar');
         await app.locator('#application-settings-close').click();
-        if (await app.evaluate(() => document.getElementById('application-settings').open)) throw Error('close button must dismiss application settings');
+        if (await app.evaluate(() => (document.getElementById('application-settings') as HTMLDialogElement).open)) throw Error('close button must dismiss application settings');
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
         await capture('library-dark.png');
@@ -403,7 +413,7 @@ try {
         await app.locator('#reader-loading').waitFor({ state: 'hidden' });
         await app.locator('#reader-settings').click();
         await app.locator('[data-setting-theme="reading"][data-value="dark"]').click();
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
+        await app.waitForFunction(() => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === 'rgb(25, 25, 25)');
         await app.locator('#setting-fontWeight-trigger').click();
         await capture('reading-settings-dark.png');
         await app.locator('#setting-fontWeight-trigger').press('Escape');
@@ -413,7 +423,7 @@ try {
         // the menu shows the passage's mark pressed, and pressing it again removes the mark.
         const frameBox = await app.locator('#book-frame').boundingBox();
         const passage = () => app.evaluate(() => {
-          const doc = document.getElementById('book-frame').contentDocument, view = doc.defaultView;
+          const doc = (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument, view = doc.defaultView;
           const p = [...doc.querySelectorAll('p')].find(el => {
             const rect = el.getBoundingClientRect();
             return rect.left >= 0 && rect.right <= view.innerWidth && rect.top >= 0 && rect.bottom <= view.innerHeight;
@@ -424,7 +434,7 @@ try {
         });
         const marked = await passage();
         await app.evaluate(index => {
-          const doc = document.getElementById('book-frame').contentDocument;
+          const doc = (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument;
           const text = doc.querySelectorAll('p')[index].firstChild, range = doc.createRange();
           range.setStart(text, 2); range.setEnd(text, 10);
           doc.getSelection().removeAllRanges(); doc.getSelection().addRange(range);
@@ -439,7 +449,7 @@ try {
         await app.locator('#selection-note').click();
         await app.locator('#annotation-note').fill('这是一条原创的测试笔记。');
         const editor = app.locator('#annotation-dialog');
-        const editorStyle = await editor.evaluate(element => ({
+        const editorStyle = await editor.evaluate((element: HTMLDialogElement) => ({
           width: element.offsetWidth,
           titleSize: getComputedStyle(element.querySelector('h2')).fontSize,
           blur: getComputedStyle(element, '::backdrop').backdropFilter,
@@ -460,7 +470,7 @@ try {
           throw Error('dragging the title bar must move the note editor and preserve its draft');
         await capture('note-editor-dragged.png');
         await app.locator('#annotation-save').click();
-        const tip = await app.waitForFunction(() => document.getElementById('book-frame').contentDocument
+        const tip = await app.waitForFunction(() => (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument
           .querySelector('.dr-note-tip')?.getBoundingClientRect().toJSON());
         const tipRect = await tip.jsonValue(), end = marked.rects.at(-1);
         if (Math.abs(tipRect.left - end.right) > 6 || tipRect.bottom > end.top + 8 || tipRect.top < end.top - 16)
@@ -491,19 +501,19 @@ try {
         await capture('selection-menu-marked.png');
         await app.locator('#selection-highlight').click();
         await app.waitForFunction(() => window.nativeProbe.data.annotations[0]?.style === 'note');
-        if (!await app.evaluate(() => document.getElementById('book-frame').contentDocument.querySelector('.dr-note-tip')))
+        if (!await app.evaluate(() => (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.querySelector('.dr-note-tip')))
           throw Error('removing the highlight must keep the note and its tip');
         await page.mouse.click(frameBox.x + marked.rects[0].left + 6, frameBox.y + marked.rects[0].top + marked.rects[0].height / 2);
         await app.locator('#selection-note-delete').click();
         await app.waitForFunction(() => !window.nativeProbe.data.annotations.length &&
-          !document.getElementById('book-frame').contentDocument.querySelector('.dr-note-tip'));
+          !(document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.querySelector('.dr-note-tip'));
         await app.evaluate(() => { document.getElementById('toast').hidden = true; });
         await app.evaluate(() => {
           window.chapterGate = new Promise(resolve => { window.releaseChapter = resolve; });
-          const frame = document.getElementById('book-frame');
+          const frame = (document.getElementById('book-frame') as HTMLIFrameElement);
           window.chapterSwapChecks = [];
           window.chapterSwapObserver = new MutationObserver(() => {
-            const snapshot = document.querySelector('.page-motion .motion-page iframe');
+            const snapshot = document.querySelector<HTMLIFrameElement>('.page-motion .motion-page iframe');
             window.chapterSwapChecks.push(Boolean(snapshot?.contentDocument?.body?.textContent.includes('原创的阅读测试文字') &&
               getComputedStyle(snapshot.closest('.page-motion')).visibility === 'visible' &&
               getComputedStyle(frame).visibility === 'hidden'));
@@ -519,16 +529,16 @@ try {
         await app.locator('#next-page').click();
         await app.waitForFunction(() => window.chapterRequests === 2);
         if (!await app.evaluate(() => document.getElementById('reader-loading').hidden &&
-          document.getElementById('book-frame').contentDocument.body.textContent.includes('原创的阅读测试文字')))
+          (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body.textContent.includes('原创的阅读测试文字')))
           throw Error('cross-chapter fetch must retain the old page without a loading flash');
         await app.evaluate(() => { window.releaseChapter(); window.chapterGate = null; });
-        await app.waitForFunction(() => document.getElementById('book-frame').srcdoc.includes('second.html') &&
+        await app.waitForFunction(() => (document.getElementById('book-frame') as HTMLIFrameElement).srcdoc.includes('second.html') &&
           document.getElementById('reader-loading').hidden && !document.querySelector('.page-motion'));
         if (!await app.evaluate(() => window.chapterSwapChecks.length > 0 && window.chapterSwapChecks.every(Boolean)))
           throw Error('cross-chapter document replacement must stay covered until the new page is ready');
         await app.evaluate(() => window.chapterSwapObserver.disconnect());
         await app.locator('#prev-page').click();
-        await app.waitForFunction(() => document.getElementById('book-frame').srcdoc.includes('/chapter.html') &&
+        await app.waitForFunction(() => (document.getElementById('book-frame') as HTMLIFrameElement).srcdoc.includes('/chapter.html') &&
           document.getElementById('reader-loading').hidden && !document.querySelector('.page-motion'));
         await app.waitForFunction(() => {
           const [page, pages] = document.getElementById('page-indicator').textContent.split('/').map(Number);
@@ -538,13 +548,13 @@ try {
         const tocPanel = app.locator('#toc-panel');
         await app.locator('#book-frame').hover();
         await tocPanel.waitFor({ state: 'hidden' });
-        const expandedWidth = await app.locator('#book-frame').evaluate(el => el.clientWidth);
-        const revealWidth = await app.locator('#toc-reveal-zone').evaluate(el => el.getBoundingClientRect().width);
+        const expandedWidth = await app.locator('#book-frame').evaluate((el: HTMLIFrameElement) => el.clientWidth);
+        const revealWidth = await app.locator('#toc-reveal-zone').evaluate((el: HTMLElement) => el.getBoundingClientRect().width);
         if (Math.abs(revealWidth - 8) > 0.1) throw Error('reveal zone must be exactly 8px wide');
         await app.locator('#toc-reveal-zone').hover({ position: { x: 4, y: 100 } });
         await tocPanel.waitFor({ state: 'visible' });
         await app.locator('.toc-entry').first().hover();
-        if (await app.locator('#book-frame').evaluate(el => el.clientWidth) !== expandedWidth)
+        if (await app.locator('#book-frame').evaluate((el: HTMLIFrameElement) => el.clientWidth) !== expandedWidth)
           throw Error('auto-hide sidebar must overlay without reflowing the book');
         await app.locator('#pin-toc').click();
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocPinned === true);
@@ -576,7 +586,7 @@ try {
         await tocPanel.waitFor({ state: 'hidden' });
         await app.locator('#book-frame').press('Control+f');
         await app.locator('#book-search-input').waitFor({ state: 'visible' });
-        if (!await app.locator('#book-search-input').evaluate(el => document.activeElement === el))
+        if (!await app.locator('#book-search-input').evaluate((el: HTMLElement) => document.activeElement === el))
           throw Error('book search must expand the sidebar and receive keyboard focus');
         const searchPage = await app.locator('#page-indicator').textContent();
         const searchBook = await (await app.$('#book-frame')).contentFrame();
@@ -593,11 +603,11 @@ try {
         await app.locator('[data-setting-theme="application"][data-value="light"]').click();
         await app.waitForFunction(() => document.body.dataset.theme === 'light');
         await app.locator('#application-settings-close').click();
-        const paper = await app.locator('#book-frame').evaluate(el => getComputedStyle(el.contentDocument.body).backgroundColor);
+        const paper = await app.locator('#book-frame').evaluate((el: HTMLIFrameElement) => getComputedStyle(el.contentDocument.body).backgroundColor);
         if (paper !== 'rgb(25, 25, 25)') throw Error('application theme must not override the independent reading theme');
         await app.locator('#reader-settings').click();
         await app.locator('[data-setting-theme="reading"][data-value="light"]').click();
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(255, 255, 255)');
+        await app.waitForFunction(() => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === 'rgb(255, 255, 255)');
         await app.locator('[data-close="reading-settings"]').click();
         await app.locator('#back-library').click();
         await app.locator('#library-view').waitFor({ state: 'visible' });
@@ -607,7 +617,7 @@ try {
           getSelection().selectAllChildren(document.getElementById('library-view'));
           const selected = getSelection().toString().trim();
           getSelection().removeAllRanges();
-          const search = document.getElementById('library-search');
+          const search = document.getElementById('library-search') as HTMLInputElement;
           search.value = '可编辑'; search.select();
           const editable = search.selectionEnd - search.selectionStart === 3;
           search.value = '';
@@ -619,7 +629,7 @@ try {
           return Math.abs(icon.top + icon.height / 2 - (box.top + box.height / 2)) < 1;
         })) throw Error('library search icon must be vertically centred in its field');
         await app.locator('#library-search').focus();
-        if (await app.locator('#library-search').evaluate(el => getComputedStyle(el).outlineStyle) !== 'none')
+        if (await app.locator('#library-search').evaluate((el: HTMLElement) => getComputedStyle(el).outlineStyle) !== 'none')
           throw Error('focused library search must not draw a square outline inside its rounded field');
         await capture('library-search-focus.png');
         await app.locator('#library-search').blur();
@@ -702,7 +712,7 @@ try {
         await app.locator('#font-smaller').click();
         await app.waitForFunction(size => window.nativeProbe.data.settings.reading.fontSize === size, fontSize);
         await app.locator('[data-quick-theme="dark"]').click();
-        await app.waitForFunction(() => getComputedStyle(document.getElementById('book-frame').contentDocument.body).backgroundColor === 'rgb(25, 25, 25)' &&
+        await app.waitForFunction(() => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === 'rgb(25, 25, 25)' &&
           document.querySelector('[data-quick-theme="dark"]').getAttribute('aria-checked') === 'true');
         await capture('reader-toolbar-dark-page.png');
         await app.locator('[data-quick-theme="light"]').click();
@@ -730,11 +740,11 @@ try {
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.paddingRight === 90);
         await app.locator('[data-close="reading-settings"]').click();
         await app.waitForFunction(() => {
-          const frame = document.getElementById('book-frame');
+          const frame = (document.getElementById('book-frame') as HTMLIFrameElement);
           return frame.clientWidth === innerWidth && frame.clientHeight === innerHeight &&
             getComputedStyle(frame.contentDocument.body).marginLeft === '10px';
         });
-        const edges = await app.locator('#book-frame').evaluate(el => {
+        const edges = await app.locator('#book-frame').evaluate((el: HTMLIFrameElement) => {
           const s = getComputedStyle(el.contentDocument.body);
           return [s.marginTop, s.marginRight, s.marginBottom, s.marginLeft];
         });
@@ -811,7 +821,7 @@ try {
         if (!await app.locator('#reader-view').isVisible()) throw Error('Escape must never close the book');
         await selectPassage();
         await app.locator('#highlight-color').click();
-        const balanced = await app.locator('#mark-palette').evaluate(element => {
+        const balanced = await app.locator('#mark-palette').evaluate((element: HTMLElement) => {
           const outer = element.getBoundingClientRect();
           const row = element.querySelector('.swatch-row').getBoundingClientRect();
           return Math.abs((row.top - outer.top) - (outer.bottom - row.bottom)) < .1;
@@ -838,10 +848,10 @@ try {
         await app.locator('#annotation-swatches .color-custom').click();
         await page.keyboard.press('Escape');
         if (await app.locator('.color-picker:popover-open').count() ||
-            !await app.locator('#annotation-dialog').evaluate(element => element.open))
+            !await app.locator('#annotation-dialog').evaluate((element: HTMLDialogElement) => element.open))
           throw Error('Escape must dismiss the custom colour picker before the note dialog');
         await page.keyboard.press('Escape');
-        if (await app.locator('#annotation-dialog').evaluate(element => element.open)) throw Error('next Escape must dismiss the note dialog');
+        if (await app.locator('#annotation-dialog').evaluate((element: HTMLDialogElement) => element.open)) throw Error('next Escape must dismiss the note dialog');
         await book.evaluate(() => getSelection().removeAllRanges());
         await page.keyboard.press('F8');
         await app.locator('#reading-settings').waitFor({ state: 'visible' });
@@ -873,11 +883,11 @@ try {
         await app.waitForFunction(() => document.body.dataset.fullscreen === 'true');
         await page.keyboard.press('Escape');
         await app.waitForFunction(() => document.body.dataset.fullscreen === 'false');
-        if (await app.locator('#reader-view').evaluate(el => el.hidden)) throw Error('Escape should exit fullscreen before leaving the book');
+        if (await app.locator('#reader-view').evaluate((el: HTMLElement) => el.hidden)) throw Error('Escape should exit fullscreen before leaving the book');
         // A collapsed toolbar leaves nothing on screen; each top corner reveals only its own button.
         const corner = () => app.evaluate(() => ['corner-library', 'expand-toolbar']
           .map(id => getComputedStyle(document.getElementById(id)).visibility).join());
-        const at = (x, y) => page.mouse.move(shell.x + x, shell.y + y);
+        const at = (x: number, y: number) => page.mouse.move(shell.x + x, shell.y + y);
         await at(size.width * .5, size.height * .5);
         await page.waitForTimeout(700);
         if (await corner() !== 'hidden,hidden') throw Error('collapsed toolbar must not leave buttons on screen');
@@ -949,14 +959,14 @@ try {
         await app.locator('.book-card').dispatchEvent('contextmenu', {
           clientX: await app.evaluate(() => innerWidth - 2), clientY: await app.evaluate(() => innerHeight - 2),
         });
-        if (!await app.locator('#book-context-menu').evaluate(el => {
+        if (!await app.locator('#book-context-menu').evaluate((el: HTMLElement) => {
           const rect = el.getBoundingClientRect();
           return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
         })) throw Error('context menu must stay within the viewport');
         await capture('library-context-menu.png');
         await app.locator('#book-menu-delete').click();
         await app.locator('#delete-book-dialog').waitFor({ state: 'visible' });
-        if (!await app.locator('#reader-view').evaluate(el => el.hidden)) throw Error('delete button opened the book');
+        if (!await app.locator('#reader-view').evaluate((el: HTMLElement) => el.hidden)) throw Error('delete button opened the book');
         await capture('delete-book-confirmation.png');
         await app.locator('#delete-book-dialog button[value="cancel"]').click();
         if (await app.evaluate(() => window.nativeProbe.requests.some(r => r.method === 'book.delete'))) throw Error('cancel must preserve book');

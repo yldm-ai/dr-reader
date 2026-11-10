@@ -14,8 +14,8 @@ if(DR_NODE_EXECUTABLE)
   string(REGEX REPLACE "^v" "" DR_NODE_VERSION "${DR_NODE_VERSION}")
   if(DR_NODE_VERSION VERSION_GREATER_EQUAL "22.7")
     add_test(NAME reader-navigation COMMAND "${DR_NODE_EXECUTABLE}"
-      --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/reader_navigation_tests.mjs")
+      --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/reader_navigation_tests.ts")
     add_test(NAME frontend-state COMMAND "${DR_NODE_EXECUTABLE}"
-      --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/frontend_state_tests.mjs")
+      --experimental-strip-types --test "${CMAKE_CURRENT_SOURCE_DIR}/frontend_state_tests.ts")
   endif()
 endif()

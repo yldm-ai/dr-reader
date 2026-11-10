@@ -1,26 +1,37 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { Reader as ReaderClass } from '../web/reader.ts';
 
 // Exercise the reader's navigation without native storage or a WebView window.
-globalThis.window = {};
-globalThis.document = {
-  // Every stub element doubles as a 700×600 book page at the window origin.
-  getElementById: () => ({ hidden: false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 700, height: 600 }) }),
-  querySelector: () => null,
-};
-const { Reader } = await import('../web/reader.js');
+Object.assign(globalThis, {
+  window: {},
+  document: {
+    // Every stub element doubles as a 700×600 book page at the window origin.
+    getElementById: () => ({ hidden: false, getBoundingClientRect: () => ({ left: 0, top: 0, width: 700, height: 600 }) }),
+    querySelector: (): null => null,
+  },
+});
+const { Reader } = await import('../web/reader.ts');
 
-function reader() {
-  const value = Object.create(Reader.prototype);
-  const view = { innerWidth: 700, scrollX: 0, scrollTo(x) { this.scrollX = x; } };
+type View = { innerWidth: number; scrollX: number; scrollTo(x: number): void };
+/** A reader whose chapter document is a bare scrolling view; `corners` records every turn. */
+type TestReader = Omit<ReaderClass, 'doc' | 'motion' | 'load'> & {
+  doc: { defaultView: View }; corners: string[];
+  motion?: Partial<ReaderClass['motion']>;
+  load(chapter: number, ...rest: unknown[]): Promise<void>;
+};
+
+function reader(): TestReader {
+  const value = Object.create(Reader.prototype) as TestReader;
+  const view: View = { innerWidth: 700, scrollX: 0, scrollTo(x) { this.scrollX = x; } };
   Object.assign(value, {
     doc: { defaultView: view }, generation: 1, navigationRevision: 0, settings: { mode: 'paged' },
     turnQueue: Promise.resolve(), page: 0, pages: 8, chapter: 0,
     book: { chapters: [{}, {}] }, loading: false, reflowing: false,
     hideSelection() {},
-    report() { this.page = Math.round(view.scrollX / view.innerWidth); },
+    report(this: TestReader) { this.page = Math.round(view.scrollX / view.innerWidth); },
     corners: [],
-    async animatePageChange(direction, update, corner) {
+    async animatePageChange(this: TestReader, direction: number, update: () => void, corner: string) {
       this.corners.push(corner);
       await new Promise(resolve => setTimeout(resolve, 5));
       update();
@@ -28,8 +39,9 @@ function reader() {
   });
   return value;
 }
-function wheel(deltaY, extra = {}) {
-  return { deltaX: 0, deltaY, deltaMode: 1, clientY: 100, prevented: false, preventDefault() { this.prevented = true; }, ...extra };
+type FakeWheel = WheelEvent & { prevented: boolean };
+function wheel(deltaY: number, extra: { clientY?: number; ctrlKey?: boolean; deltaMode?: number } = {}): FakeWheel {
+  return { deltaX: 0, deltaY, deltaMode: 1, clientY: 100, prevented: false, preventDefault(this: FakeWheel) { this.prevented = true; }, ...extra } as unknown as FakeWheel;
 }
 
 test('the wheel curls a soft page from the corner on the half under the pointer', async () => {
@@ -61,12 +73,12 @@ test('consecutive notches complete in order instead of cancelling animations', a
 
 test('wheel backlog speeds up motion but waits for each visible page to finish', async () => {
   const value = reader();
-  const pages = [], speeds = [];
-  let finish;
+  const pages: number[] = [], speeds: number[] = [];
+  let finish: () => void;
   value.animatePageChange = async (direction, update) => { update(); pages.push(value.doc.defaultView.scrollX / 700); };
   value.motion = {
     setSpeed(speed) { speeds.push(speed); },
-    finished() { return new Promise(resolve => { finish = resolve; }); },
+    finished() { return new Promise<void>(resolve => { finish = resolve; }); },
   };
   const turns = [120, 120, 120, -120].map(delta => value.wheel(wheel(delta)));
   for (const [index, page] of [1, 2, 3, 2].entries()) {
@@ -112,14 +124,14 @@ test('pending turns cannot affect an explicit navigation or a different reading 
 test('wheel notches survive a chapter boundary, including input during loading', async () => {
   const value = reader();
   value.page = 7;
-  let finishLoad;
-  let started;
-  const loading = new Promise(resolve => { started = resolve; });
-  value.load = async function(chapter) {
+  let finishLoad: () => void;
+  let started: () => void;
+  const loading = new Promise<void>(resolve => { started = resolve; });
+  value.load = async function(this: TestReader, chapter: number) {
     this.loading = true;
     this.generation++;
     started();
-    await new Promise(resolve => { finishLoad = resolve; });
+    await new Promise<void>(resolve => { finishLoad = resolve; });
     this.chapter = chapter;
     this.doc = { defaultView: this.doc.defaultView };
     this.doc.defaultView.scrollTo(0);
@@ -138,8 +150,8 @@ test('wheel notches survive a chapter boundary, including input during loading',
 
 test('forward at chapter end and backward at chapter start navigate chapters', async () => {
   const value = reader();
-  const loads = [];
-  value.load = async (...args) => { loads.push(args); };
+  const loads: unknown[][] = [];
+  value.load = async (...args: unknown[]) => { loads.push(args); };
   value.page = 7;
   await value.wheel(wheel(120));
   assert.deepEqual(loads[0], [1, 0, '', '', '', 1, 'top']);
@@ -161,7 +173,7 @@ test('touchpad inertia stays consumed across a chapter load', async () => {
   const value = reader();
   value.page = 7;
   let loads = 0;
-  value.load = async function(chapter) { loads++; this.chapter = chapter; this.page = 0; this.doc.defaultView.scrollTo(0); };
+  value.load = async function(this: TestReader, chapter: number) { loads++; this.chapter = chapter; this.page = 0; this.doc.defaultView.scrollTo(0); };
   await Promise.all([32, 64, 42, 23, 8, 2].map(delta => value.wheel(wheel(delta, { deltaMode: 0 }))));
   assert.equal(loads, 1);
   assert.equal(value.chapter, 1);

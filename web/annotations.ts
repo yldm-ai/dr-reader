@@ -1,22 +1,37 @@
 import { fluentGlyph } from "./icons.ts";
 import { materialPaths } from "./material-icons.ts";
 import { paint } from "./highlight-colors.ts";
+import type { Annotation } from "./types.ts";
+
+export interface NoteMark { id: string; range: Range; note: string; ink: string }
+interface ColoredRange { range: Range; color: string }
+/** The pointer coordinates (and target) the layer hit-tests; any MouseEvent provides them. */
+export type PointerLike = Pick<MouseEvent, "clientX" | "clientY"> & { target?: EventTarget | null };
+export type ShellRect = Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">;
+
 export class AnnotationLayer {
-  constructor(doc, callbacks = {}) {
+  doc: Document;
+  ranges = new Map<string, Range>();
+  colorStyles = new Map<string, HTMLStyleElement>();
+  highlightRanges: ColoredRange[] = [];
+  underlineRanges: ColoredRange[] = [];
+  notes: NoteMark[] = [];
+  layerNames: string[] = [];
+  tipLayer: HTMLElement | null = null;
+
+  constructor(doc: Document) {
     this.doc = doc;
-    this.callbacks = callbacks;
-    this.ranges = new Map();
-    this.installStyles();
   }
 
-  installStyles() {
-    this.colorStyles = new Map();
+  /** The chapter frame's window: its CSS.highlights registry and Highlight class paint this document. */
+  private get view(): Window & typeof globalThis {
+    return this.doc.defaultView as Window & typeof globalThis;
   }
 
   /** `paper` is the reading palette: highlight fills and underline inks depend on it. */
-  set(annotations, locate, paper = { paper: "#ffffff", dark: false }) {
+  set(annotations: Annotation[], locate: (annotation: Annotation) => Range | null, paper = { paper: "#ffffff", dark: false }): void {
     this.clear();
-    if (!this.doc.defaultView.CSS?.highlights) return;
+    if (!this.view.CSS?.highlights) return;
     this.highlightRanges = [];
     this.underlineRanges = [];
     this.notes = [];
@@ -44,14 +59,14 @@ export class AnnotationLayer {
    * icons live outside <body> (like the page tail), carry no text so anchors and search are
    * unaffected, and are in document coordinates so they move with the page and its snapshots.
    */
-  placeTips() {
+  placeTips(): void {
     this.tipLayer?.remove();
     this.tipLayer = null;
-    if (!this.notes?.length) return;
+    if (!this.notes.length) return;
     const doc = this.doc;
-    const view = doc.defaultView;
+    const view = this.view;
     const pixelRatio = view.devicePixelRatio || 1;
-    const snap = (value) => Math.round(value * pixelRatio) / pixelRatio;
+    const snap = (value: number) => Math.round(value * pixelRatio) / pixelRatio;
     let style = doc.getElementById("dr-note-tip-style");
     if (!style) {
       style = doc.createElement("style");
@@ -87,15 +102,15 @@ export class AnnotationLayer {
   }
 
   /** Takes the tips out of the layout while pages are measured; `placeTips` brings them back. */
-  hideTips() {
+  hideTips(): void {
     this.tipLayer?.remove();
     this.tipLayer = null;
   }
 
   /** The note under the pointer: on its tip, or anywhere on the noted passage. */
-  noteAtPoint(event) {
-    const tip = event.target?.closest?.(".dr-note-tip");
-    for (const note of this.notes || []) {
+  noteAtPoint(event: PointerLike): NoteMark | null {
+    const tip = (event.target as Element | null | undefined)?.closest?.<HTMLElement>(".dr-note-tip");
+    for (const note of this.notes) {
       if (tip?.dataset.id === note.id) return note;
       for (const rect of note.range.getClientRects())
         if (event.clientX >= rect.left && event.clientX <= rect.right &&
@@ -105,27 +120,26 @@ export class AnnotationLayer {
     return null;
   }
 
-  installColorLayers() {
-    this.layerNames ||= [];
+  installColorLayers(): void {
     for (const style of this.colorStyles.values()) style.remove();
     this.colorStyles.clear();
     for (const name of this.layerNames)
-      this.doc.defaultView.CSS.highlights.delete(name);
+      this.view.CSS.highlights.delete(name);
     this.layerNames = [];
     for (const [kind, values] of [
       ["highlight", this.highlightRanges],
       ["underline", this.underlineRanges],
-    ]) {
-      const byColor = new Map();
+    ] as const) {
+      const byColor = new Map<string, Range[]>();
       for (const value of values) {
         if (!byColor.has(value.color)) byColor.set(value.color, []);
-        byColor.get(value.color).push(value.range);
+        byColor.get(value.color)!.push(value.range);
       }
       for (const [color, ranges] of byColor) {
         const name = `dr-${kind}-${[...byColor.keys()].indexOf(color)}`;
         this.layerNames.push(name);
-        const highlight = new this.doc.defaultView.Highlight(...ranges);
-        this.doc.defaultView.CSS.highlights.set(name, highlight);
+        const highlight = new this.view.Highlight(...ranges);
+        this.view.CSS.highlights.set(name, highlight);
         const style = this.colorStyles.get(name) || this.doc.createElement("style");
         style.textContent =
           kind === "highlight"
@@ -137,22 +151,23 @@ export class AnnotationLayer {
     }
   }
 
-  clear() {
+  clear(): void {
     this.ranges.clear();
     this.notes = [];
     this.hideTips();
-    for (const style of this.colorStyles?.values() || []) style.remove();
-    this.colorStyles?.clear();
-    for (const name of this.layerNames || [])
-      this.doc.defaultView.CSS?.highlights?.delete(name);
+    for (const style of this.colorStyles.values()) style.remove();
+    this.colorStyles.clear();
+    for (const name of this.layerNames)
+      this.view.CSS?.highlights?.delete(name);
     this.layerNames = [];
   }
 
-  rect(range) {
+  /** The range's bounds in the shell window's coordinates. */
+  rect(range: Range | null | undefined): ShellRect | null {
     if (!range) return null;
     const value = range.getBoundingClientRect();
     if (!value.width && !value.height) return null;
-    const frame = this.doc.defaultView.frameElement.getBoundingClientRect();
+    const frame = this.view.frameElement!.getBoundingClientRect();
     return {
       left: frame.left + value.left,
       right: frame.left + value.right,
@@ -163,7 +178,7 @@ export class AnnotationLayer {
     };
   }
 
-  rangeAtPoint(event) {
+  rangeAtPoint(event: PointerLike | null | undefined): { id: string; range: Range } | null {
     if (!event) return null;
     const position = this.doc.caretPositionFromPoint?.(
       event.clientX,

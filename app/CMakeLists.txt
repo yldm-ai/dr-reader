@@ -9,7 +9,7 @@ target_link_options(dr-reader PRIVATE /MANIFEST:NO)
 set_target_properties(dr-reader PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 find_program(DR_PNPM_EXECUTABLE NAMES pnpm.cmd pnpm REQUIRED)
 file(GLOB_RECURSE DR_FRONTEND_SOURCES CONFIGURE_DEPENDS
-  "${PROJECT_SOURCE_DIR}/web/*.js" "${PROJECT_SOURCE_DIR}/web/*.ts"
+  "${PROJECT_SOURCE_DIR}/web/*.ts"
   "${PROJECT_SOURCE_DIR}/web/*.css" "${PROJECT_SOURCE_DIR}/web/*.html")
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/frontend.stamp"
   BYPRODUCTS "${PROJECT_SOURCE_DIR}/dist/index.html"

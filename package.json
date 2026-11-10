@@ -10,10 +10,10 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "build": "pnpm typecheck && vite build",
-    "test": "node --experimental-strip-types --test tests/*_tests.mjs",
-    "test:browser": "pnpm build && node scripts/test-browser.mjs",
+    "test": "node --experimental-strip-types --test tests/*_tests.ts",
+    "test:browser": "pnpm build && node --experimental-strip-types scripts/test-browser.ts",
     "test:serve": "vite --config vite.tests.config.ts --host 127.0.0.1 --port 8765 --strictPort"
   },
   "devDependencies": {

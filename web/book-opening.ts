@@ -46,7 +46,10 @@ export class BookOpening {
   private reduced = matchMedia('(prefers-reduced-motion: reduce)');
   private stopOnReduced = () => { if (this.reduced.matches) this.cancel(); };
 
-  constructor(private host: HTMLElement, enabled: boolean, effect = 'circles', cover: OpeningCover = {}) {
+  private host: HTMLElement;
+
+  constructor(host: HTMLElement, enabled: boolean, effect = 'circles', cover: OpeningCover = {}) {
+    this.host = host;
     this.completion = new Promise(resolve => { this.resolve = resolve; });
     if (!enabled || effect === 'none' || this.reduced.matches) { this.resolve?.(); return; }
     if (effect === 'cover') { this.openCover(cover); return; }

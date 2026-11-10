@@ -16,7 +16,7 @@ try {
   const frame = document.createElement('iframe');
   frame.style.cssText = 'width:1200px;height:800px;border:0';
   let html = await (await fetch('../dist/index.html')).text();
-  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js"><\/script>`);
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.ts"><\/script>`);
   frame.srcdoc = html;
   document.body.append(frame);
   await until(() => frame.contentDocument.querySelector('.book-card'));

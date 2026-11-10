@@ -25,7 +25,7 @@ try {
   // Use the production menu markup, but keep all bridge data in this test page.
   const html = new DOMParser().parseFromString(await (await fetch('../web/index.html')).text(), 'text/html');
   document.body.append(...html.body.children);
-  const { Reader } = await import('../web/reader.js');
+  const { Reader } = await import('../web/reader.ts');
   const reader = Object.create(Reader.prototype);
   let refreshed = 0;
   Object.assign(reader, {

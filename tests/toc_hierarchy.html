@@ -9,7 +9,7 @@ const check = (value, message) => { if (!value) throw Error(message); };
 try {
   const html = new DOMParser().parseFromString(await (await fetch('../web/index.html')).text(), 'text/html');
   document.body.append(...html.body.children);
-  const { Reader } = await import('../web/reader.js');
+  const { Reader } = await import('../web/reader.ts');
   document.getElementById('reader-view').hidden = false;
   const panel = document.getElementById('toc-panel');
   panel.hidden = false;

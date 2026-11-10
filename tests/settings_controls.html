@@ -4,7 +4,7 @@
 <link rel="stylesheet" href="../web/styles.css">
 <pre id="result">RUNNING</pre>
 <script type="module">
-import { bootstrapFixture, installNativeMock } from './frontend-fixtures.js';
+import { bootstrapFixture, installNativeMock } from './frontend-fixtures.ts';
 const output = document.getElementById('result');
 const check = (value, label) => { if (!value) throw Error(label); };
 const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
@@ -15,7 +15,7 @@ try {
   document.body.append(...html.body.children);
   const data = bootstrapFixture();
   const native = installNativeMock(data);
-  const { SettingsPanel } = await import('../web/settings.js');
+  const { SettingsPanel } = await import('../web/settings.ts');
   let changes = 0;
   const panel = new SettingsPanel(() => changes++);
   panel.configure(data);

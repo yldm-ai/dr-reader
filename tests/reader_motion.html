@@ -160,7 +160,7 @@ try {
     Array.from({ length: 10 }, (_, i) => `<section>第 ${i + 1} 页</section>`).join('')}`;
   await load(burstHtml);
   motion.prepare(host, 'cover', 'burst-cover');
-  const { Reader } = await import('../web/reader.js');
+  const { Reader } = await import('../web/reader.ts');
   const reader = Object.create(Reader.prototype);
   Object.assign(reader, {
     doc: frame.contentDocument, book: { id: 'burst', chapters: [{}] }, chapter: 0,

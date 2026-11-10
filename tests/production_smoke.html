@@ -20,7 +20,7 @@ try {
   const shipped = new DOMParser().parseFromString(html, 'text/html');
   check(shipped.body.classList.contains('booting') && shipped.querySelectorAll('#book-grid .book-skeleton').length >= 8 &&
     shipped.getElementById('busy').hidden, 'startup must show placeholder cards instead of a loading overlay');
-  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js"><\/script>`);
+  html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.ts"><\/script>`);
   frame.srcdoc = html;
   document.body.append(frame);
   await until(() => frame.contentDocument.querySelector('.book-card'));

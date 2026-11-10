@@ -73,7 +73,7 @@ WebView2 本地资源映射参考 [Microsoft 文档](https://learn.microsoft.com
 
 pnpm 锁定开发依赖，Vite 以 `web/index.html` 为入口，构建到 `dist/`，资源路径采用相对路径以兼容 WebView2 虚拟主机映射。CMake 的增量依赖包含 HTML、CSS、JS、TS、配置及锁文件；安装包只携带构建后的静态文件。构建先独立执行 `tsc --noEmit`，因为 [Vite 的 TypeScript 转换不负责类型检查](https://vite.dev/guide/features#typescript)。
 
-新下拉组件、字体值与标签转换、章节缓存、图标映射和阅读设置比较使用 TypeScript，已有 DOM 阅读器逐步迁移，不引入框架运行时。界面图标使用 [Material Symbols Rounded](https://fonts.google.com/icons)：`scripts/material-icons.mjs` 从固定版本的 `@material-symbols/svg-400` 中只抽取用到的路径，生成 `web/material-icons.ts` 内联到产物，运行时无需图标字体或网络。设置与作者图标保留本机 [Segoe Fluent Icons 字体及官方码位](https://learn.microsoft.com/windows/apps/design/iconography/segoe-fluent-icons-font)，旧系统回退 Segoe MDL2 Assets，不打包或重新分发系统字体。
+前端全部使用 TypeScript（`strict`），不引入框架运行时；Node 直接剥离类型运行单元测试，因此只使用可擦除的 TS 语法（`erasableSyntaxOnly`）。界面图标使用 [Material Symbols Rounded](https://fonts.google.com/icons)：`scripts/material-icons.ts` 从固定版本的 `@material-symbols/svg-400` 中只抽取用到的路径，生成 `web/material-icons.ts` 内联到产物，运行时无需图标字体或网络。设置与作者图标保留本机 [Segoe Fluent Icons 字体及官方码位](https://learn.microsoft.com/windows/apps/design/iconography/segoe-fluent-icons-font)，旧系统回退 Segoe MDL2 Assets，不打包或重新分发系统字体。
 
 设置变化每帧合并通知，持久化仍按 250 ms 合并；没有变更的词典列表保持 DOM 身份。应用设置变化和重复服务端确认不再重写正文样式。每次标注刷新共用一个章节文本索引，单纯重排保留浏览器 Range；CSS Highlight 自动跟随字体与布局。最近四章使用 LRU 缓存，累计解码字符串最多约 6 MiB，按书籍内容 ID 与章节路径隔离。字体搜索仅修改临时查询，确认选项后才提交原始字体值，每次最多展示 81 个字体选项，避免大量系统字体拖慢弹出列表。
 

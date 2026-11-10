@@ -1,0 +1,8 @@
+{
+  // Tests and scripts get their own project, so test-only globals (tests/globals.d.ts) stay out
+  // of the application's types. Fixtures, stubs and Playwright lookups fail loudly on their own,
+  // so null checks are relaxed here; the application project keeps full strict mode.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "strictNullChecks": false },
+  "include": ["tests", "scripts", "web/*.d.ts"]
+}

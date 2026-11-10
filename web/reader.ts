@@ -1,10 +1,11 @@
-import { call, bookUrl, $, escape, toast } from "./bridge.js";
+import { call, bookUrl, $, escape, toast, errorMessage } from "./bridge.ts";
 import {
   anchorFromRange,
   rangeForAnchor,
   textIndex,
-} from "./anchors.js";
-import { AnnotationLayer } from "./annotations.js";
+} from "./anchors.ts";
+import { AnnotationLayer } from "./annotations.ts";
+import type { NoteMark, PointerLike } from "./annotations.ts";
 import { WheelPaging } from "./wheel-paging.ts";
 import { ReaderMotion } from "./motion.ts";
 import { fontStack } from "./fonts.ts";
@@ -20,36 +21,101 @@ import { htmlFromXhtml } from "./xhtml.ts";
 import { tocAnchor, tocSelectionIndex } from "./toc-selection.ts";
 import { shortTitle } from "./title.ts";
 import { DEFAULT_PALETTE, normalizeColor, paint, pushColor } from "./highlight-colors.ts";
+import type { ReadingSettings } from "./settings-state.ts";
+import type { Annotation, AnnotationStyle, ApplicationSettings, Book, Dictionary, Settings, TextAnchor } from "./types.ts";
+
+type Timer = ReturnType<typeof setTimeout>;
+type Corner = "top" | "bottom";
+type MarkStyle = Exclude<AnnotationStyle, "note">;
+/** The passage the selection menu acts on: a live text selection or an existing annotation. */
+interface Selection { range: Range; text: string; annotationId: string; pinned?: boolean }
+interface BookStats { bookId: string; chars: (number | undefined)[]; exact: Map<number, number>; layout: string; failed?: boolean }
+interface SearchResult { chapter: number; title: string; snippet: string }
+type AnnotationValues = Partial<TextAnchor> & Partial<Pick<Annotation, "id" | "note" | "color" | "style">>;
+/** Settings as `apply` accepts them: the full transport object, or just the reading group. */
+type AppliedSettings = Settings | (ReadingSettings & { application?: undefined; reading?: undefined }) |
+  { reading: ReadingSettings; application?: ApplicationSettings };
+type ActivationTarget = Window & { drActivationTracked?: boolean };
 
 export class Reader {
-  constructor(onUpdate) {
+  onUpdate: (book: Book) => void;
+  onReadingSetting?: (patch: Partial<ReadingSettings>) => void;
+  onApplicationSetting?: (patch: Partial<ApplicationSettings>) => void;
+  onOpenSettings?: () => void;
+  book: Book | null = null;
+  chapter = 0;
+  ratio = 0;
+  page = 0;
+  pages = 1;
+  generation = 0;
+  /** Assigned by the first `apply`, which runs before any book opens. */
+  settings!: ReadingSettings;
+  appSettings!: ApplicationSettings;
+  annotations: Annotation[] = [];
+  doc: Document | null = null;
+  style: HTMLStyleElement | null = null;
+  annotationLayer: AnnotationLayer | null = null;
+  annotationTheme?: string;
+  annotationRevision = 0;
+  appliedDocument: Document | null = null;
+  appliedReading: ReadingSettings | null = null;
+  layoutViewport = "";
+  pageTail: HTMLElement | null = null;
+  bookStats: BookStats | null = null;
+  loading = false;
+  loadError = "";
+  reflowing = false;
+  anchor = "";
+  query = "";
+  annotationFocus = "";
+  tocTarget: { chapter: number; anchor?: string; position?: number } | null = null;
+  tocPointer?: { x: number; y: number };
+  turnQueue: Promise<void> = Promise.resolve();
+  navigationRevision = 0;
+  wheelPaging?: WheelPaging;
+  wheelBacklog?: { revision: number; count: number };
+  chapterCache = new ChapterCache();
+  motion = new ReaderMotion();
+  colorPicker: ColorPicker;
+  observer: ResizeObserver;
+  titleObserver?: ResizeObserver;
+  selection: Selection | null = null;
+  editingAnnotation: Annotation | null = null;
+  paletteStyle: MarkStyle | "" = "";
+  paletteSignature?: string;
+  dialogColor = "";
+  notePeekId = "";
+  footerDragging = false;
+  inactive = false;
+  activatedAt = -Infinity;
+  tapDismissed = false;
+  tapStart: { x: number; y: number; time: number; selected: boolean } | null = null;
+  saveTimer?: Timer;
+  tapTimer?: Timer;
+  selectionTimer?: Timer;
+  reflowTimer?: Timer;
+  toolbarTimer?: Timer;
+  peekTimer?: Timer;
+  notePeekTimer?: Timer;
+  tocHideTimer?: Timer;
+  footerHideTimer?: Timer;
+  cornerTimer?: Timer;
+
+  constructor(onUpdate: (book: Book) => void) {
     this.onUpdate = onUpdate;
-    this.book = null;
-    this.chapter = 0;
-    this.ratio = 0;
-    this.page = 0;
-    this.pages = 1;
-    this.generation = 0;
-    this.saveTimer = null;
-    this.turnQueue = Promise.resolve();
-    this.navigationRevision = 0;
-    this.chapterCache = new ChapterCache();
-    this.motion = new ReaderMotion();
-    this.selection = null;
-    this.editingAnnotation = null;
     this.attachTocHover();
     this.attachTocAutoHide();
     this.attachFooterAutoHide();
     this.trackActivation(window);
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
-      if (event.target.closest(".reading-area")) this.beginPageTap(event);
+      if ((event.target as Element).closest(".reading-area")) this.beginPageTap(event);
       // The custom colour picker belongs to the menu that opened it.
-      if (!event.target.closest("#selection-menu, .color-picker")) this.hideSelection();
-      if (!event.target.closest("#note-peek")) this.hideNotePeek();
+      if (!(event.target as Element).closest("#selection-menu, .color-picker")) this.hideSelection();
+      if (!(event.target as Element).closest("#note-peek")) this.hideNotePeek();
     }, true);
     document.addEventListener("scroll", (event) => {
-      if (event.target.closest?.("#note-peek")) return;
+      if ((event.target as Element | null)?.closest?.("#note-peek")) return;
       this.hideSelection();
       this.hideNotePeek();
     }, true);
@@ -62,29 +128,29 @@ export class Reader {
     }, true);
 
     $("page-surface").addEventListener("wheel", (event) => this.wheel(event), { passive: false });
-    for (const button of document.querySelectorAll("[data-quick-mode]"))
-      button.onclick = () => this.onReadingSetting?.({ mode: button.dataset.quickMode });
-    for (const button of document.querySelectorAll("[data-quick-theme]")) {
-      const palette = readingPalette(button.dataset.quickTheme);
+    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-mode]"))
+      button.onclick = () => this.onReadingSetting?.({ mode: button.dataset.quickMode as ReadingSettings["mode"] });
+    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-theme]")) {
+      const palette = readingPalette(button.dataset.quickTheme!);
       button.style.setProperty("--swatch-paper", palette.paper);
       button.style.setProperty("--swatch-text", palette.text);
-      button.onclick = () => this.onReadingSetting?.({ theme: button.dataset.quickTheme });
+      button.onclick = () => this.onReadingSetting?.({ theme: button.dataset.quickTheme as ReadingSettings["theme"] });
     }
-    $("font-smaller").onclick = () => this.stepFontSize(-1);
-    $("font-larger").onclick = () => this.stepFontSize(1);
+    $<HTMLButtonElement>("font-smaller").onclick = () => this.stepFontSize(-1);
+    $<HTMLButtonElement>("font-larger").onclick = () => this.stepFontSize(1);
     $("reader-search").onclick = () => this.openSearch();
     new OverlayScrollbar($("toc-scroll"), $("toc-panel"));
-    $("collapse-toolbar").onclick = () => this.setToolbarVisible(false);
-    $("expand-toolbar").onclick = () => this.setToolbarVisible(true);
-    $("reader-fullscreen").onclick = () => call("fullscreen").catch(error => toast(error.message, "error"));
-    $("prev-page").onclick = () => this.turn(-1);
-    $("next-page").onclick = () => this.turn(1);
+    $<HTMLButtonElement>("collapse-toolbar").onclick = () => this.setToolbarVisible(false);
+    $<HTMLButtonElement>("expand-toolbar").onclick = () => this.setToolbarVisible(true);
+    $("reader-fullscreen").onclick = () => call("fullscreen").catch(error => toast(errorMessage(error), "error"));
+    $<HTMLButtonElement>("prev-page").onclick = () => this.turn(-1);
+    $<HTMLButtonElement>("next-page").onclick = () => this.turn(1);
     $("toggle-toc").onclick = () => {
       if (this.settings?.showToc !== false && !this.settings?.tocPinned) {
         this.setTocExpanded($("toc-panel").dataset.expanded !== "true");
         return;
       }
-      const showToc = $("toc-panel").hidden;
+      const showToc = $("toc-panel").hidden === true;
       if (this.onReadingSetting) this.onReadingSetting({ showToc });
       else $("toc-panel").hidden = !showToc;
       this.reflow();
@@ -93,15 +159,15 @@ export class Reader {
     $("corner-settings").onclick = () => $("reader-settings").click();
     $("reader-view").addEventListener("pointermove", event => this.trackCorners(event.clientX, event.clientY));
     $("reader-view").addEventListener("pointerleave", () => this.trackCorners(-1, -1));
-    $("page-surface").addEventListener("click", event => { if (event.target.id === "page-surface") this.pageTap(event, $("page-surface").clientWidth, $("page-surface").getBoundingClientRect().left); });
-    const area = document.querySelector(".reading-area");
+    $("page-surface").addEventListener("click", event => { if ((event.target as Element).id === "page-surface") this.pageTap(event, $("page-surface").clientWidth, $("page-surface").getBoundingClientRect().left); });
+    const area = document.querySelector<HTMLElement>(".reading-area")!;
     area.addEventListener("click", event => this.consumeDismissedTap(event), true);
     area.addEventListener("click", event => { if (event.target === area) this.pageTap(event, area.clientWidth, area.getBoundingClientRect().left); });
-    $("add-bookmark").onclick = () => this.bookmark();
-    $("reading-progress").onchange = () => {
+    $<HTMLButtonElement>("add-bookmark").onclick = () => this.bookmark();
+    $<HTMLInputElement>("reading-progress").onchange = () => {
       if (!this.book) return;
       const value =
-        (Number($("reading-progress").value) / 1000) *
+        (Number($<HTMLInputElement>("reading-progress").value) / 1000) *
         this.book.chapters.length;
       const chapter = Math.min(
         this.book.chapters.length,
@@ -110,22 +176,22 @@ export class Reader {
       this.load(chapter, Math.min(1, value - chapter));
     };
     document
-      .querySelectorAll("[data-tab]")
+      .querySelectorAll<HTMLElement>("[data-tab]")
       .forEach(
-        (button) => (button.onclick = () => this.tab(button.dataset.tab)),
+        (button) => (button.onclick = () => this.tab(button.dataset.tab!)),
       );
     $("book-search-form").onsubmit = (event) => {
       event.preventDefault();
       this.search();
     };
     $("selection-menu").addEventListener("pointerdown", (event) => {
-      if (event.target.closest("button")) event.preventDefault();
+      if ((event.target as Element).closest("button")) event.preventDefault();
     });
     this.colorPicker = new ColorPicker();
     for (const id of ["highlight-color", "underline-color"])
-      $(id).onclick = (event) => this.toggleMarkPalette(event.currentTarget);
+      $(id).onclick = (event) => this.toggleMarkPalette(event.currentTarget as HTMLElement);
     $("highlight-swatches").onclick = (event) => {
-      const button = event.target.closest("button");
+      const button = (event.target as Element).closest("button");
       const style = this.paletteStyle;
       if (!button || !style) return;
       if (button.dataset.color) this.pickMarkColor(style, button.dataset.color);
@@ -142,7 +208,7 @@ export class Reader {
     $("selection-search").onclick = () => this.searchSelection();
     $("selection-dictionary").onclick = () => this.lookupSelection();
     $("annotation-swatches").onclick = (event) => {
-      const button = event.target.closest("button");
+      const button = (event.target as Element).closest("button");
       if (!button) return;
       if (button.dataset.color) {
         this.dialogColor = button.dataset.color;
@@ -162,7 +228,7 @@ export class Reader {
     $("annotation-delete").onclick = () => this.deleteFromDialog();
     this.attachAnnotationDrag();
     this.observer = new ResizeObserver(() => { this.motion.cancel(); this.reflow(); this.updateTocIndicator(); });
-    this.observer.observe($("book-frame"));
+    this.observer.observe($<HTMLIFrameElement>("book-frame"));
   }
 
   attachTocHover() {
@@ -176,7 +242,7 @@ export class Reader {
 
   attachTocAutoHide() {
     const panel = $("toc-panel");
-    const reveal = event => {
+    const reveal = (event: PointerEvent) => {
       if (panel.dataset.expanded !== "true" && !this.tocCornerProtected(event.clientX, event.clientY))
         this.setTocExpanded(true);
     };
@@ -198,31 +264,31 @@ export class Reader {
     document.addEventListener("pointermove", event => this.trackTocPointer(event.clientX, event.clientY));
   }
 
-  tocCornerProtected(x, y) {
+  tocCornerProtected(x: number, y: number): boolean {
     if (this.settings?.showToolbar !== false) return false;
     const rect = $("reader-view").getBoundingClientRect();
     return x >= rect.left && x < rect.left + 180 && y >= rect.top && y < rect.top + 88;
   }
 
-  trackTocPointer(x, y) {
+  trackTocPointer(x: number, y: number): void {
     this.tocPointer = { x, y };
     const panel = $("toc-panel");
     if (!this.book || this.settings?.tocPinned || panel.hidden || panel.dataset.expanded !== "true") return;
     const rect = panel.getBoundingClientRect();
     const edge = $("toc-reveal-zone").getBoundingClientRect();
     if (x >= edge.left && x <= edge.right && y >= edge.top && y <= edge.bottom && !this.tocCornerProtected(x, y)) {
-      clearTimeout(this.tocHideTimer); this.tocHideTimer = null; return;
+      clearTimeout(this.tocHideTimer); this.tocHideTimer = undefined; return;
     }
     if ((this.tocCornerProtected(x, y) && !panel.matches(":hover")) ||
         x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) this.scheduleTocHide();
-    else { clearTimeout(this.tocHideTimer); this.tocHideTimer = null; }
+    else { clearTimeout(this.tocHideTimer); this.tocHideTimer = undefined; }
   }
 
   /** Hides the auto-hide panel 500ms after the pointer leaves it, so sweeping along the edge cannot make it flicker. */
   scheduleTocHide() {
     if (this.tocHideTimer) return;
     this.tocHideTimer = setTimeout(() => {
-      this.tocHideTimer = null;
+      this.tocHideTimer = undefined;
       const panel = $("toc-panel");
       const pointer = this.tocPointer;
       const overEdge = $("toc-reveal-zone").matches(":hover") &&
@@ -232,9 +298,9 @@ export class Reader {
     }, 500);
   }
 
-  setTocExpanded(expanded) {
+  setTocExpanded(expanded: boolean): void {
     clearTimeout(this.tocHideTimer);
-    this.tocHideTimer = null;
+    this.tocHideTimer = undefined;
     const panel = $("toc-panel");
     panel.dataset.expanded = String(expanded);
     panel.inert = !this.settings?.tocPinned && !expanded;
@@ -242,7 +308,7 @@ export class Reader {
   }
 
   attachFooterAutoHide() {
-    const footer = document.querySelector('.reader-footer');
+    const footer = document.querySelector<HTMLElement>('.reader-footer')!;
     const zone = $('footer-reveal-zone');
     for (const element of [footer, zone]) {
       element.addEventListener('pointerenter', () => this.setFooterExpanded(true));
@@ -258,23 +324,23 @@ export class Reader {
     window.addEventListener('blur', () => { this.footerDragging = false; this.scheduleFooterHide(); });
   }
 
-  setFooterExpanded(expanded) {
+  setFooterExpanded(expanded: boolean): void {
     clearTimeout(this.footerHideTimer);
-    this.footerHideTimer = null;
-    document.querySelector('.reader-footer').dataset.expanded = String(expanded);
+    this.footerHideTimer = undefined;
+    document.querySelector<HTMLElement>('.reader-footer')!.dataset.expanded = String(expanded);
   }
 
   scheduleFooterHide() {
     if (this.footerHideTimer || !this.settings?.autoHideProgress) return;
     this.footerHideTimer = setTimeout(() => {
-      this.footerHideTimer = null;
-      const footer = document.querySelector('.reader-footer');
+      this.footerHideTimer = undefined;
+      const footer = document.querySelector<HTMLElement>('.reader-footer')!;
       if (!this.footerDragging && !footer.matches(':hover') && !footer.querySelector(':focus-visible') && !$('footer-reveal-zone').matches(':hover'))
         this.setFooterExpanded(false);
     }, 450);
   }
 
-  async open(book, settings) {
+  async open(book: Book, settings: Settings): Promise<void> {
     await this.flush();
     this.book = book;
     this.motion.setAllowed(settings.application?.animations ?? true);
@@ -298,19 +364,19 @@ export class Reader {
     this.tab("toc");
     this.toc();
     this.marks();
-    $("book-search-input").value = "";
+    $<HTMLInputElement>("book-search-input").value = "";
     $("search-results").replaceChildren();
     try {
-      this.annotations = await call("annotations", { id: book.id });
+      this.annotations = await call<Annotation[]>("annotations", { id: book.id });
     } catch (error) {
       this.annotations = [];
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
     this.notes();
     this.loadBookStats(book);
     this.apply(settings);
-    const position = book.position || {};
-    await this.load(position.chapter || 0, position.ratio || 0);
+    const position = book.position;
+    await this.load(position?.chapter || 0, position?.ratio || 0);
     if (!this.doc) {
       this.book = null;
       throw new Error(this.loadError || "章节没有完成载入");
@@ -321,16 +387,16 @@ export class Reader {
       );
   }
 
-  tab(name) {
+  tab(name: string): void {
     document
-      .querySelectorAll("[data-tab]")
+      .querySelectorAll<HTMLElement>("[data-tab]")
       .forEach((button) =>
         button.classList.toggle("active", button.dataset.tab === name),
       );
     for (const key of ["toc", "marks", "notes", "search"])
       $(`${key}-content`).hidden = key !== name;
     if (name === "notes") this.notes();
-    if (name === "search") $("book-search-input").focus();
+    if (name === "search") $<HTMLInputElement>("book-search-input").focus();
     if (name === "toc") this.updateTocIndicator();
   }
 
@@ -340,16 +406,16 @@ export class Reader {
     indicator.className = "toc-active-indicator";
     indicator.setAttribute("aria-hidden", "true");
     root.replaceChildren(indicator);
-    const stack = [];
-    for (const [index, item] of this.book.toc.entries()) {
+    const stack: { depth: number; row: HTMLDivElement; button: HTMLButtonElement; children: HTMLDivElement; toggle?: HTMLButtonElement }[] = [];
+    for (const [index, item] of this.book!.toc.entries()) {
       const depth = Math.max(0, Number(item.depth) || 0);
-      while (stack.length && stack.at(-1).depth >= depth) stack.pop();
+      while (stack.length && stack.at(-1)!.depth >= depth) stack.pop();
       const parent = stack.at(-1);
       const node = document.createElement("div");
       node.className = "toc-node";
       const row = document.createElement("div");
       row.className = "toc-row";
-      row.style.setProperty("--toc-depth", Math.min(stack.length, 5));
+      row.style.setProperty("--toc-depth", String(Math.min(stack.length, 5)));
       const button = document.createElement("button");
       button.className = "toc-entry";
       button.textContent = item.title;
@@ -390,7 +456,7 @@ export class Reader {
     if (!this.book) return;
     const href = this.book.chapters[this.chapter]?.href;
     const root = $("toc-content");
-    const previous = root.querySelector(".toc-entry.active");
+    const previous = root.querySelector<HTMLElement>(".toc-entry.active");
     const view = this.doc?.defaultView;
     const paged = this.settings?.mode === "paged";
     const position = view ? (paged ? Math.round(view.scrollX / Math.max(1, view.innerWidth)) : Math.round(view.scrollY)) : 0;
@@ -398,8 +464,9 @@ export class Reader {
     if (target && (target.chapter !== this.chapter || (!this.loading && target.position !== undefined && target.position !== position)))
       this.tocTarget = target = null;
     if (target && !this.loading && target.position === undefined) target.position = position;
-    let positions, offset;
-    if (view && !this.loading && this.doc.getElementById) {
+    let positions: Map<number, number> | undefined, offset: number | undefined;
+    // The Node navigation tests stub the chapter document without element lookups.
+    if (view && !this.loading && typeof this.doc!.getElementById === "function") {
       positions = new Map();
       const columnWidth = Math.max(1, view.innerWidth / (this.isDouble() ? 2 : 1));
       offset = paged ? Math.round(view.scrollX / columnWidth) * view.innerHeight + (this.settings?.paddingTop ?? 0) + 2
@@ -408,7 +475,7 @@ export class Reader {
         if (item.href.split("#")[0] !== href) continue;
         const anchor = tocAnchor(item.href);
         if (!anchor) { positions.set(index, -Infinity); continue; }
-        const node = this.doc.getElementById(anchor) || this.doc.getElementsByName(anchor)[0];
+        const node = this.doc!.getElementById(anchor) || this.doc!.getElementsByName(anchor)[0];
         if (!node || !node.getClientRects().length) continue;
         const rect = node.getClientRects()[0];
         positions.set(index, paged ? Math.floor((rect.left + view.scrollX + 2) / columnWidth) * view.innerHeight + rect.top
@@ -421,28 +488,28 @@ export class Reader {
       return;
     }
     root.querySelectorAll(".toc-row").forEach(row => row.classList.remove("contains-active"));
-    let active = null;
-    for (const [index, button] of [...root.querySelectorAll(".toc-entry")].entries()) {
+    let active: HTMLElement | null = null;
+    for (const [index, button] of [...root.querySelectorAll<HTMLElement>(".toc-entry")].entries()) {
       button.classList.toggle("active", index === selected);
       if (index === selected) { active = button; button.setAttribute("aria-current", "location"); }
       else button.removeAttribute("aria-current");
     }
-    for (let node = active?.closest(".toc-node"); node; node = node.parentElement.closest(".toc-node"))
-      node.firstElementChild.classList.add("contains-active");
+    for (let node = active?.closest(".toc-node"); node; node = node.parentElement!.closest(".toc-node"))
+      node.firstElementChild!.classList.add("contains-active");
     if (scroll && active !== previous && active?.offsetHeight) active.scrollIntoView({ block: "nearest" });
     this.updateTocIndicator();
   }
 
   updateTocIndicator() {
     const root = $("toc-content");
-    const indicator = root.querySelector(".toc-active-indicator");
-    const active = root.querySelector(".toc-entry.active");
+    const indicator = root.querySelector<HTMLElement>(".toc-active-indicator");
+    const active = root.querySelector<HTMLElement>(".toc-entry.active");
     // Wait for the final heading/layout instead of fading through an intermediate parent.
     if (!indicator || this.loading) return;
-    const leaf = active && !active.parentElement.querySelector(":scope > .toc-toggle");
+    const leaf = active && !active.parentElement!.querySelector(":scope > .toc-toggle");
     const visible = Boolean(leaf && active.offsetHeight);
     indicator.style.opacity = visible ? "1" : "0";
-    if (!visible) return;
+    if (!visible || !active) return;
     if (!indicator.dataset.ready) indicator.style.transition = "none";
     const rect = active.getBoundingClientRect(), bounds = root.getBoundingClientRect();
     indicator.style.removeProperty("left");
@@ -457,13 +524,14 @@ export class Reader {
   }
 
   marks() {
+    const book = this.book!;
     const root = $("marks-content");
     root.replaceChildren();
-    for (const mark of this.book.bookmarks) {
+    for (const mark of book.bookmarks) {
       const button = document.createElement("button");
       button.className = "mark-entry";
       button.textContent =
-        mark.title || this.book.chapters[mark.chapter]?.title || "书签";
+        mark.title || book.chapters[mark.chapter]?.title || "书签";
       button.onclick = () => this.load(mark.chapter, mark.ratio);
       root.append(button);
     }
@@ -481,7 +549,7 @@ export class Reader {
       (a, b) =>
         a.chapter - b.chapter ||
         a.start - b.start ||
-        b.updatedAt - a.updatedAt,
+        (b.updatedAt ?? 0) - (a.updatedAt ?? 0),
     );
     for (const annotation of ordered) {
       const card = document.createElement("button");
@@ -498,19 +566,19 @@ export class Reader {
 
   updateMark() {
     if (!this.book) return;
-    $("add-bookmark").disabled = this.atEnd();
+    $<HTMLButtonElement>("add-bookmark").disabled = this.atEnd();
     const exists = this.book.bookmarks.some(
       (mark) =>
         mark.chapter === this.chapter &&
         Math.abs(mark.ratio - this.ratio) < 0.02,
     );
-    $("add-bookmark").classList.toggle("selected", exists);
+    $<HTMLButtonElement>("add-bookmark").classList.toggle("selected", exists);
   }
 
   async bookmark() {
     if (!this.book || this.atEnd()) return;
     try {
-      this.book = await call("bookmark", {
+      this.book = await call<Book>("bookmark", {
         id: this.book.id,
         mark: {
           chapter: this.chapter,
@@ -519,23 +587,23 @@ export class Reader {
         },
       });
       this.marks();
-      this.onUpdate(this.book);
+      this.onUpdate(this.book!);
       toast("书签已更新", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
   async search() {
-    const query = $("book-search-input").value.trim();
+    const query = $<HTMLInputElement>("book-search-input").value.trim();
     if (!query) return;
     const root = $("search-results");
     root.textContent = "正在检索…";
-    const id = this.book.id;
+    const id = this.book!.id;
     try {
       this.hideSelection();
-      const results = await call("search", { id, query });
-      if (this.book.id !== id) return;
+      const results = await call<SearchResult[]>("search", { id, query });
+      if (this.book?.id !== id) return;
       root.replaceChildren();
       for (const result of results) {
         const button = document.createElement("button");
@@ -548,11 +616,11 @@ export class Reader {
         root.innerHTML = '<p class="panel-hint">没有找到相关文字。</p>';
     } catch (error) {
       this.hideSelection();
-      root.textContent = error.message;
+      root.textContent = errorMessage(error);
     }
   }
 
-  async navigate(href) {
+  async navigate(href: string): Promise<void> {
     if (!this.book) return;
     const hash = href.indexOf("#");
     const path = hash < 0 ? href : href.slice(0, hash);
@@ -565,14 +633,14 @@ export class Reader {
   }
 
   async load(
-    chapter,
+    chapter: number,
     ratio = 0,
     anchor = "",
     query = "",
     annotationId = "",
     direction = 0,
-    corner = "top",
-  ) {
+    corner: Corner = "top",
+  ): Promise<void> {
     if (!this.book) return;
     // Explicit navigation invalidates old input; a queued page turn across chapters does not.
     if (!direction) this.navigationRevision = (this.navigationRevision ?? 0) + 1;
@@ -614,9 +682,9 @@ export class Reader {
         /<head(?:\s[^>]*)?>/i,
         (match) => `${match}<style id="dr-loading-paper">html,body{background:${initialPaper.paper}!important;color:${initialPaper.text}!important}</style><base href="${escape(base)}">`,
       );
-      const frame = $("book-frame");
+      const frame = $<HTMLIFrameElement>("book-frame");
       frame.style.backgroundColor = initialPaper.paper;
-      const update = () => new Promise((resolve, reject) => {
+      const update = () => new Promise<void>((resolve, reject) => {
         if (generation !== this.generation) { resolve(); return; }
         const timeout = setTimeout(() => reject(new Error("章节载入超时")), 8000);
         frame.onload = async () => {
@@ -625,7 +693,7 @@ export class Reader {
             this.doc = frame.contentDocument;
             await this.attach();
             // Let restored pagination/scroll position reach the compositor before uncovering it.
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
             clearTimeout(timeout);
             resolve();
           } catch (error) { clearTimeout(timeout); reject(error); }
@@ -640,9 +708,9 @@ export class Reader {
     } catch (error) {
       if (generation !== this.generation) return;
       this.loading = false;
-      this.loadError = error.message;
+      this.loadError = errorMessage(error);
       $("reader-loading").hidden = true;
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
@@ -654,7 +722,7 @@ export class Reader {
       toast("章节缺少正文");
       return;
     }
-    let style = doc.getElementById("dr-reader-style");
+    let style = doc.getElementById("dr-reader-style") as HTMLStyleElement | null;
     if (!style) {
       style = doc.createElement("style");
       style.id = "dr-reader-style";
@@ -668,8 +736,8 @@ export class Reader {
     doc.addEventListener("click", (event) => {
       if (this.consumeDismissedTap(event)) return;
       // A note tip opens its note for editing.
-      const tip = event.target.closest?.(".dr-note-tip");
-      const tipped = tip && this.annotationLayer?.ranges.get(tip.dataset.id);
+      const tip = (event.target as Element | null)?.closest?.<HTMLElement>(".dr-note-tip");
+      const tipped = tip && this.annotationLayer?.ranges.get(tip.dataset.id!);
       if (tipped) {
         this.hideNotePeek();
         this.showSelectionMenu(tipped, tip.dataset.id);
@@ -684,12 +752,12 @@ export class Reader {
         if (this.selection) this.selection.pinned = true;
         return;
       }
-      const link = event.target.closest?.("a[href]");
-      if (!link) { this.pageTap(event, doc.defaultView.innerWidth); return; }
+      const link = (event.target as Element | null)?.closest?.("a[href]");
+      if (!link) { this.pageTap(event, doc.defaultView!.innerWidth); return; }
       event.preventDefault();
       try {
-        const target = new URL(link.getAttribute("href"), doc.baseURI);
-        const prefix = `/${this.book.id}/content/`;
+        const target = new URL(link.getAttribute("href")!, doc.baseURI);
+        const prefix = `/${this.book!.id}/content/`;
         if (
           target.origin === "https://books.dr-reader.local" &&
           target.pathname.startsWith(prefix)
@@ -703,10 +771,10 @@ export class Reader {
         toast("无法打开这个链接");
       }
     });
-    this.trackActivation(doc.defaultView);
+    this.trackActivation(doc.defaultView!);
     doc.addEventListener("pointerdown", event => { this.beginPageTap(event); this.hideSelection(); this.hideNotePeek(); });
     doc.addEventListener("pointermove", event => {
-      const rect = $("book-frame").getBoundingClientRect();
+      const rect = $<HTMLIFrameElement>("book-frame").getBoundingClientRect();
       this.trackCorners(rect.left + event.clientX, rect.top + event.clientY);
       this.trackTocPointer(rect.left + event.clientX, rect.top + event.clientY);
       this.hoverNote(event);
@@ -719,7 +787,7 @@ export class Reader {
     });
     doc.addEventListener("mouseup", (event) => {
       if (this.tapDismissed) return;
-      if (event.target.closest?.("a")) return;
+      if ((event.target as Element | null)?.closest?.("a")) return;
       this.selectionTimer = setTimeout(() => this.readSelection(), 0);
     });
     doc.addEventListener("keyup", (event) => {
@@ -744,7 +812,7 @@ export class Reader {
         );
       } else this.key(event);
     });
-    doc.defaultView.addEventListener("scroll", () => { this.hideNotePeek(); this.scrolled(); }, {
+    doc.defaultView!.addEventListener("scroll", () => { this.hideNotePeek(); this.scrolled(); }, {
       passive: true,
     });
     for (const image of doc.images)
@@ -753,7 +821,7 @@ export class Reader {
     this.refreshAnnotations();
     this.apply(this.settings);
     await doc.fonts?.ready;
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     if (doc !== this.doc) return;
     this.measure();
     this.restore();
@@ -769,12 +837,13 @@ export class Reader {
     const current = (this.annotations || []).filter(
       (annotation) =>
         annotation.chapter === chapter &&
-        annotation.href === this.book.chapters[chapter]?.href,
+        annotation.href === this.book?.chapters[chapter]?.href,
     );
-    const index = current.length ? textIndex(this.doc) : null;
+    const doc = this.doc;
+    const index = current.length ? textIndex(doc) : undefined;
     this.annotationTheme = this.settings?.theme;
     this.annotationLayer.set(current, (annotation) =>
-      rangeForAnchor(this.doc, annotation, index),
+      rangeForAnchor(doc, annotation, index),
       readingPalette(this.settings?.theme),
     );
     // Snapshot layers for page motion copy highlights, so they must reload after a change.
@@ -786,13 +855,13 @@ export class Reader {
   prepareMotion() {
     const surface = $("page-surface");
     if (!this.doc || this.settings?.mode !== "paged") { this.motion.prepare(surface, "none", ""); return; }
-    const view = this.doc.defaultView;
+    const view = this.doc.defaultView!;
     this.motion.prepare(surface, this.pageEffect(),
       `${this.generation}|${this.chapter}|${view.innerWidth}x${view.innerHeight}|${JSON.stringify(this.settings)}|${this.annotationRevision ?? 0}`);
   }
 
-  apply(settings) {
-    this.appSettings = settings.application || this.appSettings || {
+  apply(settings: AppliedSettings): void {
+    this.appSettings = settings.application || this.appSettings || ({
       animations: true,
       selectionActions: {
         highlight: true,
@@ -803,15 +872,15 @@ export class Reader {
         dictionary: true,
       },
       dictionaries: [],
-    };
+    } as unknown as ApplicationSettings);
     this.hideSelection();
-    this.settings = settings.reading || settings;
+    this.settings = settings.reading || (settings as ReadingSettings);
     this.motion.setAllowed(this.appSettings.animations);
     this.syncChrome();
     this.renderHighlightPalette();
     // Fills and underline inks follow the paper, so a theme change repaints highlights.
     if (this.annotationLayer && this.annotationTheme !== this.settings.theme) this.refreshAnnotations();
-    if (this.appliedDocument === this.doc && sameReading(this.appliedReading, this.settings)) return;
+    if (this.appliedDocument === this.doc && sameReading(this.appliedReading ?? undefined, this.settings)) return;
     this.appliedDocument = this.doc;
     this.appliedReading = { ...this.settings };
     // The width limit is per page, so a two-page spread may grow to twice as wide.
@@ -822,7 +891,7 @@ export class Reader {
     );
     if (!this.doc || !this.style) return;
     this.reflowing = true;
-    this.layoutViewport = `${this.doc.defaultView.innerWidth}x${this.doc.defaultView.innerHeight}`;
+    this.layoutViewport = `${this.doc.defaultView!.innerWidth}x${this.doc.defaultView!.innerHeight}`;
     const reading = this.settings;
     const colors = readingPalette(reading.theme);
     const paged = reading.mode === "paged";
@@ -832,7 +901,7 @@ export class Reader {
     const paragraph = reading.publisherStyles
       ? ""
       : `body p{text-indent:${reading.textIndent}em!important;text-align:${reading.alignment}!important}`;
-    const edges = pageMargins(reading, this.doc.defaultView.innerWidth, this.doc.defaultView.innerHeight);
+    const edges = pageMargins(reading, this.doc.defaultView!.innerWidth, this.doc.defaultView!.innerHeight);
     const horizontal = edges.left + edges.right;
     const vertical = edges.top + edges.bottom;
     // A spread holds two columns per viewport, each with the page margins on both sides: two
@@ -863,11 +932,11 @@ export class Reader {
     const r = this.settings;
     const toolbar = String(r.showToolbar !== false);
     if (root.dataset.toolbar && root.dataset.toolbar !== toolbar) this.animateToolbar();
-    $("collapse-toolbar").setAttribute("aria-expanded", toolbar);
-    $("expand-toolbar").setAttribute("aria-expanded", toolbar);
+    $<HTMLButtonElement>("collapse-toolbar").setAttribute("aria-expanded", toolbar);
+    $<HTMLButtonElement>("expand-toolbar").setAttribute("aria-expanded", toolbar);
     for (const [key, setting] of [["toolbar", "showToolbar"], ["chapterTitle", "showChapterTitle"],
       ["pagination", "showPagination"], ["progress", "showProgress"]])
-      root.dataset[key] = String(r[setting] !== false);
+      root.dataset[key] = String(r[setting as keyof ReadingSettings] !== false);
     root.dataset.bookPages = String(r.showBookPages !== false && r.mode === "paged");
     const footerAutoHide = Boolean(r.autoHideProgress && (r.showProgress !== false || root.dataset.bookPages === 'true'));
     if (root.dataset.footerAutoHide !== String(footerAutoHide)) this.setFooterExpanded(false);
@@ -888,19 +957,19 @@ export class Reader {
     const pinLabel = r.tocPinned ? "取消固定侧边栏" : "固定侧边栏";
     pin.dataset.tooltip = pinLabel;
     pin.setAttribute("aria-label", pinLabel);
-    for (const button of document.querySelectorAll("[data-quick-mode]"))
+    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-mode]"))
       button.setAttribute("aria-checked", String(button.dataset.quickMode === r.mode));
-    for (const button of document.querySelectorAll("[data-quick-theme]"))
+    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-theme]"))
       button.setAttribute("aria-checked", String(button.dataset.quickTheme === r.theme));
-    $("quick-font-size").value = String(r.fontSize);
-    $("font-smaller").disabled = r.fontSize <= 10;
-    $("font-larger").disabled = r.fontSize >= 56;
+    $<HTMLOutputElement>("quick-font-size").value = String(r.fontSize);
+    $<HTMLButtonElement>("font-smaller").disabled = r.fontSize <= 10;
+    $<HTMLButtonElement>("font-larger").disabled = r.fontSize >= 56;
     requestAnimationFrame(() => this.updateTocIndicator());
     if (r.showToolbar !== false) this.showCorners("");
   }
 
   /** The collapse buttons share the 顶部工具栏 preference, so the drawer switch stays in sync. */
-  setToolbarVisible(visible) {
+  setToolbarVisible(visible: boolean): void {
     if (this.onReadingSetting) this.onReadingSetting({ showToolbar: visible });
     else { this.settings = { ...this.settings, showToolbar: visible }; this.syncChrome(); }
     // Keep keyboard focus on the control that undoes the action once it appears.
@@ -913,7 +982,7 @@ export class Reader {
    */
   animateToolbar() {
     if (this.appSettings?.animations === false) return;
-    const root = $("reader-view"), frame = $("book-frame");
+    const root = $("reader-view"), frame = $<HTMLIFrameElement>("book-frame");
     if (!root.classList.contains("toolbar-moving")) frame.style.height = `${frame.getBoundingClientRect().height}px`;
     root.classList.add("toolbar-moving");
     clearTimeout(this.toolbarTimer);
@@ -938,9 +1007,9 @@ export class Reader {
    * buttons, so reaching for the page does not flash them; once shown, they stay while the
    * pointer is over them.
    */
-  trackCorners(x, y) {
+  trackCorners(x: number, y: number): void {
     if (this.settings?.showToolbar !== false || !this.book) return;
-    const shown = $("reader-view").dataset.corner;
+    const shown = $("reader-view").dataset.corner ?? "";
     const overEnd = ["end", "both"].includes(shown) && ["corner-settings", "expand-toolbar"].some(id => {
       const r = $(id).getBoundingClientRect();
       return x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6;
@@ -952,13 +1021,13 @@ export class Reader {
       clearTimeout(this.peekTimer);
       this.showCorners(corner);
     } else if ($("reader-view").dataset.corner && !this.cornerTimer) {
-      this.cornerTimer = setTimeout(() => { this.cornerTimer = null; this.showCorners(""); }, 400);
+      this.cornerTimer = setTimeout(() => { this.cornerTimer = undefined; this.showCorners(""); }, 400);
     }
   }
 
-  showCorners(corner) {
+  showCorners(corner: "" | "start" | "end" | "both"): void {
     clearTimeout(this.cornerTimer);
-    this.cornerTimer = null;
+    this.cornerTimer = undefined;
     $("reader-view").dataset.corner = corner;
   }
 
@@ -969,7 +1038,7 @@ export class Reader {
    * Both the shell and each chapter frame report blur/focus; focus moving between them keeps
    * document.hasFocus() true and is not a deactivation.
    */
-  trackActivation(target) {
+  trackActivation(target: ActivationTarget | null): void {
     if (!target || target.drActivationTracked) return;
     target.drActivationTracked = true;
     target.addEventListener("blur", () => setTimeout(() => {
@@ -990,7 +1059,7 @@ export class Reader {
     return activating;
   }
 
-  beginPageTap(event) {
+  beginPageTap(event: PointerEvent): void {
     clearTimeout(this.tapTimer);
     if (event.button === 0 && this.takeActivationPress()) {
       // Activation only: no page turn, link, note or selection menu from this press.
@@ -998,8 +1067,8 @@ export class Reader {
       this.tapStart = null;
       return;
     }
-    const tip = event.target.closest?.(".dr-note-tip");
-    const editsNote = Boolean(tip && this.annotationLayer?.ranges.has(tip.dataset.id));
+    const tip = (event.target as Element | null)?.closest?.<HTMLElement>(".dr-note-tip");
+    const editsNote = Boolean(tip && this.annotationLayer?.ranges.has(tip.dataset.id!));
     const dismissed = event.button === 0 && event.isPrimary !== false && this.dismissPagePopups();
     // A note icon is an explicit edit action, even when its hover preview is open.
     this.tapDismissed = dismissed && !editsNote;
@@ -1028,7 +1097,7 @@ export class Reader {
     return true;
   }
 
-  consumeDismissedTap(event) {
+  consumeDismissedTap(event: Event): boolean {
     if (!this.tapDismissed) return false;
     this.tapDismissed = false;
     event.preventDefault();
@@ -1036,14 +1105,14 @@ export class Reader {
     return true;
   }
 
-  pageTap(event, width, offsetX = 0) {
+  pageTap(event: MouseEvent, width: number, offsetX = 0): void {
     const start = this.tapStart;
     this.tapStart = null;
     if (!start || this.settings?.mode !== "paged" || this.loading || this.reflowing || event.button !== 0 ||
         event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || event.detail > 1 ||
         Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6 || performance.now() - start.time > 500 ||
         start.selected || this.doc?.getSelection()?.toString() ||
-        event.target.closest?.("a,button,input,select,textarea,[contenteditable]")) return;
+        (event.target as Element | null)?.closest?.("a,button,input,select,textarea,[contenteditable]")) return;
     const direction = pageClickDirection(event.clientX - offsetX, width);
     const corner = this.cornerAt(event);
     // A second press cancels the pending tap before double-click word selection.
@@ -1064,8 +1133,8 @@ export class Reader {
   }
 
   measurePages() {
-    const doc = this.doc;
-    const view = doc.defaultView;
+    const doc = this.doc!;
+    const view = doc.defaultView!;
     if (!this.pageTail || this.pageTail.ownerDocument !== doc) {
       this.pageTail = doc.createElement("div");
       this.pageTail.setAttribute("aria-hidden", "true");
@@ -1093,9 +1162,9 @@ export class Reader {
   recordChapterPages() {
     const stats = this.bookStats;
     if (!stats || !this.doc) return;
-    const view = this.doc.defaultView;
+    const view = this.doc.defaultView!;
     const layout = `${view.innerWidth}x${view.innerHeight}|${JSON.stringify(this.settings)}`;
-    if (stats.layout !== layout) { stats.layout = layout; stats.exact.clear(); stats.exact.set(this.book.chapters.length, 1); }
+    if (stats.layout !== layout) { stats.layout = layout; stats.exact.clear(); stats.exact.set(this.book!.chapters.length, 1); }
     // A spread is two book pages; the whole-book count stays in printed pages.
     stats.exact.set(this.chapter, this.atEnd() ? 1 : this.pages * (this.isDouble() ? 2 : 1));
     stats.chars[this.chapter] ??= chapterTextLength(this.doc.body.innerHTML);
@@ -1104,7 +1173,7 @@ export class Reader {
   /** Characters a full page holds, from the line box and the type size, before any measurement. */
   fallbackPerPage() {
     if (!this.doc) return 600;
-    const view = this.doc.defaultView, s = this.settings;
+    const view = this.doc.defaultView!, s = this.settings;
     const edges = pageMargins(s, view.innerWidth, view.innerHeight);
     const line = s.fontSize * s.lineHeight, glyph = s.fontSize + s.letterSpacing;
     return Math.max(1, Math.floor((view.innerHeight - edges.top - edges.bottom) / line) *
@@ -1112,11 +1181,11 @@ export class Reader {
   }
 
   /** Chapter text lengths come from the engine's search text, without loading the chapters. */
-  async loadBookStats(book) {
-    const stats = { bookId: book.id, chars: Array(book.chapters.length).fill(undefined).concat(0), exact: new Map([[book.chapters.length, 1]]), layout: "" };
+  async loadBookStats(book: Book): Promise<void> {
+    const stats: BookStats = { bookId: book.id, chars: Array<number | undefined>(book.chapters.length).fill(undefined).concat(0), exact: new Map([[book.chapters.length, 1]]), layout: "" };
     this.bookStats = stats;
     try {
-      const { chars } = await call("book.stats", { id: book.id });
+      const { chars } = await call<{ chars?: number[] }>("book.stats", { id: book.id });
       if (this.bookStats !== stats || !Array.isArray(chars)) return;
       chars.forEach((length, index) => { stats.chars[index] ??= length; });
       this.reportBookPages();
@@ -1131,7 +1200,7 @@ export class Reader {
     const stats = this.bookStats;
     const show = this.settings?.showBookPages !== false && this.settings?.mode === "paged" && Boolean(stats && this.book && stats.bookId === this.book.id);
     const double = this.isDouble();
-    const value = show ? bookPages({ chars: stats.chars, exact: stats.exact, chapter: this.chapter,
+    const value = show && stats ? bookPages({ chars: stats.chars, exact: stats.exact, chapter: this.chapter,
       page: this.page * (double ? 2 : 1), fallbackPerPage: this.fallbackPerPage() / (double ? 2 : 1) }) : null;
     element.hidden = !show;
     if (!value) { element.textContent = stats?.failed ? "全书页码暂不可用" : "全书页码统计中…"; return; }
@@ -1139,10 +1208,10 @@ export class Reader {
     element.dataset.tooltip = value.estimated ? "未读章节按当前排版估算，读过的章节会更准确" : "按当前排版统计";
   }
 
-  restore() {
+  restore(): void {
     if (!this.doc) return;
     const doc = this.doc;
-    const view = doc.defaultView;
+    const view = doc.defaultView!;
     const anchor = this.anchor && doc.getElementById(this.anchor);
     if (anchor) {
       this.revealRect(anchor.getBoundingClientRect());
@@ -1151,7 +1220,7 @@ export class Reader {
       const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
       let node;
       while ((node = walker.nextNode())) {
-        const position = node.textContent.indexOf(this.query);
+        const position = node.textContent!.indexOf(this.query);
         if (position >= 0) {
           const range = doc.createRange();
           range.setStart(node, position);
@@ -1178,8 +1247,8 @@ export class Reader {
       );
   }
 
-  revealRect(rect) {
-    const view = this.doc.defaultView;
+  revealRect(rect: DOMRect): void {
+    const view = this.doc!.defaultView!;
     if (this.settings.mode === "paged") {
       const page = Math.max(0, Math.min(this.pages - 1,
         Math.floor((view.scrollX + rect.left - pageMargins(this.settings, view.innerWidth, view.innerHeight).left + 1) / Math.max(1, view.innerWidth))));
@@ -1195,7 +1264,7 @@ export class Reader {
       // Loading restores its own anchor after fonts/layout are ready. An old resize timer
       // must not consume that anchor in the outgoing document.
       if (doc !== this.doc || generation !== this.generation || this.loading || $("app").hidden) return;
-      if (this.layoutViewport !== `${this.doc.defaultView.innerWidth}x${this.doc.defaultView.innerHeight}`) {
+      if (this.layoutViewport !== `${this.doc.defaultView!.innerWidth}x${this.doc.defaultView!.innerHeight}`) {
         this.appliedReading = null; this.apply({ reading: this.settings, application: this.appSettings }); return;
       }
       this.measure();
@@ -1216,7 +1285,7 @@ export class Reader {
   report() {
     if (!this.doc || !this.book) return;
     const doc = this.doc;
-    const view = doc.defaultView;
+    const view = doc.defaultView!;
     if (this.settings.mode === "paged") {
       this.page = Math.round(view.scrollX / Math.max(1, view.innerWidth));
       this.ratio = this.pages <= 1 ? 0 : this.page / (this.pages - 1);
@@ -1237,9 +1306,9 @@ export class Reader {
     $("reader-location").textContent =
       this.atEnd() ? "全书完" : `第 ${this.chapter + 1} / ${this.book.chapters.length} 节`;
     $("reader-percent").textContent = `${this.atEnd() ? 100 : Math.min(99, Math.round(progress * 100))}%`;
-    $("reading-progress").value = Math.round(progress * 1000);
-    $("prev-page").disabled = this.chapter === 0 && this.ratio <= 0;
-    $("next-page").disabled =
+    $<HTMLInputElement>("reading-progress").value = String(Math.round(progress * 1000));
+    $<HTMLButtonElement>("prev-page").disabled = this.chapter === 0 && this.ratio <= 0;
+    $<HTMLButtonElement>("next-page").disabled =
       this.atEnd();
     this.updateMark();
     this.reportBookPages();
@@ -1253,15 +1322,15 @@ export class Reader {
     const id = this.book.id;
     const position = { chapter: this.chapter, ratio: this.ratio };
     try {
-      const book = await call("position", { id, position });
+      const book = await call<Book>("position", { id, position });
       if (this.book?.id === id) this.book = book;
       this.onUpdate(book);
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
-  wheel(event) {
+  wheel(event: WheelEvent): Promise<void> | undefined {
     this.hideSelection();
     if (this.settings?.mode !== "paged" || event.ctrlKey || event.metaKey) return;
     const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
@@ -1274,18 +1343,18 @@ export class Reader {
   }
 
   /** Book-page half under a pointer event, from the shell or from inside the book frame. */
-  cornerAt(event) {
-    const frame = $("book-frame");
+  cornerAt(event: MouseEvent): Corner {
+    const frame = $<HTMLIFrameElement>("book-frame");
     const y = event.clientY + (event.view === frame.contentWindow ? frame.getBoundingClientRect().top : 0);
     const page = $("page-surface").getBoundingClientRect();
     return pageCorner(y - page.top, page.height);
   }
 
-  turn(direction, corner = "top", wheel = false) {
+  turn(direction: number, corner: Corner = "top", wheel = false): Promise<void> {
     const revision = this.navigationRevision;
     const bookId = this.book?.id;
     const mode = this.settings?.mode;
-    let backlog;
+    let backlog: { revision: number; count: number } | undefined;
     if (wheel) {
       if (this.wheelBacklog?.revision !== revision)
         this.wheelBacklog = { revision, count: 0 };
@@ -1310,14 +1379,14 @@ export class Reader {
             this.motion?.setSpeed(Math.min(10, 1 + Math.max(0, backlog.count - 1) * .6));
         }
       }
-    }).catch((error) => toast(error.message, "error"));
+    }).catch((error) => toast(errorMessage(error), "error"));
     return this.turnQueue;
   }
 
-  async turnPage(direction, corner = "top") {
+  async turnPage(direction: number, corner: Corner = "top"): Promise<void> {
     if (!this.doc || this.loading) return;
     this.hideSelection();
-    const view = this.doc.defaultView;
+    const view = this.doc.defaultView!;
     if (this.settings.mode === "paged") {
       if (direction > 0 && this.page < this.pages - 1) {
         await this.animatePageChange(direction, () =>
@@ -1346,14 +1415,14 @@ export class Reader {
       }
     }
     const next = this.chapter + direction;
-    if (next >= 0 && next <= this.book.chapters.length)
+    if (next >= 0 && next <= this.book!.chapters.length)
       await this.load(next, direction > 0 ? 0 : 1, "", "", "", direction, corner);
   }
 
   /** Two pages side by side need room; a narrow window falls back to one page. */
   isDouble() {
     return this.settings?.mode === "paged" && this.settings.layout === "double" &&
-      ($("book-frame")?.clientWidth ?? 0) >= 640;
+      ($<HTMLIFrameElement>("book-frame")?.clientWidth ?? 0) >= 640;
   }
 
   /** Spreads only turn like a book, so they keep their own animation setting. */
@@ -1368,7 +1437,7 @@ export class Reader {
       : this.settings.animationDuration;
   }
 
-  async animatePageChange(direction, update, corner = "top") {
+  async animatePageChange(direction: number, update: () => void, corner: Corner = "top"): Promise<void> {
     const effect = this.pageEffect();
     if (effect === "none") {
       update();
@@ -1386,11 +1455,11 @@ export class Reader {
     );
   }
 
-  key(event) {
+  key(event: KeyboardEvent): void {
     if (event.key === "F8") { event.preventDefault(); this.onOpenSettings?.(); return; }
     if ((event.altKey && event.key === "Enter") || event.key === "F11") {
       event.preventDefault();
-      if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message, "error"));
+      if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(errorMessage(error), "error"));
       return;
     }
     if (event.ctrlKey && event.key.toLowerCase() === "f") {
@@ -1441,7 +1510,7 @@ export class Reader {
     if (range.toString().trim()) this.showSelectionMenu(range);
   }
 
-  showSelectionMenu(range, annotationId = "") {
+  showSelectionMenu(range: Range, annotationId = ""): void {
     const rect =
       this.annotationLayer?.rect(range) || range.getBoundingClientRect();
     if (!rect || (!rect.width && !rect.height)) return;
@@ -1496,7 +1565,7 @@ export class Reader {
     $("selection-menu").hidden = true;
     $("mark-palette").hidden = true;
     this.paletteStyle = "";
-    if (!$("annotation-dialog").open) this.selection = null;
+    if (!$<HTMLDialogElement>("annotation-dialog").open) this.selection = null;
   }
 
   selectedAnnotation() {
@@ -1504,9 +1573,9 @@ export class Reader {
   }
 
   /** The colour each mark applies next: the passage's own colour if it carries that mark. */
-  markColor(style) {
+  markColor(style: MarkStyle): string {
     const existing = this.selectedAnnotation();
-    if (existing?.style === style) return normalizeColor(existing.color);
+    if (existing && existing.style === style) return normalizeColor(existing.color);
     return style === "underline"
       ? normalizeColor(this.appSettings?.underlineColor || "#ddebf1")
       : this.palette()[0];
@@ -1516,7 +1585,7 @@ export class Reader {
   syncMarkButtons() {
     const existing = this.selectedAnnotation();
     const dark = document.body.dataset.theme === "dark";
-    for (const style of ["highlight", "underline"]) {
+    for (const style of ["highlight", "underline"] as const) {
       $(`selection-${style}`).setAttribute("aria-pressed", String(existing?.style === style));
       $(`selection-${style}`).title = existing?.style === style
         ? `移除${style === "underline" ? "下划线" : "高亮"}` : "";
@@ -1527,9 +1596,9 @@ export class Reader {
     }
   }
 
-  toggleMarkPalette(dot) {
+  toggleMarkPalette(dot: HTMLElement): void {
     const palette = $("mark-palette");
-    const style = dot.dataset.style;
+    const style = dot.dataset.style as MarkStyle;
     if (!palette.hidden && this.paletteStyle === style) {
       palette.hidden = true;
       this.paletteStyle = "";
@@ -1537,7 +1606,7 @@ export class Reader {
     }
     this.paletteStyle = style;
     const current = this.markColor(style);
-    palette.querySelectorAll("[data-color]").forEach((button) =>
+    palette.querySelectorAll<HTMLElement>("[data-color]").forEach((button) =>
       button.classList.toggle("selected", button.dataset.color === current));
     palette.hidden = false;
     // Absolute offsets start inside the menu border; leave 1px between the two borders.
@@ -1549,7 +1618,7 @@ export class Reader {
   }
 
   /** Applies the mark in the picked colour; the colour becomes that mark's default. */
-  async pickMarkColor(style, color, custom = false) {
+  async pickMarkColor(style: MarkStyle, color: string, custom = false): Promise<void> {
     color = normalizeColor(color);
     $("mark-palette").hidden = true;
     this.paletteStyle = "";
@@ -1564,9 +1633,9 @@ export class Reader {
   }
 
   /** Marks the passage, or removes the mark when it already carries it (a note stays behind). */
-  async toggleMark(style) {
+  async toggleMark(style: MarkStyle): Promise<void> {
     const existing = this.selectedAnnotation();
-    if (existing?.style !== style) {
+    if (!existing || existing.style !== style) {
       await this.saveSelection(this.markColor(style), style);
       return;
     }
@@ -1574,7 +1643,7 @@ export class Reader {
       if (existing.note) await this.saveAnnotation({ ...existing, style: "note" });
       else await this.removeAnnotation(existing);
       this.doc?.getSelection()?.removeAllRanges();
-    } catch (error) { toast(error.message, "error"); }
+    } catch (error) { toast(errorMessage(error), "error"); }
   }
 
   /** Deletes the note; a passage that was only kept for its note disappears with it. */
@@ -1586,11 +1655,11 @@ export class Reader {
       else await this.saveAnnotation({ ...existing, note: "" });
       this.doc?.getSelection()?.removeAllRanges();
       toast("笔记已删除", "success");
-    } catch (error) { toast(error.message, "error"); }
+    } catch (error) { toast(errorMessage(error), "error"); }
   }
 
   /** Resting on a noted passage (or its tip) shows the note after a short pause. */
-  hoverNote(event) {
+  hoverNote(event: PointerEvent): void {
     if (event.buttons || !$("selection-menu").hidden) return;
     const note = this.annotationLayer?.noteAtPoint(event);
     if (note?.id === this.notePeekId) { clearTimeout(this.notePeekTimer); if (!$("note-peek").hidden) return; }
@@ -1600,7 +1669,7 @@ export class Reader {
     this.notePeekTimer = setTimeout(() => this.showNotePeek(note), $("note-peek").hidden ? 350 : 0);
   }
 
-  showNotePeek(note) {
+  showNotePeek(note: NoteMark): void {
     const rect = this.annotationLayer?.rect(note.range);
     if (!rect || !$("selection-menu").hidden) return;
     const peek = $("note-peek");
@@ -1630,13 +1699,14 @@ export class Reader {
 
   selectionAnchor() {
     if (!this.selection) return null;
-    return anchorFromRange(this.doc, this.selection.range);
+    return anchorFromRange(this.doc!, this.selection.range);
   }
 
-  async saveSelection(color = this.palette()[0], style = "highlight") {
+  async saveSelection(color = this.palette()[0], style: MarkStyle = "highlight"): Promise<void> {
     if (!this.selection || !this.book) return;
+    const selection = this.selection;
     const existing = this.annotations.find(
-      (annotation) => annotation.id === this.selection.annotationId,
+      (annotation) => annotation.id === selection.annotationId,
     );
     const anchor = this.selectionAnchor();
     if (!anchor) {
@@ -1651,10 +1721,10 @@ export class Reader {
         color,
         style,
       });
-      this.doc.getSelection()?.removeAllRanges();
+      this.doc?.getSelection()?.removeAllRanges();
       if (style !== "underline") toast("已添加高亮", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
@@ -1665,7 +1735,7 @@ export class Reader {
   }
 
   /** A newly picked colour takes the first slot and pushes the oldest one out. */
-  rememberColor(color) {
+  rememberColor(color: string): void {
     const highlightColors = pushColor(this.palette(), color);
     this.appSettings = { ...this.appSettings, highlightColors };
     this.renderHighlightPalette();
@@ -1687,11 +1757,12 @@ export class Reader {
     this.syncDialogColors();
   }
 
-  async saveAnnotation(values) {
+  async saveAnnotation(values: AnnotationValues): Promise<Annotation> {
+    const book = this.book!;
     const annotation = {
       id: values.id || "",
       chapter: this.chapter,
-      href: this.book.chapters[this.chapter]?.href,
+      href: book.chapters[this.chapter]?.href,
       start: values.start,
       end: values.end,
       quote: values.quote,
@@ -1701,8 +1772,8 @@ export class Reader {
       color: normalizeColor(values.color || this.palette()[0]),
       style: values.style || "highlight",
     };
-    const saved = await call("annotation.save", {
-      id: this.book.id,
+    const saved = await call<Annotation>("annotation.save", {
+      id: book.id,
       annotation,
     });
     const index = this.annotations.findIndex((item) => item.id === saved.id);
@@ -1716,10 +1787,10 @@ export class Reader {
   }
 
   attachAnnotationDrag() {
-    const dialog = $("annotation-dialog");
-    const header = dialog.querySelector(".annotation-header");
-    let drag = null;
-    const position = (left, top) => {
+    const dialog = $<HTMLDialogElement>("annotation-dialog");
+    const header = dialog.querySelector<HTMLElement>(".annotation-header")!;
+    let drag: { id: number; x: number; y: number; left: number; top: number } | null = null;
+    const position = (left: number, top: number) => {
       dialog.style.inset = "auto";
       dialog.style.margin = "0";
       dialog.style.left = `${Math.max(8, Math.min(left, innerWidth - dialog.offsetWidth - 8))}px`;
@@ -1731,7 +1802,7 @@ export class Reader {
       delete dialog.dataset.dragging;
     };
     header.addEventListener("pointerdown", event => {
-      if (event.button !== 0 || event.target.closest("button")) return;
+      if (event.button !== 0 || (event.target as Element).closest("button")) return;
       event.preventDefault();
       this.colorPicker.close(false);
       const rect = dialog.getBoundingClientRect();
@@ -1752,31 +1823,32 @@ export class Reader {
 
   openAnnotationDialog() {
     if (!this.selection) return;
+    const selection = this.selection;
     this.editingAnnotation =
       this.annotations.find(
-        (annotation) => annotation.id === this.selection.annotationId,
+        (annotation) => annotation.id === selection.annotationId,
       ) || null;
     this.dialogColor = normalizeColor(this.editingAnnotation?.color || this.palette()[0]);
     const quote = document.createElement("span");
     quote.textContent = this.editingAnnotation?.quote || this.selection.text;
     $("annotation-quote").replaceChildren(quote);
-    $("annotation-note").value = this.editingAnnotation?.note || "";
+    $<HTMLTextAreaElement>("annotation-note").value = this.editingAnnotation?.note || "";
     const style = this.editingAnnotation?.style || "highlight";
-    for (const radio of document.getElementsByName("annotation-style")) radio.checked = radio.value === style;
+    for (const radio of document.getElementsByName("annotation-style") as NodeListOf<HTMLInputElement>) radio.checked = radio.value === style;
     $("annotation-delete").hidden = !this.editingAnnotation;
     $("annotation-title").textContent = this.editingAnnotation
       ? "编辑标注"
       : "记笔记";
     this.syncDialogColors();
     $("selection-menu").hidden = true;
-    const dialog = $("annotation-dialog");
+    const dialog = $<HTMLDialogElement>("annotation-dialog");
     for (const property of ["inset", "margin", "left", "top"]) dialog.style.removeProperty(property);
     dialog.showModal();
-    setTimeout(() => $("annotation-note").focus(), 0);
+    setTimeout(() => $<HTMLTextAreaElement>("annotation-note").focus(), 0);
   }
 
-  dialogStyle() {
-    return document.querySelector("[name=annotation-style]:checked")?.value || "highlight";
+  dialogStyle(): AnnotationStyle {
+    return (document.querySelector<HTMLInputElement>("[name=annotation-style]:checked")?.value || "highlight") as AnnotationStyle;
   }
 
   /** Marks the chosen swatch and paints the quoted passage the way it will appear in the book. */
@@ -1784,7 +1856,7 @@ export class Reader {
     const current = this.dialogColor && normalizeColor(this.dialogColor);
     const swatches = $("annotation-swatches");
     if (!swatches) return;
-    swatches.querySelectorAll("[data-color]")
+    swatches.querySelectorAll<HTMLElement>("[data-color]")
       .forEach((button) => button.classList.toggle("selected", button.dataset.color === current));
     const style = this.dialogStyle();
     const quote = $("annotation-quote");
@@ -1796,7 +1868,7 @@ export class Reader {
       quote.style.setProperty("--mark", style === "underline" ? colors.ink : colors.fill);
     }
     // A note without a mark has no colour to choose.
-    swatches.closest(".annotation-color-row").toggleAttribute("data-disabled", style === "note");
+    swatches.closest(".annotation-color-row")!.toggleAttribute("data-disabled", style === "note");
     swatches.querySelectorAll("button").forEach((button) => (button.disabled = style === "note"));
   }
 
@@ -1819,21 +1891,21 @@ export class Reader {
     try {
       await this.saveAnnotation({
         ...anchor,
-        note: $("annotation-note").value.trim(),
+        note: $<HTMLTextAreaElement>("annotation-note").value.trim(),
         color: this.dialogColor,
         style: this.dialogStyle(),
       });
-      this.doc.getSelection()?.removeAllRanges();
+      this.doc?.getSelection()?.removeAllRanges();
       this.selection = null;
-      $("annotation-dialog").close();
+      $<HTMLDialogElement>("annotation-dialog").close();
       toast("笔记已保存", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
-  async removeAnnotation(annotation) {
-    const bookId = this.book.id;
+  async removeAnnotation(annotation: Annotation): Promise<void> {
+    const bookId = this.book!.id;
     await call("annotation.delete", { id: bookId, annotationId: annotation.id });
     if (this.book?.id !== bookId) return;
     this.annotations = this.annotations.filter((item) => item.id !== annotation.id);
@@ -1849,10 +1921,10 @@ export class Reader {
     const existing = this.editingAnnotation;
     try {
       await this.removeAnnotation(existing);
-      $("annotation-dialog").close("cancel");
+      $<HTMLDialogElement>("annotation-dialog").close("cancel");
       this.selection = null;
       if (existing.style !== "underline") toast("标注已删除", "success");
-    } catch (error) { toast(error.message, "error"); }
+    } catch (error) { toast(errorMessage(error), "error"); }
   }
 
   async copySelection() {
@@ -1860,10 +1932,10 @@ export class Reader {
     try {
       await call("copy", { text: this.selection.text });
       this.hideSelection();
-      this.doc.getSelection()?.removeAllRanges();
+      this.doc?.getSelection()?.removeAllRanges();
       toast("已复制选中文字", "success");
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
@@ -1872,11 +1944,11 @@ export class Reader {
     $("toc-panel").hidden = false;
     this.onReadingSetting?.({ showToc: true });
     this.setTocExpanded(true);
-    $("book-search-input").focus();
+    $<HTMLInputElement>("book-search-input").focus();
   }
 
   /** Toolbar font stepper; the engine clamps the same 10-56 px range. */
-  stepFontSize(delta) {
+  stepFontSize(delta: number): void {
     const size = Math.min(56, Math.max(10, (this.settings?.fontSize ?? 20) + delta));
     if (size !== this.settings?.fontSize) this.onReadingSetting?.({ fontSize: size });
   }
@@ -1889,7 +1961,7 @@ export class Reader {
     this.onReadingSetting?.({ showToc: true });
     this.setTocExpanded(true);
     this.tab("search");
-    $("book-search-input").value = query;
+    $<HTMLInputElement>("book-search-input").value = query;
     this.search();
   }
 
@@ -1911,11 +1983,11 @@ export class Reader {
       await call("lookup", { dictionaryId: dictionary.id, text });
       this.hideSelection();
     } catch (error) {
-      toast(error.message, "error");
+      toast(errorMessage(error), "error");
     }
   }
 
-  chooseDictionary(dictionaries) {
+  chooseDictionary(dictionaries: Dictionary[]): Promise<Dictionary | null> {
     return new Promise((resolve) => {
       const dialog = document.createElement("dialog");
       this.hideSelection();
@@ -1931,8 +2003,8 @@ export class Reader {
         dialog.remove();
         resolve(selected);
       };
-      dialog.querySelector(".dictionary-picker-header button").onclick = () => finish();
-      const outside = (event) => {
+      dialog.querySelector<HTMLButtonElement>(".dictionary-picker-header button")!.onclick = () => finish();
+      const outside = (event: MouseEvent) => {
         const rect = dialog.getBoundingClientRect();
         return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right ||
           event.clientY < rect.top || event.clientY > rect.bottom);
@@ -1943,7 +2015,7 @@ export class Reader {
         if (backdropPressed && outside(event)) finish();
         backdropPressed = false;
       });
-      const root = dialog.querySelector(".dictionary-picker-list");
+      const root = dialog.querySelector(".dictionary-picker-list")!;
       for (const dictionary of dictionaries) {
         const button = document.createElement("button");
         button.className = "dictionary-choice";
@@ -1982,6 +2054,6 @@ export class Reader {
     this.appliedReading = null;
     this.book = null;
     this.annotations = [];
-    $("book-frame").srcdoc = "";
+    $<HTMLIFrameElement>("book-frame").srcdoc = "";
   }
 }

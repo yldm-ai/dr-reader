@@ -3,7 +3,7 @@
 <title>Library sorting persistence</title>
 <pre id="result">RUNNING</pre>
 <script type="module">
-import { bootstrapFixture } from './frontend-fixtures.js';
+import { bootstrapFixture } from './frontend-fixtures.ts';
 const output = document.getElementById('result');
 const check = (value, message) => { if (!value) throw Error(message); };
 const until = async predicate => {
@@ -26,7 +26,7 @@ try {
     frame?.remove();
     frame = document.createElement('iframe');
     frame.style.cssText = 'width:1200px;height:800px';
-    const mock = `<script type="module">import { installNativeMock } from '/tests/frontend-fixtures.js';window.nativeProbe=installNativeMock(${JSON.stringify(fixture)});<\/script>`;
+    const mock = `<script type="module">import { installNativeMock } from '/tests/frontend-fixtures.ts';window.nativeProbe=installNativeMock(${JSON.stringify(fixture)});<\/script>`;
     frame.srcdoc = bundled.replace('<head>', `<head><base href="${location.origin}/dist/">${mock}`);
     document.body.append(frame);
     await until(() => frame.contentDocument?.querySelectorAll('.book-card').length === 3);

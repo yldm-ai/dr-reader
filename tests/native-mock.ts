@@ -1,4 +1,4 @@
-import { bootstrapFixture, installNativeMock } from './frontend-fixtures.js';
+import { bootstrapFixture, installNativeMock } from './frontend-fixtures.ts';
 const fixture = bootstrapFixture();
 if (new URL(import.meta.url).searchParams.has('system')) {
   fixture.settings.application.theme = 'system';
@@ -37,7 +37,7 @@ window.addEventListener('error', event => window.runtimeErrors.push(event.messag
 window.addEventListener('unhandledrejection', event => window.runtimeErrors.push(String(event.reason)));
 const originalFetch = window.fetch.bind(window);
 window.chapterRequests = 0;
-window.fetch = (url, ...args) => {
+window.fetch = (url: RequestInfo | URL, ...args: [init?: RequestInit]) => {
   if (String(url).startsWith('https://books.dr-reader.local/')) {
     window.chapterRequests++;
     if (tocAnchors) return Promise.resolve(new Response(

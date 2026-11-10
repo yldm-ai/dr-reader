@@ -21,7 +21,8 @@ int Window::caption_height() const
     const int resize=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
     return -frame.top-(IsZoomed(hwnd_)?resize:0);
 }
-bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio, double height_ratio)
+bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio, double height_ratio,
+                    const std::string &theme)
 {
     width_ratio_ = width_ratio;
     height_ratio_ = height_ratio;
@@ -57,8 +58,17 @@ bool Window::create(HINSTANCE instance, ShellStyle style, int icon_resource, dou
         return false;
     update_icons();
     apply_frame();
+    set_theme(theme);
+    // Shown before its first Direct2D frame (factory, fonts and render target take ~100 ms),
+    // the window would appear as a blank white surface. Paint that frame while cloaked and
+    // uncloak once DWM has it, so the first visible frame is the themed placeholder.
+    BOOL cloak = TRUE;
+    DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloak, sizeof(cloak));
     ShowWindow(hwnd_, SW_SHOW);
     UpdateWindow(hwnd_);
+    DwmFlush();
+    cloak = FALSE;
+    DwmSetWindowAttribute(hwnd_, DWMWA_CLOAK, &cloak, sizeof(cloak));
     return true;
 }
 void Window::update_icons()
@@ -123,9 +133,13 @@ void Window::set_theme(const std::string &theme)
     // Match the web application's --bg, --text and --hover in styles.css.
     const bool dark = theme == "dark" || (follow_system_theme_ && light == 0);
     const bool sepia = theme == "sepia";
+    resolved_theme_ = dark ? "dark" : sepia ? "sepia" : "light";
     caption_background_ = dark ? 0x191919 : sepia ? 0xf5f1eb : 0xffffff;
     caption_text_ = dark ? 0xe6e6e5 : sepia ? 0x4a4036 : 0x37352f;
     caption_hover_ = dark ? 0x2c2c2c : sepia ? 0xeee7de : 0xf1f1ef;
+    sidebar_ = dark ? 0x202020 : sepia ? 0xeee8df : 0xf7f7f5;
+    border_ = dark ? 0x363636 : sepia ? 0xe5dcd0 : 0xe9e9e7;
+    selected_ = dark ? 0x303030 : sepia ? 0xe8e0d5 : 0xebebea;
     BOOL value = dark;
     DwmSetWindowAttribute(hwnd_, 20, &value, sizeof(value));
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -254,13 +268,89 @@ void Window::caption_tip(int hit)
     if (button != HTNOWHERE)
         SetTimer(hwnd_, caption_tip_timer, 500, nullptr);
 }
+void Window::set_placeholder(bool shown)
+{
+    if (placeholder_ == shown) return;
+    placeholder_ = shown;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+// The library layout in placeholder blocks while WebView2 starts: the page's own geometry
+// (styles.css .sidebar, .library-view, .search-field, .book-grid, .cover-wrap; the compact
+// sizes below 1000px) in CSS pixels, which are this target's DIPs. Static, no text or icons,
+// so it reads as "the library is coming" and the real page lands on the same shapes.
+void Window::paint_placeholder(float top)
+{
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> fill;
+    target_->CreateSolidColorBrush(D2D1::ColorF(caption_hover_), &fill);
+    if (!fill) return;
+    const auto size = target_->GetSize();
+    const float width = size.width, height = size.height - top;
+    if (width < 320 || height < 240) return;
+    const bool compact = width <= 1000;
+    const auto block = [&](float x, float y, float w, float h, float radius, UINT32 color) {
+        fill->SetColor(D2D1::ColorF(color));
+        target_->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(x, top + y, x + w, top + y + h), radius, radius), fill.Get());
+    };
+    // Sidebar panel with its brand, import button, five library entries and settings.
+    const float side_w = compact ? 195.f : 224.f, side_pad = compact ? 13.f : 12.f, side_top = compact ? 24.f : 20.f;
+    const auto panel = D2D1::RoundedRect(D2D1::RectF(12.5f, top + 12.5f, 12.5f + side_w - 1, top + height - 12.5f), 14, 14);
+    fill->SetColor(D2D1::ColorF(sidebar_));
+    target_->FillRoundedRectangle(panel, fill.Get());
+    fill->SetColor(D2D1::ColorF(border_));
+    target_->DrawRoundedRectangle(panel, fill.Get(), 1);
+    const float sx = 12 + side_pad, sw = side_w - 2 * side_pad;
+    float y = 12 + side_top;
+    block(sx + 8, y, 30, 32, 6, selected_);
+    block(sx + 48, y + 5, 86, 11, 3, selected_);
+    block(sx + 48, y + 22, 64, 8, 3, selected_);
+    y += 54;
+    block(sx, y, sw, 36, 4, selected_);
+    y += 36 + 22;
+    block(sx + 10, y, 48, 9, 3, selected_);
+    y += 22;
+    // Five four-character entries (全部图书 …), the first one selected.
+    for (int i = 0; i < 5; ++i, y += 38)
+    {
+        if (i == 0) block(sx, y, sw, 36, 6, selected_);
+        block(sx + 10, y + 10, 16, 16, 4, i == 0 ? caption_hover_ : selected_);
+        block(sx + 38, y + 12, 56, 12, 3, i == 0 ? caption_hover_ : selected_);
+    }
+    block(sx + 10, height - 12 - 12 - 26, 16, 16, 4, selected_);
+    block(sx + 38, height - 12 - 12 - 24, 72, 12, 3, selected_);
+    // Library header, search field, sort and view controls.
+    const float pad = compact ? 28.f : 40.f, mx = 12 + side_w + pad, mw = width - mx - pad;
+    if (mw < 160) return;
+    block(mx, 38, 112, 26, 5, caption_hover_);
+    block(mx + 124, 40, 24, 22, 5, caption_hover_);
+    block(mx, 98, std::min(compact ? 245.f : 330.f, mw), 38, 6, caption_hover_);
+    if (mw > 560)
+    {
+        block(mx + mw - 36, 99, 36, 36, 6, caption_hover_);
+        block(mx + mw - 80, 99, 36, 36, 6, caption_hover_);
+        block(mx + mw - 104 - 130, 98, 130, 38, 6, caption_hover_);
+    }
+    // Book grid: auto-fill columns of at least 145px, 32px gaps, cards at most 210px wide.
+    const int columns = std::max(1, int((mw + 32) / (145 + 32)));
+    const float column = (mw - 32 * (columns - 1)) / columns, card = std::min(column, 210.f);
+    const float cover = compact ? 205.f : 225.f, pitch = cover + 135;
+    for (float row = 158; row < height; row += pitch)
+        for (int i = 0; i < columns; ++i)
+        {
+            const float x = mx + i * (column + 32);
+            block(x, row, card, cover, 5, caption_hover_);
+            block(x + 5, row + cover + 23, card * .72f, 12, 3, caption_hover_);
+            block(x + 5, row + cover + 50, card * .44f, 10, 3, caption_hover_);
+        }
+}
 void Window::paint()
 {
     PAINTSTRUCT ps{};
     BeginPaint(hwnd_, &ps);
     RECT rc{};
     GetClientRect(hwnd_, &rc);
-    if (draws_caption() && rc.right > 0 && rc.bottom > 0)
+    // The Direct2D shell owns the whole client area: until WebView2 paints, the content
+    // area shows the theme background (the page's --bg) instead of an uncleared black target.
+    if (style_ == ShellStyle::Direct2D && rc.right > 0 && rc.bottom > 0)
     {
         if (!factory_)
             D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.GetAddressOf());
@@ -340,9 +430,12 @@ void Window::paint()
             auto size = target_->GetSize();
             const float height=caption_height()*96.0f/GetDpiForWindow(hwnd_);
             target_->BeginDraw();
+            target_->Clear(D2D1::ColorF(caption_background_));
+            if (placeholder_)
+                paint_placeholder(draws_caption() ? height : 0);
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
             target_->CreateSolidColorBrush(D2D1::ColorF(caption_background_), &brush);
-            if (brush)
+            if (brush && draws_caption())
             {
                 target_->FillRectangle(D2D1::RectF(0, 0, size.width, height), brush.Get());
                 brush->SetColor(D2D1::ColorF(caption_text_));

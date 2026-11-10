@@ -16,6 +16,10 @@ try {
   const frame = document.createElement('iframe');
   frame.style.cssText = 'width:1200px;height:800px;border:0';
   let html = await (await fetch('../dist/index.html')).text();
+  // The library starts as placeholder cards (no loading overlay) until bootstrap renders it.
+  const shipped = new DOMParser().parseFromString(html, 'text/html');
+  check(shipped.body.classList.contains('booting') && shipped.querySelectorAll('#book-grid .book-skeleton').length >= 8 &&
+    shipped.getElementById('busy').hidden, 'startup must show placeholder cards instead of a loading overlay');
   html = html.replace('<head>', `<head><base href="${location.origin}/dist/"><script type="module" src="/tests/native-mock.js"><\/script>`);
   frame.srcdoc = html;
   document.body.append(frame);
@@ -23,6 +27,18 @@ try {
   const doc = frame.contentDocument;
   const win = frame.contentWindow;
   check(doc.querySelectorAll('.material-icon svg path').length > 20 && doc.querySelectorAll('.fluent-icon').length >= 2, 'bundled icons did not hydrate');
+  check(!doc.querySelector('.book-skeleton') && !doc.body.classList.contains('booting') &&
+    win.getComputedStyle(doc.getElementById('count-all')).visibility === 'visible', 'loaded library must replace the placeholders and show counts');
+  {
+    // Placeholders share the real card's geometry, so nothing shifts when the books arrive.
+    const probe = doc.importNode(shipped.querySelector('.book-skeleton'), true);
+    doc.getElementById('book-grid').prepend(probe);
+    const real = doc.querySelector('.book-card .cover-wrap').getBoundingClientRect();
+    const fake = probe.querySelector('.skeleton-cover').getBoundingClientRect();
+    probe.remove();
+    check(Math.abs(fake.height - real.height) < 1 && Math.abs(fake.width - real.width) < 1,
+      `placeholder covers must match real covers (${fake.width}x${fake.height} vs ${real.width}x${real.height})`);
+  }
   doc.querySelector('.book-card').click();
   await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
   const content = doc.getElementById('book-frame').contentDocument;

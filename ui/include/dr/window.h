@@ -18,7 +18,9 @@ enum class ShellStyle
 class Window
 {
   public:
-    bool create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio = 0.6, double height_ratio = 0.75);
+    /** `theme` is applied before the window is first shown, so the first frame already matches it. */
+    bool create(HINSTANCE instance, ShellStyle style, int icon_resource, double width_ratio = 0.6, double height_ratio = 0.75,
+                const std::string &theme = "light");
     HWND handle() const
     {
         return hwnd_;
@@ -26,6 +28,10 @@ class Window
     RECT content_bounds() const;
     void set_style(ShellStyle style);
     void set_theme(const std::string &theme);
+    /** The theme's window background (0xRRGGBB), equal to the page's --bg. */
+    UINT32 background() const { return caption_background_; }
+    /** "light", "dark" or "sepia", with "system" resolved from the Windows app theme. */
+    const char *resolved_theme() const { return resolved_theme_; }
     void set_fullscreen(bool enabled);
     bool fullscreen() const { return fullscreen_; }
     // Hides the title bar of either shell while keeping the window, its content position,
@@ -34,6 +40,11 @@ class Window
     bool borderless() const { return borderless_; }
     void set_title(const std::wstring &title);
     void post(std::function<void()> action);
+    /**
+     * While shown (the default), the Direct2D shell draws a static placeholder of the library
+     * layout in the theme's colours, for the time before the web content is ready.
+     */
+    void set_placeholder(bool shown);
     std::function<void()> on_resize;
     std::function<void()> on_close;
     std::function<void()> on_toggle_borderless;
@@ -52,6 +63,7 @@ class Window
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
     LRESULT message(UINT, WPARAM, LPARAM);
     void paint();
+    void paint_placeholder(float top);
     int caption_hit(POINT point) const;
     RECT caption_button(int hit) const;
     void caption_tip(int hit);
@@ -72,8 +84,12 @@ class Window
     WINDOWPLACEMENT windowed_placement_{sizeof(WINDOWPLACEMENT)};
     LONG_PTR windowed_style_ = 0;
     UINT32 caption_background_ = 0xffffff;
+    const char *resolved_theme_ = "light";
     UINT32 caption_text_ = 0x37352f;
     UINT32 caption_hover_ = 0xf1f1ef;
+    // The page's --sidebar, --border and --selected for the placeholder (--hover is caption_hover_).
+    UINT32 sidebar_ = 0xf7f7f5, border_ = 0xe9e9e7, selected_ = 0xebebea;
+    bool placeholder_ = true;
     int hot_ = HTNOWHERE, pressed_ = HTNOWHERE, tip_ = HTNOWHERE;
     std::wstring title_ = L"DR Reader";
     Microsoft::WRL::ComPtr<ID2D1Factory> factory_;

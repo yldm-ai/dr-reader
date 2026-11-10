@@ -35,6 +35,10 @@ void WebView::resize(RECT bounds)
     if (controller_)
         controller_->put_Bounds(bounds);
 }
+void WebView::set_theme(const std::string &theme)
+{
+    theme_ = theme;
+}
 void WebView::send(const Json &message)
 {
     if (view_)
@@ -66,6 +70,11 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                     }
                                     controller_ = controller;
                                     controller_->get_CoreWebView2(&view_);
+                                    // Transparent until the page paints its opaque body, so the window's themed
+                                    // startup placeholder shows through instead of a blank (white) view.
+                                    Microsoft::WRL::ComPtr<ICoreWebView2Controller2> controller2;
+                                    if (SUCCEEDED(controller_.As(&controller2)))
+                                        controller2->put_DefaultBackgroundColor(COREWEBVIEW2_COLOR{0, 0, 0, 0});
                                     controller_->put_Bounds(bounds_);
                                     controller_->put_ZoomFactor(1.0);
                                     EventRegistrationToken zoom_token{};
@@ -190,6 +199,14 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                         &token);
                                     if (ready)
                                         ready();
+                                    // Give <body> the window's theme before the first paint; app.js replaces
+                                    // it with the saved settings once they load. Top-level app page only.
+                                    const std::wstring theme_script =
+                                        L"if (window === top && location.host === 'app.dr-reader.local') "
+                                        L"new MutationObserver((_, observer) => { if (!document.body) return; "
+                                        L"document.body.dataset.theme ??= '" + widen(theme_) + L"'; observer.disconnect(); })"
+                                        L".observe(document, { childList: true, subtree: true });";
+                                    view_->AddScriptToExecuteOnDocumentCreated(theme_script.c_str(), nullptr);
                                     view_->Navigate(L"https://app.dr-reader.local/index.html");
                                     return S_OK;
                                 })

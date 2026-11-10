@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="app.js"></script>
   </head>
-  <body>
+  <body class="booting">
     <div id="app" class="app">
       <!-- The library home keeps Segoe Fluent glyphs; the reader uses Material Symbols. -->
       <aside class="sidebar" data-icon-set="fluent">
@@ -115,7 +115,21 @@
           <button id="shelf-edit" class="text-button">编辑书架与图书</button>
         </div>
         <div id="shelf-grid" class="shelf-grid" hidden></div>
-        <div id="book-grid" class="book-grid"></div>
+        <!-- Placeholder cards hold the library's shape until bootstrap; render() replaces them. -->
+        <div id="book-grid" class="book-grid" aria-busy="true">
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+          <div class="book-item book-skeleton" aria-hidden="true"><div class="skeleton-cover"></div><span class="skeleton-line"></span><span class="skeleton-line short"></span></div>
+        </div>
         <div id="empty-state" class="empty-state" hidden>
           <span data-icon="book"></span>
           <h2>下一段故事，从这里开始</h2>

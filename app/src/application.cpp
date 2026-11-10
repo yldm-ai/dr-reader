@@ -89,6 +89,7 @@ void Application::apply_settings(const Json &s)
     window_.set_style(app.value("shell", std::string("mica")) == "direct2d" ? ShellStyle::Direct2D
                                                                           : ShellStyle::Mica);
     window_.set_theme(app.value("theme", std::string("light")));
+    webview_.set_theme(window_.resolved_theme());
 }
 std::vector<fs::path> Application::pick_books()
 {
@@ -193,6 +194,14 @@ void Application::receive(const Json &request)
     auto id = request["id"];
     auto method = request["method"].get<std::string>();
     auto params = request.value("params", Json::object());
+    if (method == "ready")
+    {
+        // The page has rendered the library (or failed to load it) and covers the window's
+        // startup placeholder, which no longer needs drawing behind the transparent view.
+        window_.set_placeholder(false);
+        webview_.send({{"id", id}, {"result", true}});
+        return;
+    }
     if (method == "fullscreen")
     {
         const bool enabled = params.value("enabled", !window_.fullscreen());
@@ -389,7 +398,8 @@ int Application::run(HINSTANCE instance)
                                       ? ShellStyle::Direct2D
                                       : ShellStyle::Mica, IDI_DR_READER,
                          settings["window"]["widthRatio"].get<double>(),
-                         settings["window"]["heightRatio"].get<double>()))
+                         settings["window"]["heightRatio"].get<double>(),
+                         settings["application"].value("theme", std::string("light"))))
         return 1;
     window_.on_resize = [this] { webview_.resize(window_.content_bounds()); };
     // Alt+Enter hides or restores the title bar; fullscreen stays on F11 and the toolbar.
@@ -409,6 +419,7 @@ int Application::run(HINSTANCE instance)
                        {"left", button.left * scale}, {"width", (button.right - button.left) * scale}});
     };
     window_.set_theme(settings["application"].value("theme", std::string("light")));
+    webview_.set_theme(window_.resolved_theme());
     webview_.on_message = [this](auto &request) { receive(request); };
     webview_.on_error = [this](const auto &error)
     { MessageBoxW(window_.handle(), error.c_str(), L"DR Reader", MB_OK | MB_ICONERROR); };

@@ -393,6 +393,8 @@ document.addEventListener("keydown", (event) => {
     if (!event.repeat) call(event.key === "F11" ? "fullscreen" : "titlebar").catch(error => toast(error.message, "error"));
     return;
   }
+  // Library shortcuts wait for the library (window shortcuts above already work).
+  if (document.body.classList.contains("booting")) return;
   if (event.key === "F8" && reader.book && !settingsPanel.applicationOpen) {
     event.preventDefault(); settingsPanel.open("reading"); return;
   }
@@ -430,7 +432,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-busy(true, "正在打开本地书库…");
+// The page starts with placeholder cards (index.html) instead of a loading overlay; render()
+// replaces them with the library.
 try {
   const data = await call("bootstrap");
   configureIconFonts(data.iconFonts);
@@ -440,7 +443,11 @@ try {
   render();
   if (data.importErrors?.length) toast(data.importErrors.join("\n"), "error");
 } catch (error) {
+  $("book-grid").replaceChildren();
   toast(error.message, "error");
 } finally {
-  busy(false);
+  $("book-grid").removeAttribute("aria-busy");
+  document.body.classList.remove("booting");
+  // The window draws a native placeholder behind the (transparent) view until this point.
+  call("ready").catch(() => {});
 }

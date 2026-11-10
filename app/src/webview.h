@@ -17,6 +17,8 @@ class WebView
     void create(HWND window, const fs::path &web_root, const fs::path &data_root,
                 std::function<void()> ready);
     void resize(RECT bounds);
+    /** The window's resolved theme, given to the page so its first paint already matches. */
+    void set_theme(const std::string &theme);
     void send(const Json &message);
     std::function<void(const Json &)> on_message;
     std::function<void(const std::wstring &)> on_error;
@@ -26,6 +28,7 @@ class WebView
     Microsoft::WRL::ComPtr<ICoreWebView2Controller> controller_;
     Microsoft::WRL::ComPtr<ICoreWebView2> view_;
     RECT bounds_{};
+    std::string theme_ = "light";
     void fail(HRESULT error, const wchar_t *step);
 };
 std::wstring widen(std::string_view text);

@@ -580,6 +580,15 @@ h1 span {
   padding-bottom: 30px;
 }
 .book-item { min-width: 0; max-width: 210px; }
+/* Startup placeholders in the book card's own geometry (225px cover, title and author
+   lines), in the theme's quiet fill. Static: the real cards replace them as soon as the
+   library loads, and the counts stay hidden until then instead of reading 0. */
+.book-skeleton { display: flex; flex-direction: column; padding-bottom: 8px; }
+.skeleton-cover { height: 225px; margin-bottom: 16px; border-radius: 5px; background: var(--hover); }
+.skeleton-line { display: block; width: 72%; height: 12px; margin: 7px 5px 12px; border-radius: 3px; background: var(--hover); }
+.skeleton-line.short { width: 44%; margin-top: 0; }
+body.booting :is(.count, #heading-count) { visibility: hidden; }
+body.booting .app { pointer-events: none; }
 .book-item .book-card { width: 100%; }
 .list-mode .book-item { max-width: none; }
 .list-mode .book-item .book-card { grid-template-columns: 65px minmax(0, 1fr) 130px 100px; }

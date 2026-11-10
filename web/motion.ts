@@ -141,9 +141,10 @@ export class ReaderMotion {
       return page;
     });
     // Spreads: [left, right] of the spread turned from, then of the one turned to (in book order).
+    const startPage = spread ? (forward ? 0 : 2) : ahead ? 0 : 1;
     const flip = new PageFlip(host, {
       width: pageWidth, height: overlay.clientHeight, size: 'fixed',
-      usePortrait: !spread, autoSize: false, startPage: spread ? (forward ? 0 : 2) : ahead ? 0 : 1,
+      usePortrait: !spread, autoSize: false, startPage,
       drawShadow: true, maxShadowOpacity: .32, flippingTime: duration,
       showCover: false, useMouseEvents: false, showPageCorners: false,
       mobileScrollSupport: false, clickEventForward: false,
@@ -192,6 +193,16 @@ export class ReaderMotion {
       frame.contentWindow?.dispatchEvent(new Event('resize'));
     }
     host.dataset.pageCount = String(flip.getPageCount());
+    // Pages that will move (all but the resting page or spread at startPage) get their
+    // own compositor layer now, while the old snapshot still covers the engine, so it is
+    // rasterized before the first frame. Otherwise each one is promoted (and its page-sized
+    // snapshot rasterized, ~25 ms in WebView2) mid-turn, or repainted on every frame,
+    // dropping frames. The resting pages stay in the root layer and keep ClearType text.
+    // StPageFlip rewrites each page's cssText as it draws, so drawFrame reapplies the hint.
+    const resting = spread ? (forward ? [0, 1] : [2, 3]) : [startPage];
+    let moving = [...host.querySelectorAll<HTMLElement>('.stf__item')].filter((_, index) => !resting.includes(index));
+    const promote = () => { for (const item of moving) item.style.willChange = 'transform'; };
+    promote();
     // Portrait soft flips normally clone a page synchronously. A ready copy preserves
     // the actual column offset, fonts and highlights instead of flashing a fresh iframe.
     // A hard page must keep the library's own copy (the page itself): a separate
@@ -211,6 +222,7 @@ export class ReaderMotion {
     const drawFrame = render.drawFrame.bind(render);
     render.drawFrame = () => {
       drawFrame();
+      promote();
       for (const item of host.querySelectorAll<HTMLElement>('.stf__item')) {
         const pose = /^translate3d\((\S+)px, (\S+)px, 0px\)(?: rotate\((\S+)rad\)| rotateY\((\S+)deg\))?$/
           .exec(item.style.transform);
@@ -286,7 +298,16 @@ export class ReaderMotion {
       }
       first = frames[0];
       const hold = Math.ceil(frames.length * 34 / Math.max(time, 1));
-      startAnimation([...frames, ...Array(hold).fill(frames.at(-1))],
+      // While the landing pose is held, return the moved pages to the root layer so their
+      // text is back to ClearType before the live page replaces them; the one-off re-raster
+      // happens while nothing moves.
+      const pose = frames.at(-1)!;
+      const settle = () => {
+        pose();
+        for (const item of moving) item.style.willChange = '';
+        moving = [];
+      };
+      startAnimation([...frames.slice(0, -1), pose, ...Array(hold).fill(settle)],
         time * (frames.length + hold) / frames.length, done);
     };
     await new Promise(resolve => requestAnimationFrame(resolve));

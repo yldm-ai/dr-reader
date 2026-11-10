@@ -220,6 +220,8 @@ try {
         check(engine.querySelector('.stpageflip-spine')?.style.opacity === '1',
           'the spine must be fully back on the landing frame so cleanup does not pop it in');
         check(spineFaded.has(render), 'the spine must fade while the soft flap slides over it');
+        check([...engine.querySelectorAll('.stf__item')].every(item => !item.style.willChange),
+          'moved pages must leave their layers during the held landing pose');
         landed++;
       }), time, done);
     }
@@ -243,6 +245,11 @@ try {
       const halves = [...engine.querySelectorAll('.stpageflip-page .motion-page')];
       check(halves.length === 4 && halves.every((pane, i) => pane.style.width === '980px' && pane.style.left === (i % 2 ? '-490px' : '0px')),
         `${effect} ${direction}: each half page must crop its side of the spread snapshot`);
+      // Only the pages that move are pre-promoted, so the turn never rasterizes a page-sized
+      // layer mid-flight and the resting spread keeps ClearType.
+      const promoted = [...engine.querySelectorAll('.stf__item')].map(item => item.style.willChange === 'transform');
+      check(promoted.filter(Boolean).length === 2 && promoted.join() === (direction > 0 ? 'false,false,true,true' : 'true,true,false,false'),
+        `${effect} ${direction}: only the two moving pages may get their own compositor layer (${promoted})`);
       // One spine copy rides above the engine's pages and curl shadows, so its first and last
       // frames match the live spine; soft flaps fade it while they slide across (checked at landing).
       const spines = host.querySelectorAll('.stpageflip-spine');

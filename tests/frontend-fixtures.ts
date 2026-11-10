@@ -17,6 +17,8 @@ export interface Fixture extends Bootstrap {
   agentSlow?: boolean;
   /** Fails the model query of this agent with the message. */
   agentModelsError?: Record<string, string>;
+  /** Saved AI conversations, like the reading database, keyed by conversation id. */
+  conversations?: Record<string, { id: string; bookId: string; title: string; createdAt: number; updatedAt: number; messages: unknown[] }>;
 }
 export interface HostRequest { method: string; params: any }
 
@@ -128,6 +130,26 @@ export function installNativeMock(data: Fixture = bootstrapFixture()) {
             { id: 'gpt-6-astra', name: 'GPT-6-Astra', description: '', default: false, efforts: [], defaultEffort: '' }];
         setTimeout(() => reply(failure ? { id, error: failure } : { id, result: { models } }), 60);
         return;
+      }
+      if (method.startsWith('conversation')) {
+        const store = data.conversations ??= {};
+        const now = Math.floor(Date.now() / 1000);
+        const tick = () => Object.values(store).reduce((latest, item) => Math.max(latest, item.updatedAt), now - 1) + 1;
+        if (method === 'conversations')
+          result = Object.values(store).filter(item => item.bookId === params.id).sort((a, b) => b.updatedAt - a.updatedAt)
+            .map(({ messages, ...summary }) => ({ ...summary, messageCount: messages.length }));
+        if (method === 'conversation') {
+          const found = store[params.session];
+          if (!found || found.bookId !== params.id) { reply({ id, error: '这段对话不存在或不属于当前书籍' }); return; }
+          result = structuredClone({ ...found, messageCount: found.messages.length });
+        }
+        if (method === 'conversation.save') {
+          const previous = store[params.session.id];
+          // Strictly increasing times keep the newest-first order deterministic within a second.
+          store[params.session.id] = { ...structuredClone(params.session), bookId: params.id, createdAt: previous?.createdAt ?? tick(), updatedAt: tick() };
+          result = structuredClone(store[params.session.id]);
+        }
+        if (method === 'conversation.delete') { delete store[params.session]; result = true; }
       }
       if (method === 'agent.cancel') reply({ event: 'agent', request: params.request, type: 'error', text: '已停止回答' });
       if (method === 'settings') {

@@ -768,15 +768,89 @@ int main()
             dr::Library reopened(root / "notes-restore");
             require(reopened.annotations(id) == restored_snapshot, "restored annotations persist after reopening the library");
         }
+        {
+            // AI 问书 conversations: saved per book, summarised, exported and restored with the notes.
+            const auto messages = dr::Json::array({
+                {{"role", "user"}, {"text", "这句话想表达什么？"}, {"quote", "结尾文字"}},
+                {{"role", "assistant"}, {"text", "## 要点\n回答 *Markdown*"}, {"agent", "claude"}, {"label", "Claude Code"},
+                 {"model", "opus"}, {"effort", "high"}}});
+            const auto first = library.save_agent_session(id, {{"id", "session-one"}, {"title", "这句话想表达什么？"}, {"messages", messages}});
+            require(first["messages"].size() == 2 && first["messages"][1]["effort"] == "high" && first["messages"][0]["quote"] == "结尾文字" &&
+                        first["messages"][1]["stopped"] == false && first["createdAt"].get<int64_t>() > 0 && first["bookId"] == id,
+                    "conversation saved with its messages");
+            auto longer = messages;
+            longer.push_back({{"role", "user"}, {"text", "再举个例子"}});
+            longer.push_back({{"role", "assistant"}, {"text", "例子"}, {"stopped", true}, {"label", "Codex"}, {"agent", "codex"}});
+            library.save_agent_session(id, {{"id", "session-two"}, {"title", "第二段"}, {"messages", messages}});
+            library.save_agent_session(id, {{"id", "session-one"}, {"title", "这句话想表达什么？"}, {"messages", longer}});
+            auto list = library.agent_sessions(id);
+            auto one = std::find_if(list.begin(), list.end(), [](auto &session) { return session["id"] == "session-one"; });
+            require(list.size() == 2 && one != list.end() && (*one)["messageCount"] == 4 && !one->contains("messages"),
+                    "summaries count messages without loading them");
+            require(library.agent_session(id, "session-one")["messages"][3]["stopped"] == true, "a later save replaces the messages");
+            rejects([&] { library.agent_session(id, "missing"); }, "missing conversation");
+            rejects([&] { library.agent_sessions("../invalid"); }, "conversations need a valid book");
+            rejects([&] { library.save_agent_session(id, {{"id", "bad id"}, {"messages", messages}}); }, "unsafe conversation id");
+            rejects([&] { library.save_agent_session(id, {{"id", "x"}, {"messages", dr::Json::array()}}); }, "empty conversation");
+            auto invalid_messages = messages;
+            invalid_messages[0]["role"] = "system";
+            rejects([&] { library.save_agent_session(id, {{"id", "x"}, {"messages", invalid_messages}}); }, "unknown role");
+            invalid_messages = messages;
+            invalid_messages[1]["model"] = "a;b";
+            rejects([&] { library.save_agent_session(id, {{"id", "x"}, {"messages", invalid_messages}}); }, "unsafe model in a conversation");
+            require(library.agent_sessions(id).size() == 2, "rejected conversations are not saved");
+
+            const auto backup = dr::Json::parse(library.export_notes(id));
+            require(backup["conversations"].size() == 2 && backup["conversations"][0]["id"] == "session-one" &&
+                        backup["conversations"][0]["messages"].size() == 4 && !backup["conversations"][0].contains("messageCount"),
+                    "the backup carries every conversation");
+            const auto text = library.export_notes_markdown(id);
+            require(text.find("## AI 问书") != text.npos && text.find("**读者**：这句话想表达什么？") != text.npos &&
+                        text.find("> 结尾文字") != text.npos && text.find("#### 要点") != text.npos &&
+                        text.find("**Codex**（回答被中途停止）：") != text.npos,
+                    "Markdown export appends the conversations with demoted headings");
+            {
+                dr::Library restored(root / "conversation-restore");
+                restored.import_book(epub);
+                auto result = restored.import_notes(id, backup.dump());
+                require(result["conversationsImported"] == 2 && result["conversationsSkipped"] == 0 && result["imported"] == backup["annotations"].size(),
+                        "import restores conversations together with the notes");
+                require(restored.agent_session(id, "session-one") == library.agent_session(id, "session-one"),
+                        "round trip preserves conversation text, settings and timestamps");
+                restored.save_agent_session(id, {{"id", "session-two"}, {"title", "本地修改"}, {"messages", messages}});
+                result = restored.import_notes(id, backup.dump());
+                require(result["conversationsImported"] == 0 && result["conversationsSkipped"] == 2 &&
+                            restored.agent_session(id, "session-two")["title"] == "本地修改",
+                        "import never overwrites local conversations");
+                auto invalid = backup;
+                invalid["conversations"][0]["id"] = "new-one";
+                invalid["conversations"][1]["id"] = "new-two";
+                invalid["conversations"][1]["messages"][0]["role"] = "system";
+                const auto sessions_before = restored.agent_sessions(id);
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "an invalid conversation fails the import");
+                require(restored.agent_sessions(id) == sessions_before, "a failed import writes no conversation");
+                invalid = backup;
+                invalid["conversations"][0]["bookId"] = "another-book";
+                rejects([&] { restored.import_notes(id, invalid.dump()); }, "conversations of another book rejected");
+                invalid = backup;
+                invalid.erase("conversations");
+                require(!restored.import_notes(id, invalid.dump()).contains("conversationsImported"), "backups without conversations import as before");
+            }
+            library.remove_agent_session(id, "session-two");
+            require(library.agent_sessions(id).size() == 1, "a conversation can be deleted");
+            rejects([&] { library.remove_agent_session(id, "session-two"); }, "a deleted conversation is gone");
+        }
         library.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.4}});
         rejects([&] { library.remove_book("../library"); }, "reject unsafe deletion ID");
         require(library.list().size() == 1, "invalid deletion preserves library");
         {
             dr::AnnotationStore store(root / "library" / "reader.sqlite3");
             store.toggle_bookmark("another-book", {{"chapter", 0}, {"ratio", 0.2}});
+            store.save_agent_session("another-book", {{"id", "other-session"}, {"messages", {{{"role", "user"}, {"text", "问"}}}}});
+            require(!store.agent_sessions(id).empty(), "the book has a conversation before deletion");
             library.remove_book(id);
-            require(store.list(id).empty() && store.bookmarks(id).empty(), "delete book reading data");
-            require(store.bookmarks("another-book").size() == 1, "preserve other book data");
+            require(store.list(id).empty() && store.bookmarks(id).empty() && store.agent_sessions(id).empty(), "delete book reading data and conversations");
+            require(store.bookmarks("another-book").size() == 1 && store.agent_sessions("another-book").size() == 1, "preserve other book data");
         }
         require(library.list().empty() && !dr::fs::exists(root / "library" / "books" / id),
                 "delete removes library entry and extracted files");

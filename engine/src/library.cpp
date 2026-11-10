@@ -378,7 +378,8 @@ std::string Library::export_notes(const std::string &id) const
 {
     const auto book = get(id);
     const auto notes = annotations_->list(id);
-    if (notes.empty()) return {};
+    const auto conversations = annotations_->export_agent_sessions(id);
+    if (notes.empty() && conversations.empty()) return {};
     Json chapters = Json::array();
     for (const auto &chapter : book.at("chapters")) chapters.push_back(chapter.at("href"));
     // Design reference: calibre gui2/viewer/highlights.py Export.exported_data and
@@ -388,9 +389,11 @@ std::string Library::export_notes(const std::string &id) const
                     {"book", {{"id", id}, {"title", book.value("title", "")},
                               {"author", book.value("author", "")}, {"chapters", chapters}}},
                     {"annotations", notes}};
+    // Optional in version 1: earlier releases ignore it, and files without it import as before.
+    if (!conversations.empty()) archive["conversations"] = conversations;
     auto data = archive.dump(2) + "\n";
-    if (notes.size() > 10000 || data.size() > notes_max_bytes)
-        throw std::runtime_error("笔记数量或文件大小超出备份范围（最多 10000 条、32 MiB）");
+    if (notes.size() > 10000 || conversations.size() > 10000 || data.size() > notes_max_bytes)
+        throw std::runtime_error("笔记、对话数量或文件大小超出备份范围（各最多 10000 条、共 32 MiB）");
     return data;
 }
 Json Library::import_notes(const std::string &id, std::string_view data)
@@ -427,7 +430,20 @@ Json Library::import_notes(const std::string &id, std::string_view data)
             if (note.at("bookId") != id || chapter >= chapters.size() || note.at("href") != chapters[chapter])
                 throw std::runtime_error("笔记章节不属于当前图书");
         }
-        return annotations_->import_annotations(id, notes);
+        Json conversations = Json::array();
+        if (archive.contains("conversations"))
+        {
+            conversations = archive.at("conversations");
+            if (!conversations.is_array() || conversations.size() > 10000)
+                throw std::runtime_error("对话列表无效或超过 10000 段");
+            for (const auto &session : conversations)
+                if (!session.is_object() || session.value("bookId", id) != id)
+                    throw std::runtime_error("对话不属于当前图书");
+        }
+        auto result = annotations_->import_backup(id, notes, conversations);
+        if (!archive.contains("conversations"))
+            for (auto key : {"conversationsImported", "conversationsSkipped"}) result.erase(key);
+        return result;
     }
     catch (const Json::exception &)
     {
@@ -438,7 +454,8 @@ std::string Library::export_notes_markdown(const std::string &id) const
 {
     const auto book = get(id);
     const auto notes = annotations_->list(id);
-    if (notes.empty()) return {};
+    const auto conversations = annotations_->export_agent_sessions(id);
+    if (notes.empty() && conversations.empty()) return {};
     const auto escaped = [](const std::string &text) {
         std::string result;
         for (char c : text)
@@ -475,10 +492,57 @@ std::string Library::export_notes_markdown(const std::string &id) const
         if (!text.empty()) out << "\n**笔记**\n\n" << escaped(text) << "\n";
         out << "\n---\n\n";
     }
+    if (conversations.empty()) return out.str();
+    // Questions and passages are the reader's text and stay escaped; answers are the model's
+    // Markdown, kept as written but with headings demoted below this section's own.
+    out << "## AI 问书\n\n";
+    for (const auto &session : conversations)
+    {
+        auto title = session.value("title", std::string());
+        out << "### " << escaped(title.empty() ? std::string("未命名对话") : title) << "\n\n";
+        for (const auto &message : session.at("messages"))
+        {
+            const auto text = message.value("text", std::string());
+            if (message.value("role", std::string()) == "user")
+            {
+                const auto quote = message.value("quote", std::string());
+                if (!quote.empty())
+                {
+                    std::istringstream lines(escaped(quote));
+                    std::string line;
+                    while (std::getline(lines, line)) out << "> " << line << '\n';
+                    out << '\n';
+                }
+                out << "**读者**：" << escaped(text) << "\n\n";
+                continue;
+            }
+            auto label = message.value("label", std::string());
+            out << "**" << escaped(label.empty() ? std::string("AI") : label) << "**"
+                << (message.value("stopped", false) ? "（回答被中途停止）" : "") << "：\n\n";
+            std::istringstream lines(text);
+            std::string line;
+            while (std::getline(lines, line))
+            {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (line.starts_with("#"))
+                {
+                    const auto text_start = line.find_first_not_of('#');
+                    line = "####" + (text_start == line.npos ? std::string() : line.substr(text_start));
+                }
+                out << line << '\n';
+            }
+            out << '\n';
+        }
+        out << "---\n\n";
+    }
     return out.str();
 }
 Json Library::annotations(const std::string& id) const {get(id);return annotations_->list(id);}
 Json Library::save_annotation(const std::string& id,const Json& annotation){auto book=get(id);int chapter=annotation.at("chapter");if(chapter<0||static_cast<size_t>(chapter)>=book["chapters"].size()||annotation.at("href")!=book["chapters"][chapter]["href"])throw std::runtime_error("标注章节不属于当前书籍");return annotations_->save(id,annotation);}
 void Library::remove_annotation(const std::string& id,const std::string& annotation_id){get(id);annotations_->remove(id,annotation_id);}
+Json Library::agent_sessions(const std::string& id) const{get(id);return annotations_->agent_sessions(id);}
+Json Library::agent_session(const std::string& id,const std::string& session) const{get(id);return annotations_->agent_session(id,session);}
+Json Library::save_agent_session(const std::string& id,const Json& session){get(id);return annotations_->save_agent_session(id,session);}
+void Library::remove_agent_session(const std::string& id,const std::string& session){get(id);annotations_->remove_agent_session(id,session);}
 std::string Library::lookup_url(const std::string& dictionary,const std::string& text)const{return dictionary_url(settings(),dictionary,text);}
 } // namespace dr

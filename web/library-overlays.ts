@@ -46,8 +46,8 @@ export function createLibraryOverlays(onRemove: BookAction, actions: LibraryActi
   };
   const open = item(menu, "book-menu-open", "打开阅读", "book");
   const details = item(menu, "book-menu-info", "查看信息", "book-info");
-  const exportNotes = item(menu, "book-menu-export", "导出笔记", "note");
-  const importNotes = item(menu, "book-menu-import", "导入笔记", "note");
+  const exportNotes = item(menu, "book-menu-export", "导出笔记与对话", "note");
+  const importNotes = item(menu, "book-menu-import", "导入笔记与对话", "note");
   const category = item(menu, "book-menu-category", "添加至分类", "library");
   category.insertAdjacentHTML("beforeend", `<span class="book-menu-trailing">${icon("chevron", "fluent")}</span>`);
   category.setAttribute("aria-haspopup", "menu");

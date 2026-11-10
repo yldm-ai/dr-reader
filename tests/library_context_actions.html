@@ -70,7 +70,7 @@ try {
   context(); click('book-menu-export');
   await until(() => win.nativeProbe.requests.some(request => request.method === 'notes.export'));
   check(win.nativeProbe.requests.find(request => request.method === 'notes.export').params.id === 'fixture', 'export targets the selected book');
-  await until(() => doc.getElementById('toast').textContent.includes('笔记已导出'));
+  await until(() => doc.getElementById('toast').textContent.includes('笔记与对话已导出'));
   win.nativeProbe.data.exportResult = { saved: false };
   const beforeCancel = doc.getElementById('toast').textContent;
   const beforeRequests = win.nativeProbe.requests.length;
@@ -90,6 +90,9 @@ try {
   check(!menu.matches(':popover-open') && doc.getElementById('busy').hidden, 'import dismisses menus and clears busy state');
   check(win.nativeProbe.requests.find(request => request.method === 'notes.import').params.id === 'fixture', 'import targets the selected book');
   check(doc.getElementById('toast').textContent.includes('跳过 1 条已有笔记（保留本地版本）'), 'duplicate handling is explained');
+  win.nativeProbe.data.notesImportResult = { imported: 0, skipped: 0, conversationsImported: 2, conversationsSkipped: 1 };
+  context(); click('book-menu-import');
+  await until(() => doc.getElementById('toast').textContent.includes('AI 对话导入 2 段，跳过 1 段已有对话'), 'imported conversations reported');
   win.nativeProbe.data.notesImportResult = { cancelled: true };
   const beforeImportCancel = doc.getElementById('toast').textContent;
   const beforeImportRequests = win.nativeProbe.requests.length;

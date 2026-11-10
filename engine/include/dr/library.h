@@ -33,6 +33,11 @@ class Library
     Json import_notes(const std::string& id,std::string_view data);
     Json save_annotation(const std::string& id,const Json& annotation);
     void remove_annotation(const std::string& id,const std::string& annotation_id);
+    // AI 问书 conversations of a book (see AnnotationStore).
+    Json agent_sessions(const std::string& id) const;
+    Json agent_session(const std::string& id,const std::string& session) const;
+    Json save_agent_session(const std::string& id,const Json& session);
+    void remove_agent_session(const std::string& id,const std::string& session);
     std::string lookup_url(const std::string& dictionary,const std::string& text) const;
     const fs::path &root() const
     {

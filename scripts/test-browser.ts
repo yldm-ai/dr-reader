@@ -109,6 +109,10 @@ try {
           await app.locator('#toc-panel').screenshot({ path: resolve(directory, `agent-chat-${theme}.png`) });
         }
         await app.evaluate(() => { document.body.dataset.theme = 'light'; });
+        await app.locator('.ask-history-open').click();
+        await app.locator('.ask-history-row').first().waitFor();
+        await app.locator('#toc-panel').screenshot({ path: resolve(directory, 'agent-history.png') });
+        await app.locator('.ask-history-close').click();
         await app.locator('#reader-app-settings').click();
         await app.locator('#app-section-agent').scrollIntoViewIfNeeded();
         await app.locator('#app-section-agent').screenshot({ path: resolve(directory, 'agent-settings.png') });

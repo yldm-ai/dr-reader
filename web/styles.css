@@ -2866,6 +2866,27 @@ body[data-animations="false"] .reader-footer { transition: none; }
 .ask-send { width: 30px; height: 30px; background: var(--primary); color: var(--on-primary); }
 .ask-send:hover { background: var(--primary-hover); color: var(--on-primary); }
 .ask-panel[data-busy="true"] .ask-send { background: var(--text); }
+.ask-thread[hidden] { display: none; }
+/* 历史: the book's saved conversations, in place of the thread. */
+.ask-history { flex: 1; padding: 0 0 12px; }
+.ask-history[hidden] { display: none; }
+.ask-history-head {
+  display: flex; align-items: center; justify-content: space-between; padding: 0 4px 6px;
+  color: var(--muted); font-size: var(--text-secondary);
+}
+.ask-history-head .text-button { height: 26px; padding: 0 6px; font-size: var(--text-secondary); }
+.ask-history-row { display: flex; align-items: center; gap: 2px; border-radius: 6px; }
+.ask-history-row:hover, .ask-history-row[data-current="true"] { background: var(--hover); }
+.ask-history-item {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.ask-history-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus-ring); }
+.ask-history-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-body); }
+.ask-history-item small { color: var(--muted); font-size: var(--text-caption); }
+.ask-history-delete { flex: 0 0 28px; width: 28px; height: 28px; color: var(--muted); opacity: 0; }
+.ask-history-row:is(:hover, :focus-within) .ask-history-delete { opacity: 1; }
+.ask-history-open[aria-pressed="true"] { background: var(--hover); color: var(--text); }
 
 /* AI 助读 settings */
 .app-text-input {

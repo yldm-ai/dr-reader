@@ -55,17 +55,20 @@ const libraryOverlays = createLibraryOverlays(book => {
   exportNotes: async book => {
     try {
       const result = await call<{ empty?: boolean; saved?: boolean }>("notes.export", { id: book.id });
-      if (result.empty) toast("这本书还没有笔记或标注");
-      else if (result.saved) toast("笔记已导出", "success");
+      if (result.empty) toast("这本书还没有笔记、标注或 AI 对话");
+      else if (result.saved) toast("笔记与对话已导出", "success");
     } catch (error) { toast(`导出失败：${errorMessage(error)}`, "error"); }
   },
   importNotes: async book => {
     busy(true, "正在导入阅读笔记…");
     try {
-      const result = await call<{ cancelled?: boolean; imported?: number; skipped?: number }>("notes.import", { id: book.id });
+      const result = await call<{ cancelled?: boolean; imported?: number; skipped?: number; conversationsImported?: number; conversationsSkipped?: number }>("notes.import", { id: book.id });
       if (!result.cancelled) {
         const skipped = result.skipped ? `，跳过 ${result.skipped} 条已有笔记（保留本地版本）` : "";
-        toast(`已导入 ${result.imported} 条笔记或标注${skipped}`, "success");
+        // Only backups that carry conversations report them.
+        const conversations = result.conversationsImported === undefined ? ""
+          : `；AI 对话导入 ${result.conversationsImported} 段${result.conversationsSkipped ? `，跳过 ${result.conversationsSkipped} 段已有对话` : ""}`;
+        toast(`已导入 ${result.imported} 条笔记或标注${skipped}${conversations}`, "success");
       }
     } catch (error) { toast(`导入笔记失败：${errorMessage(error)}`, "error"); }
     finally { busy(false); }

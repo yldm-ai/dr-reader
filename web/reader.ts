@@ -376,7 +376,7 @@ export class Reader {
     this.setTocExpanded(false);
     $("toc-panel").hidden = false;
     this.tab("toc");
-    this.chat?.reset();
+    void this.chat?.open(book.id);
     this.toc();
     this.marks();
     $<HTMLInputElement>("book-search-input").value = "";
@@ -2099,7 +2099,7 @@ export class Reader {
     this.appliedReading = null;
     this.book = null;
     this.annotations = [];
-    this.chat?.reset();
+    this.chat?.close();
     $<HTMLIFrameElement>("book-frame").srcdoc = "";
   }
 }

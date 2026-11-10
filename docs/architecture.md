@@ -20,7 +20,7 @@ flowchart LR
 
 设置采用版本 2 的两组模型：`application` 包含界面主题、Mica/Direct2D 外壳、动画、选词菜单与查词网站；`reading` 只包含正文排版、分页与翻页动画。旧的扁平设置文件在读取时迁移。C++ 负责枚举本机字体、验证取值、规范化 URL 模板、保存设置，并把外壳变化投递回窗口线程。
 
-标注表位于 `<data-root>/reader.sqlite3`。`annotations` 保存章节与 href、UTF-16 文本偏移、原文、前后 32 个 UTF-16 单元的上下文、笔记、颜色和样式；`bookmarks` 保存章节与相对位置；`migrations` 防止同一本书的旧 JSON 书签重复导入。SQLite 启用 WAL 与完整同步。SQLite 连接与书库对象一样只由串行工作线程访问。
+标注表位于 `<data-root>/reader.sqlite3`。`annotations` 保存章节与 href、UTF-16 文本偏移、原文、前后 32 个 UTF-16 单元的上下文、笔记、颜色和样式；`bookmarks` 保存章节与相对位置；`migrations` 防止同一本书的旧 JSON 书签重复导入；`agent_sessions` 与 `agent_messages` 保存每本书的 AI 问书对话（删除会话时级联删除消息，删除图书时一并删除）。新表只追加不改旧表，`user_version` 仍为 3，旧版本可照常打开。SQLite 启用 WAL 与完整同步。SQLite 连接与书库对象一样只由串行工作线程访问。
 
 ## 导入管线
 
@@ -98,7 +98,7 @@ pnpm 锁定开发依赖，Vite 以 `web/index.html` 为入口，构建到 `dist/
 
 阅读页侧栏的「问书」和选词菜单的「问 AI」复用本机已安装并登录的 Codex CLI、Claude Code 或 opencode 回答关于当前书籍的问题。思路参考 NeoRead（`apps/server/internal/neoread/cli.go`、`claude.go`、`codex.go`；该项目没有声明许可证，因此只借鉴做法、独立实现），opencode 为本项目自行接入。
 
-- 每个问题都是一次全新、无状态的 CLI 运行：prompt 经 stdin 传入，之前的对话在 prompt 中按预算重放（`web/agent-prompt.ts`），不写入用户的 CLI 会话列表（Claude `--no-session-persistence`、Codex `--ephemeral`）。
+- 每个问题都是一次全新、无状态的 CLI 运行：prompt 经 stdin 传入，之前的对话在 prompt 中按预算重放（`web/agent-prompt.ts`），不写入用户的 CLI 会话列表（Claude `--no-session-persistence`、Codex `--ephemeral`）。会话由本应用管理：每轮回答完成后整段保存到 `reader.sqlite3`（`conversation.save`，失败的提问不保存），打开图书时接上最近一次对话，「历史」可切换或删除；导出笔记时一并导出（见 [笔记文件格式](notes-format.md)）。
 - 只读、不调用工具：Claude `--tools ""`、不加载 MCP 与项目设置；Codex 只读沙箱、`approval_policy=never`、关闭工具类 feature，并按名称关闭用户 `config.toml` 中的 MCP 服务器；opencode 通过 `OPENCODE_CONFIG_CONTENT` 关闭全部工具并拒绝所有权限。保留用户级配置，以便沿用其登录、网关和默认模型。
 - `app/src/agent_runner.cpp` 在注册表最新 PATH 与常见安装目录中查找可执行文件（npm 的 `.cmd` 通过 cmd.exe 启动，参数不含 cmd 元字符），在空的临时目录中无窗口运行，并放入 Job 对象：停止、15 分钟超时或退出应用时连同子进程一起结束。
 - `engine/src/agent.cpp` 把三种 JSONL 输出统一为文本、进度与错误；只有供应商的成功终止事件加正常退出才算回答完成。事件样例来自 codex-cli 0.167、Claude Code 2.1 和 opencode 1.19 的实测输出，见 `tests/engine_tests.cpp`。

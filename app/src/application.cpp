@@ -134,10 +134,10 @@ fs::path Application::pick_notes_path(const std::string &title, bool &markdown)
     if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
         throw std::runtime_error("无法打开笔记保存窗口");
     const COMDLG_FILTERSPEC filters[] = {{L"DR Reader 笔记备份 (*.drnotes)", L"*.drnotes"},
-                                        {L"Markdown 笔记（仅供阅读） (*.md)", L"*.md"}};
+                                        {L"Markdown 笔记与对话（仅供阅读） (*.md)", L"*.md"}};
     dialog->SetFileTypes(2, filters);
     dialog->SetDefaultExtension(L"drnotes");
-    dialog->SetTitle(L"导出阅读笔记");
+    dialog->SetTitle(L"导出阅读笔记与 AI 对话");
     auto filename = widen(title);
     for (auto &c : filename)
         if (c < 32 || std::wstring_view(L"<>:\"/\\|?*").find(c) != std::wstring_view::npos) c = L'_';
@@ -327,7 +327,8 @@ void Application::receive(const Json &request)
                 else if (method == "notes.export")
                 {
                     const auto book_id = params.at("id").get<std::string>();
-                    if (library_.annotations(book_id).empty()) result = {{"saved", false}, {"empty", true}};
+                    if (library_.annotations(book_id).empty() && library_.agent_sessions(book_id).empty())
+                        result = {{"saved", false}, {"empty", true}};
                     else
                     {
                         const auto title = library_.get(book_id).value("title", std::string("阅读笔记"));
@@ -372,6 +373,11 @@ void Application::receive(const Json &request)
                 else if(method=="annotations")result=library_.annotations(params.at("id"));
                 else if(method=="annotation.save")result=library_.save_annotation(params.at("id"),params.at("annotation"));
                 else if(method=="annotation.delete"){library_.remove_annotation(params.at("id"),params.at("annotationId"));result=true;}
+                // AI 问书 conversations, saved per book after each answer.
+                else if(method=="conversations")result=library_.agent_sessions(params.at("id"));
+                else if(method=="conversation")result=library_.agent_session(params.at("id"),params.at("session"));
+                else if(method=="conversation.save")result=library_.save_agent_session(params.at("id"),params.at("session"));
+                else if(method=="conversation.delete"){library_.remove_agent_session(params.at("id"),params.at("session"));result=true;}
                 else if(method=="lookup"){auto url=library_.lookup_url(params.at("dictionaryId"),params.at("text"));window_.post([this,id,url]{auto result=ShellExecuteW(window_.handle(),L"open",widen(url).c_str(),nullptr,nullptr,SW_SHOWNORMAL);if(reinterpret_cast<INT_PTR>(result)>32)webview_.send({{"id",id},{"result",true}});else webview_.send({{"id",id},{"error","无法打开浏览器"}});});return;}
                 else if (method == "settings")
                 {

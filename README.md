@@ -81,7 +81,7 @@ docs/         架构、拆分策略与验证记录
 
 ```text
 config.toml                    应用设置、阅读设置、排序规则与启动窗口比例
-reader.sqlite3                 SQLite 标注、笔记与书签
+reader.sqlite3                 SQLite 标注、笔记、书签与 AI 问书对话
 books/<content-id>/book.json   元数据、目录与阅读进度
 books/<content-id>/content/    解包资源、拆分后的 XHTML
 books/<content-id>/search/     C++ 提取的每节纯文本
@@ -92,7 +92,7 @@ webview-profile/              WebView2 用户数据
 
 ## 笔记备份与恢复
 
-右键图书选择“导出笔记”，默认保存 `.drnotes` 备份；在保存窗口的文件类型中也可选择 Markdown，供阅读和分享。右键同一本图书选择“导入笔记”，即可从 `.drnotes` 恢复高亮、下划线和笔记。操作完成后显示新增和跳过的数量，取消文件选择不更改任何数据。
+右键图书选择“导出笔记与对话”，默认保存 `.drnotes` 备份；在保存窗口的文件类型中也可选择 Markdown，供阅读和分享。右键同一本图书选择“导入笔记与对话”，即可从 `.drnotes` 恢复高亮、下划线、笔记和 AI 问书对话。操作完成后显示新增和跳过的数量，取消文件选择不更改任何数据。
 
 备份保留完整的文字定位、颜色、样式、唯一 ID 和创建/修改时间。仅接受同一原始 EPUB、相同章节布局的备份；重复 ID 跳过并保留本地版本，已有笔记不被覆盖。导入使用 SQLite 事务，有任一无效记录时全部回滚，不改变阅读进度、分类或书签。备份最多 10000 条、32 MiB。旧 Markdown 未保存定位信息，无法导入；原书库中的笔记仍可重新导出为 `.drnotes`。详细格式见 [笔记文件格式](docs/notes-format.md)。
 

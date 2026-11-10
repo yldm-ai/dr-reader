@@ -174,8 +174,60 @@ try {
   check(!asks()[4].params.prompt.includes('出错的问题？'), 'failed exchange not replayed');
   check(asks()[4].params.prompt.includes('读者的问题：出错的问题'), 'retry asks the same question');
 
+  // Every finished answer saved the conversation; the failed attempt was not.
+  const sessions = () => Object.values(probe.data.conversations ?? {});
+  const saves = () => probe.requests.filter(item => item.method === 'conversation.save');
+  await until(() => sessions()[0]?.messages.length === 8, 'conversation saved after each answer');
+  check(saves().length === 4 && saves().every(item => item.params.id === 'fixture'), 'saved to the open book');
+  const conversation = sessions()[0];
+  check(conversation.title === '这句话想表达什么？' && conversation.messages[0].quote.startsWith('阅读是一段安静的时光'), 'titled by the first question, with its passage');
+  check(conversation.messages[1].agent === 'codex' && conversation.messages[1].label === 'Codex' && conversation.messages[1].model === 'opus[1m]' && conversation.messages[1].effort === 'turbo',
+    'answers record the CLI, model and effort');
+  check(conversation.messages[5].stopped === true && conversation.messages.filter(item => item.text === '出错的问题').length === 1, 'stopped answers kept, failed attempt not');
+
+  // A new conversation starts empty; the earlier one stays in the history.
   doc.querySelector('.ask-reset').click();
   check(!doc.querySelector('.ask-turn') && doc.querySelector('#ask-content .panel-hint'), 'new conversation clears the thread');
+  submit('换个话题');
+  await until(() => sessions().length === 2 && doc.querySelectorAll('.ask-copy').length === 1, 'second conversation saved');
+  check(!asks().at(-1).params.prompt.includes('<conversation>'), 'a new conversation replays nothing');
+  const historyButton = doc.querySelector('.ask-history-open');
+  historyButton.click();
+  const rows = () => [...doc.querySelectorAll('.ask-history-row')];
+  await until(() => rows().length === 2, 'history lists both conversations');
+  check(doc.querySelector('.ask-thread').hidden && historyButton.getAttribute('aria-pressed') === 'true', 'history replaces the thread');
+  check(rows()[0].dataset.current === 'true' && rows()[0].textContent.includes('换个话题') && rows()[1].textContent.includes('4 问'),
+    `newest first, current marked, questions counted: ${rows().map(row => row.textContent).join(' | ')}`);
+  rows()[1].querySelector('.ask-history-item').click();
+  await until(() => !doc.querySelector('.ask-thread').hidden && doc.querySelectorAll('.ask-copy').length === 4, 'earlier conversation reopened');
+  check(doc.querySelector('.ask-turn-quote')?.textContent.startsWith('阅读是一段安静的时光') && doc.querySelectorAll('.ask-meta')[2].textContent.includes('已停止'),
+    'reopened conversation shows passages and stopped answers');
+  submit('接着上次问');
+  await until(() => doc.querySelectorAll('.ask-copy').length === 5, 'follow-up in a reopened conversation');
+  const resumed = asks().at(-1).params.prompt;
+  check(resumed.includes('<conversation>') && resumed.includes('这句话想表达什么？') && resumed.includes('（回答被读者中途停止）'), 'reopened history is replayed');
+  await until(() => probe.data.conversations[conversation.id].messages.length === 10, 'the reopened conversation grows');
+
+  // Reopening the book continues its latest conversation.
+  doc.getElementById('back-library').click();
+  await until(() => !doc.getElementById('library-view').hidden, 'back to the library');
+  doc.querySelector('.book-card').click();
+  await until(() => !doc.getElementById('reader-view').hidden && doc.getElementById('reader-loading').hidden);
+  doc.querySelector('[data-tab="ask"]').click();
+  // The sidebar folds away on opening; pointing at the window edge brings it back, as for a reader.
+  doc.getElementById('toc-reveal-zone').dispatchEvent(new win.PointerEvent('pointerenter', { clientX: 2, clientY: 400 }));
+  await until(() => doc.getElementById('toc-panel').dataset.expanded === 'true', 'sidebar revealed');
+  await until(() => doc.querySelectorAll('.ask-copy').length === 5, 'latest conversation restored after reopening');
+
+  // Deleting: another conversation, then the open one.
+  historyButton.click();
+  await until(() => rows().length === 2);
+  rows().find(row => row.textContent.includes('换个话题')).querySelector('.ask-history-delete').click();
+  await until(() => rows().length === 1 && sessions().length === 1, 'conversation deleted');
+  rows()[0].querySelector('.ask-history-delete').click();
+  await until(() => !sessions().length && doc.querySelector('.ask-history-list').textContent.includes('还没有保存的对话'), 'last conversation deleted');
+  doc.querySelector('.ask-history-close').click();
+  check(!doc.querySelector('.ask-turn') && doc.querySelector('#ask-content .panel-hint'), 'deleting the open conversation clears the thread');
   check(!win.runtimeErrors.length, win.runtimeErrors.join('\n'));
   document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS agent chat';
 } catch (error) {

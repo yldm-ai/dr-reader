@@ -33,7 +33,8 @@
   --ease-ui: cubic-bezier(.1, .9, .2, 1);
   /* A standard ease-in-out reads as a slide; --ease-ui would snap the toolbar shut. */
   --toolbar-motion: 260ms cubic-bezier(.4, 0, .2, 1);
-  --font-ui: "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans SC", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+  /* Noto Sans SC ships with current Windows 11; earlier systems fall back to Microsoft YaHei. */
+  --font-ui: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", sans-serif;
   --text-caption: 12px;
   --text-secondary: 13px;
   --text-body: 14px;

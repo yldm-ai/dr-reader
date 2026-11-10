@@ -1,4 +1,5 @@
 #include "webview.h"
+#include <WebView2EnvironmentOptions.h>
 #include <sstream>
 namespace dr
 {
@@ -47,8 +48,16 @@ void WebView::send(const Json &message)
 void WebView::create(HWND window, const fs::path &web_root, const fs::path &data_root,
                      std::function<void()> ready)
 {
+    // At 150% display scaling and above Chromium composites every overflow scroller (sidebar,
+    // settings, notes), and text in a composited scroller loses ClearType: it was drawn with
+    // greyscale antialiasing while the rest of the window kept subpixel text, so the sidebar
+    // looked blurred. Measured in the real window: 0% vs 40-50% subpixel-coloured text pixels.
+    // This switch keeps such scrollers in the main layer, trading compositor scrolling of small
+    // panels for crisp text. Explicitly promoted layers (page turns) are unaffected.
+    auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    options->put_AdditionalBrowserArguments(L"--disable-prefer-compositing-to-lcd-text");
     auto hr = CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, (data_root / "webview-profile").c_str(), nullptr,
+        nullptr, (data_root / "webview-profile").c_str(), options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [this, window, web_root, data_root, ready](HRESULT result,
                                                        ICoreWebView2Environment *env) -> HRESULT

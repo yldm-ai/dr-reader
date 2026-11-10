@@ -112,6 +112,10 @@ try {
         await app.locator('#reader-app-settings').click();
         await app.locator('#app-section-agent').scrollIntoViewIfNeeded();
         await app.locator('#app-section-agent').screenshot({ path: resolve(directory, 'agent-settings.png') });
+        await app.locator('#app-agent-model-trigger').click();
+        await app.locator('#app-agent-model-popup').waitFor();
+        await page.locator('iframe').screenshot({ path: resolve(directory, 'agent-model-list.png') });
+        await app.locator('#app-agent-model-popup .select-search input').press('Escape');
       }
       if (name === 'toc_hierarchy') {
         const panel = page.locator('#toc-panel');
@@ -375,7 +379,7 @@ try {
         await app.locator('#setting-fontFamily-trigger').click();
         const capture = (name: string) => page.locator('iframe').screenshot({ path: resolve(directory, name), animations: 'disabled' });
         await capture('reading-settings.png');
-        await app.locator('.select-search input').press('Escape');
+        await app.locator('#setting-fontFamily-popup .select-search input').press('Escape');
         if (!await app.locator('#reading-settings').evaluate((el: HTMLDialogElement) => el.open)) throw Error('Escape closed the whole drawer');
         await app.locator('[data-close="reading-settings"]').click();
         await app.locator('#reader-app-settings').click();

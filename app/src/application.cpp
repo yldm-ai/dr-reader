@@ -417,11 +417,45 @@ bool Application::receive_agent(const Json &id, const std::string &method, const
             webview_.send({{"id", id}, {"result", true}});
             return true;
         }
+        auto runner = [this]() -> AgentRunner & {
+            if (!agents_)
+                agents_ = std::make_unique<AgentRunner>([this](const AgentUpdate &update) {
+                    static constexpr const char *types[] = {"text", "status", "done", "error"};
+                    Json event{{"event", "agent"}, {"request", update.request},
+                               {"type", types[static_cast<int>(update.type)]}, {"text", update.text}};
+                    window_.post([this, event = std::move(event)] { webview_.send(event); });
+                });
+            return *agents_;
+        };
+        if (method == "agent.models")
+        {
+            // Runs the CLI for a few seconds: off the UI thread and outside the serial worker queue.
+            auto kind = agent_kind(params.value("agent", std::string()));
+            if (!kind) throw std::runtime_error("请先选择具体的工具");
+            auto agent = AgentRunner::find(*kind);
+            if (!agent) throw std::runtime_error(std::string("没有找到 ") + agent_label(*kind) + "，请确认已安装并能在终端中运行");
+            runner().list_models(*agent, [this, id](std::vector<AgentModel> models, std::string error) {
+                Json reply{{"id", id}};
+                if (!error.empty()) reply["error"] = error;
+                else
+                {
+                    Json list = Json::array();
+                    for (auto &model : models)
+                        list.push_back({{"id", model.id}, {"name", model.name}, {"description", model.description},
+                                        {"default", model.is_default}, {"efforts", model.efforts},
+                                        {"defaultEffort", model.default_effort}});
+                    reply["result"] = {{"models", list}};
+                }
+                window_.post([this, reply = std::move(reply)] { webview_.send(reply); });
+            });
+            return true;
+        }
         if (method != "agent.ask") return false;
         const auto request = params.at("request").get<std::string>();
         const auto prompt = params.at("prompt").get<std::string>();
         const auto choice = params.value("agent", std::string("auto"));
         const auto model = params.value("model", std::string());
+        const auto effort = params.value("effort", std::string());
         if (request.empty() || request.size() > 64) throw std::runtime_error("提问标识无效");
         if (prompt.empty() || prompt.size() > (1u << 20)) throw std::runtime_error("问题为空或附带的正文过长");
         std::optional<AgentExecutable> agent;
@@ -438,14 +472,7 @@ bool Application::receive_agent(const Json &id, const std::string &method, const
             agent = AgentRunner::find(*kind);
             if (!agent) throw std::runtime_error(std::string("没有找到 ") + agent_label(*kind) + "，请确认已安装并能在终端中运行");
         }
-        if (!agents_)
-            agents_ = std::make_unique<AgentRunner>([this](const AgentUpdate &update) {
-                static constexpr const char *types[] = {"text", "status", "done", "error"};
-                Json event{{"event", "agent"}, {"request", update.request},
-                           {"type", types[static_cast<int>(update.type)]}, {"text", update.text}};
-                window_.post([this, event = std::move(event)] { webview_.send(event); });
-            });
-        agents_->start(request, *agent, model, prompt);
+        runner().start(request, *agent, model, effort, prompt);
         webview_.send({{"id", id}, {"result", {{"agent", agent_id(agent->kind)}, {"label", agent_label(agent->kind)}}}});
     }
     catch (const std::exception &error)

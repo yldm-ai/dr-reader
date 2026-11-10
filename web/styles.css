@@ -2879,5 +2879,10 @@ body[data-animations="false"] .reader-footer { transition: none; }
 .agent-status li span { flex: 0 0 96px; }
 .agent-status li small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--text-caption); }
 .agent-status li[data-found="false"] span { color: var(--muted); }
-.app-row:has(> #app-agent-label) > .select-control { width: 220px; flex: 0 0 220px; }
+/* Tool, model and effort lists line up on the right; refresh buttons sit to their left. */
+.agent-control { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: 0 0 auto; }
+.agent-control > .select-control { width: 220px; flex: 0 0 220px; }
+.agent-control > .icon-button { width: 32px; height: 32px; color: var(--muted); }
+.agent-control > .icon-button:hover:not(:disabled) { color: var(--text); }
+.agent-model-error { color: var(--danger); }
 .ask-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

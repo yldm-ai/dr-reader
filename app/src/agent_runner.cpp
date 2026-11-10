@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cwctype>
+#include <functional>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -147,6 +148,209 @@ std::filesystem::path codex_config()
     if (home.empty()) home = environment(L"USERPROFILE") + L"\\.codex";
     return std::filesystem::path(home) / L"config.toml";
 }
+std::vector<std::string> codex_servers(AgentKind kind)
+{
+    std::vector<std::string> servers;
+    if (kind == AgentKind::Codex)
+        if (std::error_code error; std::filesystem::is_regular_file(codex_config(), error))
+            servers = codex_mcp_server_names(read_file(codex_config()));
+    return servers;
+}
+
+/** One CLI process: what to run, what to feed it and how to react to its output. */
+struct ProcessSpec
+{
+    AgentExecutable agent;
+    std::vector<std::string> arguments;
+    std::string input;
+    /** Keep stdin open after `input` so `line` can answer; otherwise stdin closes once written. */
+    bool interactive = false;
+    HANDLE cancel = nullptr;
+    unsigned long timeout_ms = 0;
+    /** Called per stdout line; returns input to write back (interactive only). */
+    std::function<std::string(std::string_view)> line;
+    /** Polled after each line; true ends the process early (a server that has answered). */
+    std::function<bool()> done;
+};
+struct ProcessResult
+{
+    DWORD code = 1;
+    bool timed_out = false;
+    std::string errors;
+};
+/**
+ * Runs an agent CLI hidden, in an empty temporary working directory of its own (the CLIs must not
+ * pick up a project, its instructions or files), inside a job object that ends its whole process
+ * tree on cancel, timeout or early finish.
+ */
+ProcessResult run_process(const ProcessSpec &spec)
+{
+    const auto label = std::string(agent_label(spec.agent.kind));
+    wchar_t temp[MAX_PATH + 1]{};
+    GetTempPathW(MAX_PATH + 1, temp);
+    static std::atomic<unsigned> counter = 0;
+    auto workdir = std::filesystem::path(temp) / L"dr-reader-agent" /
+                   (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
+                    std::to_wstring(++counter));
+    std::filesystem::create_directories(workdir);
+    struct Cleanup
+    {
+        std::filesystem::path dir;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(dir, ignored);
+        }
+    } cleanup{workdir};
+
+    std::wstring command = quote(spec.agent.path.native());
+    for (auto &arg : spec.arguments) command += L" " + quote(wide(arg));
+    std::wstring application = spec.agent.path.native();
+    const auto extension = spec.agent.path.extension().native();
+    if (_wcsicmp(extension.c_str(), L".cmd") == 0 || _wcsicmp(extension.c_str(), L".bat") == 0)
+    {
+        // Batch shims need cmd.exe. Every argument is free of cmd metacharacters (see
+        // agent_arguments), and /s keeps the outer quotes from being re-parsed.
+        application = environment(L"ComSpec");
+        if (application.empty()) application = L"C:\\Windows\\System32\\cmd.exe";
+        command = L"cmd.exe /d /s /c \"" + command + L"\"";
+    }
+
+    // Inherited environment plus the full search path and the CLI's overrides.
+    auto overrides = agent_environment(spec.agent.kind);
+    std::vector<std::pair<std::wstring, std::wstring>> extra{{L"PATH", joined(search_path())}};
+    for (auto &[key, value] : overrides) extra.emplace_back(wide(key), wide(value));
+    std::wstring block;
+    if (auto strings = GetEnvironmentStringsW())
+    {
+        for (auto entry = strings; *entry; entry += wcslen(entry) + 1)
+        {
+            std::wstring_view item(entry);
+            auto equals = item.find(L'=', 1);
+            auto key = item.substr(0, equals);
+            bool replaced = std::any_of(extra.begin(), extra.end(), [&](auto &pair) {
+                return pair.first.size() == key.size() && _wcsnicmp(pair.first.c_str(), key.data(), key.size()) == 0;
+            });
+            if (!replaced) block.append(item).push_back(L'\0');
+        }
+        FreeEnvironmentStringsW(strings);
+    }
+    for (auto &[key, value] : extra) block.append(key + L"=" + value).push_back(L'\0');
+    block.push_back(L'\0');
+
+    SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
+    Handle in_read, in_write, out_read, out_write, err_read, err_write;
+    if (!CreatePipe(in_read.put(), in_write.put(), &inherit, 0) || !CreatePipe(out_read.put(), out_write.put(), &inherit, 0) ||
+        !CreatePipe(err_read.put(), err_write.put(), &inherit, 0))
+        throw std::runtime_error("无法创建与 " + label + " 通信的管道");
+    for (auto parent : {in_write.get(), out_read.get(), err_read.get()}) SetHandleInformation(parent, HANDLE_FLAG_INHERIT, 0);
+
+    // Only the three pipe ends reach the child, not every inheritable handle of the app.
+    HANDLE inherited[] = {in_read.get(), out_write.get(), err_write.get()};
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+    std::vector<char> attributes(size);
+    auto list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
+    if (!InitializeProcThreadAttributeList(list, 1, 0, &size) ||
+        !UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof(inherited), nullptr, nullptr))
+        throw std::runtime_error("无法准备 " + label + " 的启动参数");
+    STARTUPINFOEXW startup{};
+    startup.StartupInfo.cb = sizeof(startup);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = in_read.get();
+    startup.StartupInfo.hStdOutput = out_write.get();
+    startup.StartupInfo.hStdError = err_write.get();
+    startup.lpAttributeList = list;
+
+    Handle job(CreateJobObjectW(nullptr, nullptr));
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if (!job.get() || !SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
+        throw std::runtime_error("无法为 " + label + " 创建进程组");
+
+    PROCESS_INFORMATION info{};
+    std::wstring mutable_command = command;
+    const bool created = CreateProcessW(application.c_str(), mutable_command.data(), nullptr, nullptr, TRUE,
+                                        CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
+                                        block.data(), workdir.c_str(), &startup.StartupInfo, &info);
+    DeleteProcThreadAttributeList(list);
+    if (!created) throw std::runtime_error("无法启动 " + label + "（错误 " + std::to_string(GetLastError()) + "）");
+    Handle process(info.hProcess), thread(info.hThread);
+    if (!AssignProcessToJobObject(job.get(), process.get()))
+    {
+        TerminateProcess(process.get(), 1);
+        throw std::runtime_error("无法管理 " + label + " 进程");
+    }
+    ResumeThread(thread.get());
+    in_read.reset();
+    out_write.reset();
+    err_write.reset();
+
+    // Stop on cancel or timeout; once the CLI exits, also end helpers that kept its pipes open.
+    ProcessResult result;
+    Handle exited(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+    std::thread watchdog([&] {
+        HANDLE waits[] = {process.get(), spec.cancel, exited.get()};
+        if (WaitForMultipleObjects(3, waits, FALSE, spec.timeout_ms) == WAIT_TIMEOUT) result.timed_out = true;
+        TerminateJobObject(job.get(), 1);
+    });
+    auto write = [&](std::string_view text) {
+        DWORD written = 0;
+        for (size_t offset = 0; offset < text.size() && in_write.get(); offset += written)
+            if (!WriteFile(in_write.get(), text.data() + offset, static_cast<DWORD>(std::min<size_t>(text.size() - offset, 1 << 16)), &written, nullptr))
+                break;
+    };
+    std::thread writer;
+    if (spec.interactive) write(spec.input); // a short request; replies follow from this thread
+    else
+        writer = std::thread([&] {
+            write(spec.input);
+            in_write.reset(); // end of input: the CLIs start once stdin closes
+        });
+    std::thread error_reader([&] {
+        char buffer[4096];
+        DWORD read = 0;
+        while (ReadFile(err_read.get(), buffer, sizeof(buffer), &read, nullptr) && read)
+        {
+            result.errors.append(buffer, read);
+            if (result.errors.size() > 16384) result.errors.erase(0, result.errors.size() - 8192);
+        }
+    });
+
+    std::string pending;
+    char buffer[65536];
+    DWORD read = 0;
+    bool done = false;
+    auto deliver = [&](std::string_view line) {
+        if (done) return;
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        auto reply = spec.line(line);
+        if (spec.interactive && !reply.empty()) write(reply);
+        if (spec.done && spec.done())
+        {
+            done = true;
+            SetEvent(exited.get()); // answered: the server is not needed any more
+        }
+    };
+    while (ReadFile(out_read.get(), buffer, sizeof(buffer), &read, nullptr) && read)
+    {
+        pending.append(buffer, read);
+        size_t start = 0;
+        for (size_t end; (end = pending.find('\n', start)) != pending.npos; start = end + 1)
+            deliver(std::string_view(pending).substr(start, end - start));
+        pending.erase(0, start);
+        if (pending.size() > (64u << 20)) pending.clear(); // a runaway line, not an event
+    }
+    if (!pending.empty()) deliver(pending);
+    WaitForSingleObject(process.get(), INFINITE);
+    SetEvent(exited.get()); // releases the watchdog if the CLI exited on its own
+    watchdog.join();
+    if (writer.joinable()) writer.join();
+    in_write.reset();
+    error_reader.join();
+    GetExitCodeProcess(process.get(), &result.code);
+    return result;
+}
 } // namespace
 
 struct AgentRunner::Run
@@ -181,9 +385,10 @@ std::optional<AgentExecutable> AgentRunner::find(AgentKind kind)
     return std::nullopt;
 }
 void AgentRunner::start(const std::string &request, const AgentExecutable &agent, const std::string &model,
-                        const std::string &prompt)
+                        const std::string &effort, const std::string &prompt)
 {
     validate_agent_model(model);
+    validate_agent_effort(effort);
     auto run = std::make_shared<Run>();
     run->request = request;
     {
@@ -191,7 +396,7 @@ void AgentRunner::start(const std::string &request, const AgentExecutable &agent
         if (runs_.contains(request)) throw std::runtime_error("这个提问已经在进行");
         runs_[request] = run;
     }
-    std::thread([this, run, agent, model, prompt] { execute(run, agent, model, prompt); }).detach();
+    std::thread([this, run, agent, model, effort, prompt] { execute(run, agent, model, effort, prompt); }).detach();
 }
 void AgentRunner::cancel(const std::string &request)
 {
@@ -202,7 +407,8 @@ void AgentRunner::cancel(const std::string &request)
         SetEvent(found->second->cancel.get());
     }
 }
-void AgentRunner::execute(std::shared_ptr<Run> run, AgentExecutable agent, std::string model, std::string prompt)
+void AgentRunner::execute(std::shared_ptr<Run> run, AgentExecutable agent, std::string model, std::string effort,
+                          std::string prompt)
 {
     const auto label = std::string(agent_label(agent.kind));
     auto finish = [&](AgentUpdate::Type type, std::string text) {
@@ -211,179 +417,77 @@ void AgentRunner::execute(std::shared_ptr<Run> run, AgentExecutable agent, std::
         runs_.erase(run->request);
         idle_.notify_all();
     };
-    std::filesystem::path workdir;
     try
     {
-        // An empty folder of our own: the CLIs must not pick up a project, its instructions or
-        // files, and the book's own folder is never exposed.
-        wchar_t temp[MAX_PATH + 1]{};
-        GetTempPathW(MAX_PATH + 1, temp);
-        workdir = std::filesystem::path(temp) / L"dr-reader-agent" /
-                  (std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()) + L"-" +
-                   std::to_wstring(reinterpret_cast<uintptr_t>(run.get()) & 0xffff));
-        std::filesystem::create_directories(workdir);
-
-        std::vector<std::string> servers;
-        if (agent.kind == AgentKind::Codex)
-            if (std::error_code error; std::filesystem::is_regular_file(codex_config(), error))
-                servers = codex_mcp_server_names(read_file(codex_config()));
-        std::wstring command = quote(agent.path.native());
-        for (auto &arg : agent_arguments(agent.kind, model, servers)) command += L" " + quote(wide(arg));
-        std::wstring application = agent.path.native();
-        const auto extension = agent.path.extension().native();
-        if (_wcsicmp(extension.c_str(), L".cmd") == 0 || _wcsicmp(extension.c_str(), L".bat") == 0)
-        {
-            // Batch shims need cmd.exe. Every argument is free of cmd metacharacters (see
-            // agent_arguments), and /s keeps the outer quotes from being re-parsed.
-            application = environment(L"ComSpec");
-            if (application.empty()) application = L"C:\\Windows\\System32\\cmd.exe";
-            command = L"cmd.exe /d /s /c \"" + command + L"\"";
-        }
-
-        // Inherited environment plus the full search path and the CLI's overrides.
-        auto overrides = agent_environment(agent.kind);
-        std::vector<std::pair<std::wstring, std::wstring>> extra{{L"PATH", joined(search_path())}};
-        for (auto &[key, value] : overrides) extra.emplace_back(wide(key), wide(value));
-        std::wstring block;
-        if (auto strings = GetEnvironmentStringsW())
-        {
-            for (auto entry = strings; *entry; entry += wcslen(entry) + 1)
-            {
-                std::wstring_view item(entry);
-                auto equals = item.find(L'=', 1);
-                auto key = item.substr(0, equals);
-                bool replaced = std::any_of(extra.begin(), extra.end(), [&](auto &pair) {
-                    return pair.first.size() == key.size() && _wcsnicmp(pair.first.c_str(), key.data(), key.size()) == 0;
-                });
-                if (!replaced) block.append(item).push_back(L'\0');
-            }
-            FreeEnvironmentStringsW(strings);
-        }
-        for (auto &[key, value] : extra) block.append(key + L"=" + value).push_back(L'\0');
-        block.push_back(L'\0');
-
-        SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
-        Handle in_read, in_write, out_read, out_write, err_read, err_write;
-        if (!CreatePipe(in_read.put(), in_write.put(), &inherit, 0) || !CreatePipe(out_read.put(), out_write.put(), &inherit, 0) ||
-            !CreatePipe(err_read.put(), err_write.put(), &inherit, 0))
-            throw std::runtime_error("无法创建与 " + label + " 通信的管道");
-        for (auto parent : {in_write.get(), out_read.get(), err_read.get()}) SetHandleInformation(parent, HANDLE_FLAG_INHERIT, 0);
-
-        // Only the three pipe ends reach the child, not every inheritable handle of the app.
-        HANDLE inherited[] = {in_read.get(), out_write.get(), err_write.get()};
-        SIZE_T size = 0;
-        InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
-        std::vector<char> attributes(size);
-        auto list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
-        if (!InitializeProcThreadAttributeList(list, 1, 0, &size) ||
-            !UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof(inherited), nullptr, nullptr))
-            throw std::runtime_error("无法准备 " + label + " 的启动参数");
-        STARTUPINFOEXW startup{};
-        startup.StartupInfo.cb = sizeof(startup);
-        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        startup.StartupInfo.hStdInput = in_read.get();
-        startup.StartupInfo.hStdOutput = out_write.get();
-        startup.StartupInfo.hStdError = err_write.get();
-        startup.lpAttributeList = list;
-
-        Handle job(CreateJobObjectW(nullptr, nullptr));
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        if (!job.get() || !SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)))
-            throw std::runtime_error("无法为 " + label + " 创建进程组");
-
-        PROCESS_INFORMATION info{};
-        std::wstring mutable_command = command;
-        const bool created = CreateProcessW(application.c_str(), mutable_command.data(), nullptr, nullptr, TRUE,
-                                            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT,
-                                            block.data(), workdir.c_str(), &startup.StartupInfo, &info);
-        DeleteProcThreadAttributeList(list);
-        if (!created) throw std::runtime_error("无法启动 " + label + "（错误 " + std::to_string(GetLastError()) + "）");
-        Handle process(info.hProcess), thread(info.hThread);
-        if (!AssignProcessToJobObject(job.get(), process.get()))
-        {
-            TerminateProcess(process.get(), 1);
-            throw std::runtime_error("无法管理 " + label + " 进程");
-        }
-        ResumeThread(thread.get());
-        in_read.reset();
-        out_write.reset();
-        err_write.reset();
-
-        // Stop on cancel or timeout; once the CLI exits, also end helpers that kept its pipes open.
-        bool timed_out = false;
-        std::thread watchdog([&] {
-            HANDLE waits[] = {process.get(), run->cancel.get()};
-            if (WaitForMultipleObjects(2, waits, FALSE, timeout_ms) == WAIT_TIMEOUT) timed_out = true;
-            TerminateJobObject(job.get(), 1);
-        });
-        std::thread writer([&] {
-            DWORD written = 0;
-            for (size_t offset = 0; offset < prompt.size(); offset += written)
-                if (!WriteFile(in_write.get(), prompt.data() + offset, static_cast<DWORD>(std::min<size_t>(prompt.size() - offset, 1 << 16)), &written, nullptr))
-                    break;
-            in_write.reset(); // end of input: the CLIs start once stdin closes
-        });
-        std::string errors;
-        std::thread error_reader([&] {
-            char buffer[4096];
-            DWORD read = 0;
-            while (ReadFile(err_read.get(), buffer, sizeof(buffer), &read, nullptr) && read)
-            {
-                errors.append(buffer, read);
-                if (errors.size() > 16384) errors.erase(0, errors.size() - 8192);
-            }
-        });
-
         AgentStream stream(agent.kind);
-        std::string pending;
-        char buffer[65536];
-        DWORD read = 0;
-        auto deliver = [&](std::string_view line) {
-            if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        ProcessSpec spec{agent, agent_arguments(agent.kind, model, effort, codex_servers(agent.kind)), std::move(prompt)};
+        spec.cancel = run->cancel.get();
+        spec.timeout_ms = timeout_ms;
+        spec.line = [&](std::string_view line) {
             for (auto &event : stream.line(line))
             {
-                if (run->cancelled) return;
+                if (run->cancelled) break;
                 if (event.type == AgentEvent::Type::Text) sink_({run->request, AgentUpdate::Type::Text, event.text});
                 else if (event.type == AgentEvent::Type::Status) sink_({run->request, AgentUpdate::Type::Status, event.text});
             }
+            return std::string();
         };
-        while (ReadFile(out_read.get(), buffer, sizeof(buffer), &read, nullptr) && read)
-        {
-            pending.append(buffer, read);
-            size_t start = 0;
-            for (size_t end; (end = pending.find('\n', start)) != pending.npos; start = end + 1)
-                deliver(std::string_view(pending).substr(start, end - start));
-            pending.erase(0, start);
-            if (pending.size() > (64u << 20)) pending.clear(); // a runaway line, not an event
-        }
-        if (!pending.empty()) deliver(pending);
-        WaitForSingleObject(process.get(), INFINITE);
-        SetEvent(run->cancel.get()); // releases the watchdog if the CLI exited on its own
-        watchdog.join();
-        writer.join();
-        error_reader.join();
-        DWORD code = 1;
-        GetExitCodeProcess(process.get(), &code);
-
-        std::error_code ignored;
-        std::filesystem::remove_all(workdir, ignored);
-        if (run->cancelled && !timed_out) return finish(AgentUpdate::Type::Error, "已停止回答");
-        if (timed_out) return finish(AgentUpdate::Type::Error, label + " 超过 15 分钟没有完成回答，已停止");
+        auto result = run_process(spec);
+        if (run->cancelled && !result.timed_out) return finish(AgentUpdate::Type::Error, "已停止回答");
+        if (result.timed_out) return finish(AgentUpdate::Type::Error, label + " 超过 15 分钟没有完成回答，已停止");
         if (stream.failed())
         {
             // The stream already explained the failure; repeat it as the final word.
             return finish(AgentUpdate::Type::Error, stream.last_error().empty() ? label + " 返回了错误" : stream.last_error());
         }
-        if (stream.succeeded() && code == 0) return finish(AgentUpdate::Type::Done, {});
-        auto detail = !stream.last_error().empty() ? stream.last_error() : stderr_summary(errors);
-        finish(AgentUpdate::Type::Error, detail.empty() ? label + " 异常退出（代码 " + std::to_string(code) + "）" : detail);
+        if (stream.succeeded() && result.code == 0) return finish(AgentUpdate::Type::Done, {});
+        auto detail = !stream.last_error().empty() ? stream.last_error() : stderr_summary(result.errors);
+        finish(AgentUpdate::Type::Error, detail.empty() ? label + " 异常退出（代码 " + std::to_string(result.code) + "）" : detail);
     }
     catch (const std::exception &error)
     {
-        std::error_code ignored;
-        if (!workdir.empty()) std::filesystem::remove_all(workdir, ignored);
         finish(AgentUpdate::Type::Error, error.what());
     }
+}
+void AgentRunner::list_models(const AgentExecutable &agent, ModelsSink done)
+{
+    auto run = std::make_shared<Run>();
+    {
+        std::lock_guard lock(mutex_);
+        run->request = "models-" + std::to_string(++model_queries_);
+        runs_[run->request] = run;
+    }
+    std::thread([this, run, agent, done = std::move(done)] {
+        const auto label = std::string(agent_label(agent.kind));
+        std::vector<AgentModel> models;
+        std::string error;
+        try
+        {
+            AgentModelProbe probe(agent.kind);
+            ProcessSpec spec{agent, probe.arguments(codex_servers(agent.kind)), probe.start(), probe.interactive()};
+            spec.cancel = run->cancel.get();
+            spec.timeout_ms = model_timeout_ms;
+            spec.line = [&](std::string_view line) { return probe.line(line); };
+            spec.done = [&] { return probe.finished(); };
+            auto result = run_process(spec);
+            probe.end();
+            models = probe.models();
+            if (result.timed_out) error = label + " 没有及时返回模型列表";
+            else if (probe.failed()) error = probe.error().empty() ? label + " 拒绝了模型查询" : probe.error();
+            else if (models.empty())
+            {
+                auto detail = stderr_summary(result.errors);
+                error = detail.empty() ? label + " 没有返回可用的模型，请确认已登录" : detail;
+            }
+        }
+        catch (const std::exception &failure)
+        {
+            error = failure.what();
+        }
+        if (!run->cancelled) done(error.empty() ? std::move(models) : std::vector<AgentModel>{}, error);
+        std::lock_guard lock(mutex_);
+        runs_.erase(run->request);
+        idle_.notify_all();
+    }).detach();
 }
 } // namespace dr

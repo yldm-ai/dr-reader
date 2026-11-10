@@ -42,6 +42,12 @@ export type SelectionAction = 'highlight' | 'underline' | 'note' | 'copy' | 'sea
 /** Local agent CLIs that can answer questions about the book. */
 export type AgentId = 'codex' | 'claude' | 'opencode';
 export type AgentChoice = 'auto' | AgentId;
+/** A model an agent CLI reports (`agent.models`); `id` is what its `--model` takes. */
+export interface AgentModelInfo {
+  id: string; name: string; description: string; default: boolean;
+  /** Reasoning efforts the model accepts (empty when it has none) and the one it uses by default. */
+  efforts: string[]; defaultEffort: string;
+}
 export type BookOpeningAnimation = 'circles' | 'book' | 'cover' | 'none';
 export type LibrarySort = 'added' | 'read' | 'title' | 'author';
 
@@ -60,6 +66,8 @@ export interface ApplicationSettings {
   agent?: AgentChoice;
   /** Optional model per CLI; empty uses the CLI's own default. */
   agentModels?: Partial<Record<AgentId, string>>;
+  /** Reasoning effort per CLI; empty uses the model's default. */
+  agentEfforts?: Partial<Record<AgentId, string>>;
 }
 
 export interface Settings { version?: number; application: ApplicationSettings; reading: ReadingSettings }

@@ -100,16 +100,30 @@ void agent_checks()
         require(failing.failed() && failing.last_error() == "Unexpected server error.", "opencode error");
     }
     // Arguments: tool-free, read-only, prompt on stdin, no cmd.exe metacharacters.
-    auto codex = dr::agent_arguments(AgentKind::Codex, "gpt-6.1", {"node_repl", "bad name"});
+    auto codex = dr::agent_arguments(AgentKind::Codex, "gpt-6.1", "high", std::vector<std::string>{"node_repl", "bad name"});
     require(codex.back() == "-" && std::count(codex.begin(), codex.end(), "mcp_servers.node_repl.enabled=false") == 1 &&
                 std::none_of(codex.begin(), codex.end(), [](auto &arg) { return arg.find("bad name") != arg.npos; }),
             "codex reads stdin and disables valid MCP names");
+    require(std::count(codex.begin(), codex.end(), "model_reasoning_effort=high") == 1, "codex reasoning effort");
+    auto effortful = dr::agent_arguments(AgentKind::Claude, "opus", "max");
+    auto flag = std::find(effortful.begin(), effortful.end(), "--effort");
+    require(flag != effortful.end() && flag + 1 != effortful.end() && flag[1] == "max", "claude effort flag");
+    auto variant = dr::agent_arguments(AgentKind::OpenCode, "opencode/beam-free", "xhigh");
+    require(variant.end()[-2] == "--variant" && variant.back() == "xhigh", "opencode variant flag");
+    for (auto kind : {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode})
+    {
+        auto plain = dr::agent_arguments(kind, "");
+        require(std::none_of(plain.begin(), plain.end(), [](auto &arg) { return arg == "--effort" || arg == "--variant" || arg.starts_with("model_reasoning_effort"); }),
+                "no effort keeps the CLI default");
+    }
+    rejects([] { dr::agent_arguments(AgentKind::Claude, "", "high&calc"); }, "efforts cannot inject commands");
+    rejects([] { dr::agent_arguments(AgentKind::Codex, "", "a=b"); }, "efforts cannot set other Codex options");
     auto claude = dr::agent_arguments(AgentKind::Claude, "");
     require(std::find(claude.begin(), claude.end(), "--no-session-persistence") != claude.end() &&
                 std::find(claude.begin(), claude.end(), "--model") == claude.end(),
             "claude does not persist sessions and keeps its default model");
     for (auto kind : {AgentKind::Codex, AgentKind::Claude, AgentKind::OpenCode})
-        for (auto &arg : dr::agent_arguments(kind, "anthropic/claude-sonnet-5"))
+        for (auto &arg : dr::agent_arguments(kind, "anthropic/claude-sonnet-5", "high"))
             require(arg.find_first_of("&|<>^%!\"") == arg.npos, "agent arguments are cmd-safe");
     rejects([] { dr::agent_arguments(AgentKind::OpenCode, "x & calc"); }, "model names cannot inject commands");
     auto names = dr::codex_mcp_server_names("model = \"x\"\n[mcp_servers.node_repl]\n[mcp_servers.node_repl.env]\n  [mcp_servers.\"quoted-one\"]\n[mcp_servers.bad$name]\n[plugins.\"a@b\"]\n");
@@ -121,6 +135,70 @@ void agent_checks()
             "agent settings");
     rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agent", "gemini"}}}}); }, "unknown agent");
     rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agentModels", {{"codex", "a;b"}}}}}}); }, "unsafe model");
+    auto effort = dr::patch_settings(dr::default_settings(), {{"application", {{"agentEfforts", {{"codex", "xhigh"}}}}}});
+    require(effort["application"]["agentEfforts"]["codex"] == "xhigh" && effort["application"]["agentEfforts"]["claude"] == "", "effort settings");
+    rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agentEfforts", {{"claude", "high max"}}}}}}); }, "unsafe effort");
+
+    // Model discovery: no model turn, only the CLIs' own listing protocols.
+    {
+        dr::AgentModelProbe codex(AgentKind::Codex);
+        auto args = codex.arguments({"node_repl"});
+        require(args.at(0) == "app-server" && std::count(args.begin(), args.end(), "mcp_servers.node_repl.enabled=false") == 1 &&
+                    codex.interactive() && codex.start().find(R"("method":"initialize")") != std::string::npos,
+                "codex lists models through app-server");
+        require(codex.line(R"({"method":"remoteControl/status/changed","params":{"status":"disabled"}})").empty(), "codex notifications need no reply");
+        auto refusal = codex.line(R"({"id":7,"method":"item/tool/requestUserInput","params":{}})");
+        require(refusal.find(R"("id":7)") != std::string::npos && refusal.find("-32601") != std::string::npos, "codex server requests are refused");
+        auto next = codex.line(R"({"id":1,"result":{"userAgent":"dr-reader/0.167.0","codexHome":"C:\\Users\\x\\.codex"}})");
+        require(next.find(R"("method":"initialized")") != std::string::npos && next.find(R"("method":"model/list")") != std::string::npos,
+                "codex asks for models once initialized");
+        auto page = codex.line(R"({"id":2,"result":{"data":[{"id":"gpt-6.1-sol","model":"gpt-6.1-sol","displayName":"GPT-6.1-Sol","description":"Latest workhorse model.","hidden":false,"supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"high","description":"Deep"},{"reasoningEffort":"bad effort"}],"defaultReasoningEffort":"low","isDefault":true},{"id":"x","model":"internal-x","displayName":"X","hidden":true,"isDefault":false}],"nextCursor":"c2"}})");
+        require(page.find(R"("cursor":"c2")") != std::string::npos && page.find(R"("id":3)") != std::string::npos && !codex.finished(),
+                "codex follows the next page");
+        codex.line(R"({"id":3,"result":{"data":[{"model":"gpt-6-astra","displayName":"GPT-6-Astra","isDefault":false},{"model":"gpt-6.1-sol","displayName":"dup"}],"nextCursor":null}})");
+        auto models = codex.models();
+        require(codex.finished() && !codex.failed() && models.size() == 2 && models[0].id == "gpt-6.1-sol" && models[0].is_default &&
+                    models[0].name == "GPT-6.1-Sol" && models[1].id == "gpt-6-astra" &&
+                    models[0].efforts == std::vector<std::string>{"low", "high"} && models[0].default_effort == "low" && models[1].efforts.empty(),
+                "codex models: hidden and duplicate entries dropped");
+        dr::AgentModelProbe rejected(AgentKind::Codex);
+        rejected.line(R"({"id":1,"error":{"code":-32600,"message":"Not logged in"}})");
+        require(rejected.failed() && rejected.error() == "Not logged in", "codex discovery error");
+    }
+    {
+        dr::AgentModelProbe claude(AgentKind::Claude);
+        auto args = claude.arguments();
+        require(std::find(args.begin(), args.end(), "stream-json") != args.end() && std::find(args.begin(), args.end(), "--no-session-persistence") != args.end() &&
+                    claude.start().find(R"("subtype":"initialize")") != std::string::npos,
+                "claude lists models through the initialize control request");
+        claude.line(R"({"type":"system","subtype":"init"})");
+        require(!claude.finished(), "claude waits for its control response");
+        claude.line(R"j({"type":"control_response","response":{"subtype":"success","request_id":"models","response":{"commands":[],"models":[{"value":"default","resolvedModel":"claude-opus-5-5","displayName":"Default (recommended)"},{"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus 5.5","description":"Custom Opus model","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","resolvedModel":"claude-sonnet-5-5","displayName":"Sonnet 5.5"},{"value":"opus[1m]","resolvedModel":"claude-opus-5-5[1m]","displayName":"Opus (1M context)"},{"value":"bad model","displayName":"Bad"}]}}})j");
+        auto models = claude.models();
+        require(claude.finished() && models.size() == 3 && models[0].id == "opus" && models[0].is_default && !models[1].is_default &&
+                    models[2].id == "opus[1m]" && models[0].efforts.size() == 5 && models[0].efforts.back() == "max" && models[1].efforts.empty(),
+                "claude models: aliases kept, default marked, unsafe ids dropped");
+        dr::AgentModelProbe rejected(AgentKind::Claude);
+        rejected.line(R"({"type":"control_response","response":{"subtype":"error","request_id":"models","error":"Invalid API key"}})");
+        require(rejected.failed() && rejected.error() == "Invalid API key", "claude discovery error");
+    }
+    {
+        dr::AgentModelProbe opencode(AgentKind::OpenCode);
+        require(opencode.arguments() == std::vector<std::string>{"models", "--verbose"} && !opencode.interactive() && opencode.start().empty(),
+                "opencode lists models with `opencode models --verbose`");
+        // Verbose output: the id line, then the model object; variants are its reasoning efforts.
+        for (auto line : {"opencode/beam-free\r", "{", "  \"name\": \"Beam Free\",", "  \"limit\": {", "    \"context\": 1048576", "  },",
+                          "  \"variants\": {", "    \"low\": { \"reasoningEffort\": \"low\" },", "    \"xhigh\": {}, \"max\": {}", "  }", "}\r",
+                          "magpie/auto/gpt-5.6-luna", "{", "  \"name\": \"GPT-5.6 Luna\",", "  \"variants\": {}", "}",
+                          "", "Warning: something", "opencode/beam-free", "plain/model-without-details"})
+            opencode.line(line);
+        opencode.end();
+        auto models = opencode.models();
+        require(models.size() == 3 && models[0].id == "opencode/beam-free" && models[0].name == "Beam Free" &&
+                    models[0].efforts == std::vector<std::string>{"low", "xhigh", "max"} && models[1].name == "GPT-5.6 Luna" &&
+                    models[1].efforts.empty() && models[2].name == "plain/model-without-details",
+                "opencode models: names and variants in the CLI's order");
+    }
 }
 } // namespace
 int main()

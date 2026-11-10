@@ -8,7 +8,7 @@ import type { AgentChoice, AgentId } from './types.ts';
 /** What the reader supplies: the passage being read and the configured agent. */
 export interface AgentChatHost {
   context(): ReadingContext | null;
-  agent(): { agent: AgentChoice; model: string };
+  agent(): { agent: AgentChoice; model: string; effort: string };
 }
 interface AgentEventMessage { request?: string; type?: 'text' | 'status' | 'done' | 'error'; text?: string }
 interface Active {
@@ -99,7 +99,7 @@ export class AgentChat {
     const context = this.host.context();
     if (!context) { toast('请先打开一本书'); return; }
     const quote = this.quote;
-    const { agent, model } = this.host.agent();
+    const { agent, model, effort } = this.host.agent();
     const prompt = buildAgentPrompt(context, this.history, question, quote);
     if (!this.history.length) this.thread.replaceChildren();
     this.thread.append(this.userTurn(question, quote));
@@ -115,7 +115,7 @@ export class AgentChat {
     this.setBusy(true);
     this.reveal(turn);
     try {
-      const started = await call<{ agent: AgentId; label: string }>('agent.ask', { request, agent, model, prompt });
+      const started = await call<{ agent: AgentId; label: string }>('agent.ask', { request, agent, model, effort, prompt });
       if (this.active?.request === request) {
         this.active.label = started.label;
         if (!this.active.answer) this.active.meta.textContent = `${started.label} 正在思考…`;

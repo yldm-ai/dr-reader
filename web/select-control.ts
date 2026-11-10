@@ -3,6 +3,19 @@ import { icon } from './icons.ts';
 import { OverlayScrollbar } from './scrollbar.ts';
 import type { Choice } from './fonts.ts';
 
+/** Wording for a searchable list; fonts are the default. */
+export interface SearchTexts {
+  placeholder: string;
+  /** Shown when more matches exist than are listed. */
+  count: (matches: number) => string;
+  empty: string;
+}
+const fontSearch: SearchTexts = {
+  placeholder: '搜索本机字体',
+  count: matches => `${matches} 款字体，输入名称缩小范围`,
+  empty: '未找到字体，请尝试其他名称',
+};
+
 /** Native select holds the saved value; the popover owns navigation and transient search. */
 export class SelectControl {
   readonly select: HTMLSelectElement;
@@ -19,8 +32,9 @@ export class SelectControl {
   private typeTimer?: ReturnType<typeof setTimeout>;
   private observer: ResizeObserver;
   private pointerStart?: { x: number; y: number };
+  private texts: SearchTexts = fontSearch;
 
-  constructor(select: HTMLSelectElement, searchable = false) {
+  constructor(select: HTMLSelectElement, searchable: boolean | SearchTexts = false) {
     this.select = select;
     select.classList.add('select-source');
     select.tabIndex = -1;
@@ -58,13 +72,14 @@ export class SelectControl {
       }
     });
     if (searchable) {
+      if (searchable !== true) this.texts = searchable;
       const field = document.createElement('div');
       field.className = 'select-search';
       field.innerHTML = icon('search');
       this.search = document.createElement('input');
       this.search.type = 'search';
-      this.search.placeholder = '搜索本机字体';
-      this.search.setAttribute('aria-label', '搜索本机字体');
+      this.search.placeholder = this.texts.placeholder;
+      this.search.setAttribute('aria-label', this.texts.placeholder);
       this.search.setAttribute('role', 'combobox');
       this.search.setAttribute('aria-expanded', 'true');
       this.search.setAttribute('aria-controls', `${select.id}-options`);
@@ -179,7 +194,7 @@ export class SelectControl {
       const hint = document.createElement('p');
       hint.className = 'select-hint';
       hint.setAttribute('role', 'status');
-      hint.textContent = matches.length ? `${matches.length} 款字体，输入名称缩小范围` : '未找到字体，请尝试其他名称';
+      hint.textContent = matches.length ? this.texts.count(matches.length) : this.texts.empty;
       fragment.append(hint);
     }
     this.list.replaceChildren(fragment);

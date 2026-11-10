@@ -216,7 +216,9 @@ export class Reader {
       context: () => this.readingContext(),
       agent: () => {
         const agent = this.appSettings?.agent ?? "auto";
-        return { agent, model: agent === "auto" ? "" : this.appSettings?.agentModels?.[agent] ?? "" };
+        // 自动选择 uses each CLI's own defaults.
+        if (agent === "auto") return { agent, model: "", effort: "" };
+        return { agent, model: this.appSettings?.agentModels?.[agent] ?? "", effort: this.appSettings?.agentEfforts?.[agent] ?? "" };
       },
     });
     $("annotation-swatches").onclick = (event) => {

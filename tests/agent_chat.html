@@ -32,15 +32,89 @@ try {
   check(status.join() === 'true,false,true', `detected agents shown: ${status}`);
   check(doc.querySelector('#app-agent-status li small').textContent.includes('C:/fake/codex.exe'), 'detected path shown');
   const model = doc.getElementById('app-agent-model');
-  check(model.disabled, 'automatic choice has no model to edit');
+  const trigger = doc.getElementById('app-agent-model-trigger');
+  const effort = doc.getElementById('app-agent-effort');
+  const effortTrigger = doc.getElementById('app-agent-effort-trigger');
+  const modelStatus = () => doc.getElementById('app-agent-model-status').textContent;
+  const effortStatus = () => doc.getElementById('app-agent-effort-status').textContent;
+  const modelQueries = () => probe.requests.filter(item => item.method === 'agent.models');
+  const saved = () => probe.data.settings.application;
+  check(model.disabled && trigger.disabled && effort.disabled && effortTrigger.disabled, 'automatic choice has no model or effort to choose');
+  check(!modelQueries().length, 'automatic choice queries no CLI');
   const agent = doc.getElementById('app-agent');
-  agent.value = 'claude'; agent.dispatchEvent(new win.Event('change', { bubbles: true }));
-  await until(() => !model.disabled, 'choosing a CLI enables its model');
-  model.value = 'a;b'; model.dispatchEvent(new win.Event('change', { bubbles: true }));
-  await until(() => doc.querySelector('.toast-message')?.textContent.includes('模型名称'), 'unsafe model rejected');
-  check(model.value === '', 'rejected model is reverted');
-  model.value = 'opus'; model.dispatchEvent(new win.Event('change', { bubbles: true }));
-  await until(() => probe.data.settings.application.agent === 'claude' && probe.data.settings.application.agentModels?.claude === 'opus', 'agent settings saved');
+  const choose = value => { agent.value = value; agent.dispatchEvent(new win.Event('change', { bubbles: true })); };
+  const pick = async (kind, label) => {
+    doc.getElementById(`app-agent-${kind}-trigger`).click();
+    const rows = () => [...doc.querySelectorAll(`#app-agent-${kind}-options .select-option`)];
+    await until(() => rows().some(row => row.textContent === label), `${kind} option ${label}`);
+    rows().find(row => row.textContent === label).click();
+  };
+  const values = select => [...select.options].map(option => option.value).join();
+  choose('claude');
+  check(modelStatus().includes('正在查询'), 'model query in progress');
+  await until(() => !model.disabled && [...model.options].some(option => option.value === 'sonnet'), 'choosing a CLI lists its models');
+  check(modelQueries().at(-1).params.agent === 'claude', 'models asked from the chosen CLI');
+  check(model.options[0].text === '默认（Opus 5.5）' && trigger.textContent === '默认（Opus 5.5）', 'the CLI default is named');
+  check(modelStatus() === '共 2 个可用模型', `model count shown: ${modelStatus()}`);
+  check(values(effort) === ',low,medium,high,*custom' && effortStatus() === 'Opus 5.5 支持 3 档', 'efforts follow the default model');
+  await pick('model', 'Sonnet 5.5（sonnet）');
+  await until(() => saved().agent === 'claude' && saved().agentModels?.claude === 'sonnet', 'listed model saved');
+  await until(() => values(effort) === ',low,max,*custom', 'efforts follow the chosen model');
+  check(effort.options[0].text === '模型的默认强度' && effort.options[2].text === '最高（max）', 'efforts are named');
+
+  // Efforts: a listed one, one the next model does not accept, and a typed one.
+  await pick('effort', '最高（max）');
+  await until(() => saved().agentEfforts?.claude === 'max', 'listed effort saved');
+  await pick('model', 'Opus 5.5（opus）');
+  await until(() => saved().agentModels.claude === 'opus' && saved().agentEfforts.claude === '' && effortTrigger.textContent === '模型的默认强度',
+    'an effort the new model does not accept falls back to its default');
+  const effortRow = doc.getElementById('app-agent-effort-custom-row');
+  const effortInput = doc.getElementById('app-agent-effort-custom');
+  const type = (field, value) => { field.value = value; field.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); };
+  check(effortRow.hidden, 'effort typing is hidden until asked for');
+  await pick('effort', '其他强度…');
+  await until(() => !effortRow.hidden && doc.activeElement === effortInput, 'other effort field shown and focused');
+  type(effortInput, 'high max');
+  await until(() => doc.querySelector('.toast-message')?.textContent.includes('思考强度'), 'unsafe effort rejected');
+  check(saved().agentEfforts.claude === '', 'rejected effort not saved');
+  type(effortInput, 'turbo');
+  await until(() => saved().agentEfforts.claude === 'turbo' && effortRow.hidden && effortTrigger.textContent === 'turbo（自定义）', 'other effort saved');
+
+  // A model the CLI did not list can still be typed; a typed effort is kept for it.
+  const customRow = doc.getElementById('app-agent-model-custom-row');
+  const custom = doc.getElementById('app-agent-model-custom');
+  check(customRow.hidden, 'typing is hidden until asked for');
+  await pick('model', '其他模型…');
+  await until(() => !customRow.hidden && doc.activeElement === custom, 'other model field shown and focused');
+  type(custom, 'a;b');
+  await until(() => [...doc.querySelectorAll('.toast-message')].some(item => item.textContent.includes('模型名称')), 'unsafe model rejected');
+  check(saved().agentModels.claude === 'opus', 'rejected model not saved');
+  type(custom, 'opus[1m]');
+  await until(() => saved().agentModels.claude === 'opus[1m]' && customRow.hidden, 'other model saved');
+  await until(() => trigger.textContent === 'opus[1m]（自定义）', 'saved custom model shown in the list');
+  check(saved().agentEfforts.claude === 'turbo' && effortStatus().includes('手动指定'), 'an unknown model keeps the typed effort');
+
+  // A failed query explains itself; re-detecting the tools retries it, and the model refresh asks again.
+  probe.data.agentModelsError = { codex: '请先运行 codex login' };
+  choose('codex');
+  await until(() => modelStatus().includes('请先运行 codex login'), 'model query failure shown');
+  check(values(model) === ',*custom' && values(effort) === ',*custom', 'defaults and other remain after a failure');
+  probe.data.agentModelsError = {};
+  const detections = probe.requests.filter(item => item.method === 'agent.detect').length;
+  const detect = doc.getElementById('app-agent-detect');
+  detect.click();
+  check(detect.disabled && doc.querySelector('#app-agent-status small').textContent === '正在检测…', 'detection runs again');
+  await until(() => !detect.disabled && doc.querySelectorAll('#app-agent-status li[data-found]').length === 3, 'detection finished');
+  check(probe.requests.filter(item => item.method === 'agent.detect').length === detections + 1, 'detection asked the host again');
+  await until(() => [...model.options].some(option => option.value === 'gpt-6-astra'), 're-detection retries the failed model list');
+  check(effort.options[0].text === '默认（低）', `codex default effort named: ${effort.options[0].text}`);
+  const refreshed = modelQueries().length;
+  doc.getElementById('app-agent-model-refresh').click();
+  await until(() => modelQueries().length === refreshed + 1 && !doc.getElementById('app-agent-model-refresh').disabled, 'model refresh asks again');
+  const queries = modelQueries().length;
+  choose('claude');
+  await until(() => trigger.textContent === 'opus[1m]（自定义）');
+  check(modelQueries().length === queries, 'model lists are kept for the session');
   doc.getElementById('application-settings-close').click();
 
   // Ask about a selected passage.
@@ -68,7 +142,7 @@ try {
   check(doc.querySelector('.ask-meta').textContent.includes('Codex'), 'agent label shown');
   check(quote.hidden, 'quote cleared after asking');
   const first = asks()[0].params;
-  check(first.agent === 'claude' && first.model === 'opus', 'configured agent and model sent');
+  check(first.agent === 'claude' && first.model === 'opus[1m]' && first.effort === 'turbo', 'configured agent, model and effort sent');
   check(first.prompt.includes('<selection>\n阅读是一段安静的时光') && first.prompt.includes('读者的问题：这句话想表达什么？'), 'passage and question in prompt');
   check(first.prompt.includes('《阅读与时光》') && first.prompt.includes('<chapter>') && first.prompt.includes('原创的阅读测试文字'), 'book and chapter text in prompt');
 

@@ -15,6 +15,8 @@ export interface Fixture extends Bootstrap {
   agentError?: string;
   /** Streams one chunk and then waits until the page cancels. */
   agentSlow?: boolean;
+  /** Fails the model query of this agent with the message. */
+  agentModelsError?: Record<string, string>;
 }
 export interface HostRequest { method: string; params: any }
 
@@ -115,6 +117,17 @@ export function installNativeMock(data: Fixture = bootstrapFixture()) {
         chunks.slice(0, data.agentSlow ? 1 : chunks.length).forEach((text, index) => setTimeout(() => agent({ type: 'text', text }), 20 * (index + 1)));
         if (!data.agentSlow) setTimeout(() => agent(data.agentError ? { type: 'error', text: data.agentError } : { type: 'done', text: '' }), 100);
         result = { agent: 'codex', label: 'Codex' };
+      }
+      if (method === 'agent.models') {
+        // Answers later, like a CLI that takes a moment to start.
+        const failure = data.agentModelsError?.[params.agent];
+        const models = params.agent === 'claude'
+          ? [{ id: 'opus', name: 'Opus 5.5', description: '', default: true, efforts: ['low', 'medium', 'high'], defaultEffort: '' },
+            { id: 'sonnet', name: 'Sonnet 5.5', description: '', default: false, efforts: ['low', 'max'], defaultEffort: '' }]
+          : [{ id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', description: '', default: true, efforts: ['low', 'medium', 'high'], defaultEffort: 'low' },
+            { id: 'gpt-6-astra', name: 'GPT-6-Astra', description: '', default: false, efforts: [], defaultEffort: '' }];
+        setTimeout(() => reply(failure ? { id, error: failure } : { id, result: { models } }), 60);
+        return;
       }
       if (method === 'agent.cancel') reply({ event: 'agent', request: params.request, type: 'error', text: '已停止回答' });
       if (method === 'settings') {

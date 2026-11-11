@@ -24,6 +24,7 @@ function transition(time: number, acceleration: number, deceleration: number): n
 /** Five overlapping circles from the supplied SoundControlAnimation, drawn in the app's layer. */
 export class BookOpening {
   private cover?: HTMLDivElement;
+  private board?: HTMLDivElement;
   private coverIntro?: Animation;
   private book?: HTMLDivElement;
   private sheets: Animation[] = [];
@@ -53,6 +54,7 @@ export class BookOpening {
     this.completion = new Promise(resolve => { this.resolve = resolve; });
     if (!enabled || effect === 'none' || this.reduced.matches) { this.resolve?.(); return; }
     if (effect === 'cover') { this.openCover(cover); return; }
+    if (effect === 'board') { this.closedBoard(cover); return; }
     if (effect === 'book') { this.openBook(); return; }
     const canvas = document.createElement('canvas');
     canvas.className = 'book-opening';
@@ -76,6 +78,10 @@ export class BookOpening {
       this.finishing = true;
       void this.slideCover(this.cover);
     }
+    if (this.board && !this.finishing) {
+      this.finishing = true;
+      void this.swingBoard(this.board);
+    }
     if (this.book && !this.finishing) {
       this.finishing = true;
       void this.fadeBook(this.book);
@@ -87,7 +93,7 @@ export class BookOpening {
 
   /** Whether an opaque opening animation covers the window (so views can switch beneath it). */
   get covering(): boolean {
-    return Boolean(this.canvas || this.cover || this.book);
+    return Boolean(this.canvas || this.cover || this.book || this.board);
   }
 
   cancel(): void {
@@ -103,6 +109,8 @@ export class BookOpening {
     this.book = undefined;
     this.cover?.remove();
     this.cover = undefined;
+    this.board?.remove();
+    this.board = undefined;
     this.host.style.removeProperty('background-color');
     this.host.style.removeProperty('opacity');
     this.host.classList.remove('book-opening-active', 'book-opening-cover-active');
@@ -202,6 +210,95 @@ export class BookOpening {
     this.sheets.push(slide, reveal);
     await Promise.all([slide.finished.catch(() => {}), reveal.finished.catch(() => {})]);
     if (this.cover === root) this.cancel();
+  }
+
+  /**
+   * A closed hardback that opens like grabfold's cover (https://github.com/javocsoft/grabfold, MIT;
+   * see web/vendor/grabfold/README.md). The library cover flies to a closed book centred in the
+   * window. Once the chapter is ready the cover swings open about the spine as a rigid board
+   * (grabfold src/board.ts RigidSheet: perspective six page widths away, each face darkening as
+   * it turns edge-on, a shadow thrown on the page it lifts off), while the book slides from
+   * centred-closed to centred-open (src/physics.ts closedShift), then the reader fades in.
+   */
+  private closedBoard(source: OpeningCover): void {
+    const ratio = source.ratio || 2 / 3;
+    const height = Math.min(innerHeight * .8, innerWidth * .86 / (2 * ratio)), width = height * ratio;
+    const root = document.createElement('div');
+    root.className = 'book-opening book-opening-cover book-opening-board';
+    root.setAttribute('aria-hidden', 'true');
+    root.style.setProperty('--board-width', `${width}px`);
+    root.style.setProperty('--board-height', `${height}px`);
+    root.innerHTML = `<div class="opening-cover-backdrop"></div><div class="opening-board">
+      <div class="opening-board-shift"><div class="opening-board-page"><span class="opening-board-cast"></span></div>
+      <div class="opening-board-leaf"><div class="opening-board-face opening-board-front"><span class="opening-board-shade"></span></div>
+      <div class="opening-board-face opening-board-back"><span class="opening-board-shade"></span></div></div></div></div>`;
+    const front = root.querySelector<HTMLElement>('.opening-board-front')!;
+    const title = document.createElement('strong');
+    title.textContent = source.title || 'DR Reader';
+    const author = document.createElement('small');
+    author.textContent = source.author || '';
+    front.prepend(title, author);
+    if (source.image) {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.src = source.image;
+      image.addEventListener('error', () => image.remove(), { once: true });
+      title.before(image);
+    }
+    this.board = root;
+    this.host.classList.add('book-opening-active', 'book-opening-cover-active');
+    this.host.prepend(root);
+    this.reduced.addEventListener('change', this.stopOnReduced);
+    // Closed, the book is one page wide and sits in the middle of the window.
+    const left = (innerWidth - width) / 2, top = (innerHeight - height) / 2;
+    const book = root.querySelector<HTMLElement>('.opening-board')!;
+    book.style.left = `${left}px`;
+    book.style.top = `${top}px`;
+    const from = source.rect;
+    const transform = from
+      ? `translate(${from.left - left}px, ${from.top - top}px) scale(${from.width / width}, ${from.height / height})`
+      : 'translateY(18px) scale(.88)';
+    this.coverIntro = book.animate([{ transform, opacity: from ? 1 : 0 }, { transform: 'none', opacity: 1 }], {
+      duration: 600, easing: 'cubic-bezier(.16, 1, .3, 1)', fill: 'forwards',
+    });
+    void this.coverIntro.finished.catch(() => {});
+    this.sheets.push(this.coverIntro);
+  }
+
+  private async swingBoard(root: HTMLDivElement): Promise<void> {
+    await this.coverIntro?.finished.catch(() => {});
+    if (this.board !== root) return;
+    const width = root.querySelector<HTMLElement>('.opening-board')!.offsetWidth;
+    // grabfold's settle: a cubic ease-out (src/model.ts easeOut), sampled per 60 Hz frame so the
+    // shading, which follows sin(pi * progress), stays exact.
+    const duration = 900, count = Math.round(duration / (1000 / 60)) + 1;
+    const leaf: Keyframe[] = [], shift: Keyframe[] = [], shade: Keyframe[] = [], cast: Keyframe[] = [];
+    for (let index = 0; index < count; index++) {
+      const progress = 1 - (1 - index / (count - 1)) ** 3, standing = Math.sin(Math.PI * progress);
+      leaf.push({ transform: `rotateY(${(-180 * progress).toFixed(2)}deg)` });
+      shift.push({ transform: `translateX(${(width / 2 * progress).toFixed(2)}px)` });
+      shade.push({ opacity: (.4 * .9 * standing).toFixed(4) });
+      // Only while the board is over the page it lifts off (grabfold switches it off at half way;
+      // it fades over the last few degrees here so it does not blink out).
+      cast.push({ opacity: (standing * Math.min(1, Math.max(0, (.5 - progress) / .06))).toFixed(4),
+        transform: `scaleX(${Math.max(standing, 1e-4).toFixed(4)})` });
+    }
+    const options: KeyframeAnimationOptions = { duration, easing: 'linear', fill: 'forwards' };
+    const animations = [
+      root.querySelector('.opening-board-leaf')!.animate(leaf, options),
+      root.querySelector('.opening-board-shift')!.animate(shift, options),
+      root.querySelector('.opening-board-cast')!.animate(cast, options),
+      ...[...root.querySelectorAll('.opening-board-shade')].map(element => element.animate(shade, options)),
+    ];
+    this.sheets.push(...animations);
+    await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
+    if (this.board !== root) return;
+    // The open book gives way to the first page of the text.
+    this.fade = this.host.animate([{ opacity: 1 }, { opacity: 0 }], {
+      delay: 120, duration: 450, easing: 'ease-in-out', fill: 'forwards',
+    });
+    await this.fade.finished.catch(() => {});
+    if (this.board === root) this.cancel();
   }
 
   private fit(): void {

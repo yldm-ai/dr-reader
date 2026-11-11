@@ -48,7 +48,7 @@ export interface AgentModelInfo {
   /** Reasoning efforts the model accepts (empty when it has none) and the one it uses by default. */
   efforts: string[]; defaultEffort: string;
 }
-export type BookOpeningAnimation = 'circles' | 'book' | 'cover' | 'none';
+export type BookOpeningAnimation = 'circles' | 'book' | 'cover' | 'board' | 'none';
 export type LibrarySort = 'added' | 'read' | 'title' | 'author';
 
 export interface ApplicationSettings {

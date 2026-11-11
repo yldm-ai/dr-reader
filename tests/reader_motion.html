@@ -300,6 +300,55 @@ try {
         `${effect} ${direction}: a finished spread turn must show the live spread`);
     }
   }
+  // grabfold's fold: single page (forward folds the page off, backward lays the previous one on)
+  // and spread, played as Web Animations of transform, clip-path and opacity only; taken by a
+  // corner or by the whole free edge.
+  for (const effect of ['turn-fold', 'turn-fold-edge']) for (const [width, spread] of [[600, false], [980, true]]) {
+    host.style.width = `${width}px`;
+    host.style.setProperty('--reading-paper', '#fffaf3');
+    for (const direction of [1, -1]) {
+      const page = spread ? 490 : width;
+      const html = `<style>html{overflow:hidden}body{margin:0;display:flex;width:${page * 6}px;height:360px;background:#fffaf3;color:#37352f}section{flex:0 0 ${page}px;box-sizing:border-box;padding:30px;font:20px/1.8 'Microsoft YaHei'}section:nth-child(odd){background:#fffaf3}section:nth-child(even){background:#eef3f8}</style>${
+        Array.from({ length: 6 }, (_, i) => `<section><h1>第 ${i + 1} 页</h1><p>折页从抓起的位置折过来，折痕随手倾斜。</p></section>`).join('')}`;
+      await load(html);
+      const start = spread ? 980 : width;
+      frame.contentWindow.scrollTo(start, 0);
+      const target = direction > 0 ? start + (spread ? 980 : width) : start - (spread ? 980 : width);
+      pending = motion.change(host, effect, 800, direction, () => frame.contentWindow.scrollTo(target, 0), false,
+        direction > 0 ? 'bottom' : 'top', spread);
+      await until(() => host.querySelector('.page-motion')?.dataset.fold && host.querySelector('.fold-flap')?.getAnimations().length);
+      const overlay = host.querySelector('.page-motion');
+      const label = `${effect} ${spread ? 'spread' : 'single'} ${direction}`;
+      check(overlay.dataset.fold === (spread ? 'spread' : direction > 0 ? 'single' : 'arriving'), `${label}: wrong fold plan`);
+      const animations = overlay.getAnimations({ subtree: true });
+      check(animations.length === (spread ? 5 : 6), `${label}: expected one animation per moving part (${animations.length})`);
+      check(animations.every(animation => animation.effect.getKeyframes().every(frame =>
+        Object.keys(frame).every(key => ['offset', 'easing', 'composite', 'computedOffset', 'transform', 'clipPath', 'opacity'].includes(key)))),
+        `${label}: the fold may only animate transform, clip-path and opacity`);
+      check(overlay.querySelectorAll('.motion-page iframe').length === (spread ? 3 : 2) &&
+        (!spread || overlay.querySelector('.fold-face iframe').contentWindow.scrollX === target),
+        `${label}: a spread's flap carries a copy of the facing page`);
+      // The first frame is the page on show: nothing of the destination shows yet.
+      animations.forEach(animation => { animation.pause(); animation.currentTime = 0; });
+      const panes = [...overlay.querySelectorAll(':scope > .motion-page')];
+      const top = panes.find(pane => pane.style.zIndex === '2');
+      const shown = top.querySelector('iframe').contentWindow.scrollX;
+      const clipArea = () => {
+        const points = getComputedStyle(top).clipPath.replace(/^polygon\(|\)$/g, '').split(', ').map(pair => pair.split(' ').map(parseFloat));
+        return Math.abs(points.reduce((sum, [x, y], i) => { const [nx, ny] = points[(i + 1) % points.length]; return sum + x * ny - nx * y; }, 0)) / 2;
+      };
+      if (direction > 0) check(shown === target && clipArea() < 2 * page, `${label}: the destination must start hidden`);
+      else if (!spread) check(shown === start && clipArea() > page * 359, `${label}: the page on show must start whole`);
+      else check(shown === target && clipArea() < 2 * page, `${label}: the destination must start hidden`);
+      animations.forEach(animation => { animation.currentTime = 320; });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await window.captureMotion?.(`${effect}-${spread ? 'spread' : 'single'}-${direction > 0 ? 'forward' : 'backward'}`);
+      animations.forEach(animation => animation.play());
+      await pending;
+      check(!host.querySelector('.page-motion') && frame.style.visibility === '' && frame.contentWindow.scrollX === target,
+        `${label}: a finished fold must show the live page`);
+    }
+  }
   PageFlip.prototype.getRender = getRender;
   check(landed === 2, 'both soft-spread directions must paint their flat landing frame');
   host.style.width = '600px';

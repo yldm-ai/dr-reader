@@ -15,6 +15,7 @@ $dependencyLicenses = @{
  'webview2.txt' = 'build/_deps/webview2-src/LICENSE.txt'
  'webview2-notice.txt' = 'build/_deps/webview2-src/NOTICE.txt'
  'stpageflip.txt' = 'web/vendor/page-flip/LICENSE'
+ 'grabfold.txt' = 'web/vendor/grabfold/LICENSE'
  'material-symbols.txt' = 'node_modules/@material-symbols/svg-400/LICENSE'
 }
 foreach ($entry in $dependencyLicenses.GetEnumerator()) {

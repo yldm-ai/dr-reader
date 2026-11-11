@@ -8,6 +8,10 @@ import { BookOpening } from '../web/book-opening.ts';
 window.BookOpening = BookOpening;
 const host = document.getElementById('busy');
 const check = (value, message) => { if (!value) throw Error(message); };
+const until = async predicate => {
+  for (let i = 0; i < 300; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
+  throw Error('Opening did not reach the expected state');
+};
 try {
   const opening = new BookOpening(host, true);
   const canvas = host.querySelector('canvas');
@@ -91,7 +95,40 @@ try {
   const cancelledCover = new BookOpening(host, true, 'cover');
   const cancelledCoverDone = cancelledCover.finish(); cancelledCover.cancel(); await cancelledCoverDone;
   check(!host.querySelector('.book-opening'), 'a cancelled cover must not block loading');
-  for (const effect of ['none', 'book', 'cover']) await new BookOpening(host, effect === 'none', effect).finish();
+  // A closed hardback, after grabfold's cover: centred closed, the cover swings open about the
+  // spine while the book slides to centre the open spread, then the reader fades in.
+  const coverImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#506b7c"/><path d="M24 32H176M24 268H176" stroke="#d7c8a2"/><text x="100" y="143" fill="#fffaf3" font-size="22" text-anchor="middle">阅读与时光</text></svg>');
+  const board = new BookOpening(host, true, 'board', { title: '阅读与时光', author: 'DR Reader', ratio: 2 / 3, image: coverImage,
+    rect: { left: 120, top: 160, width: 90, height: 140 } });
+  check(board.covering, 'the hardback covers the window while the book loads');
+  const boardScene = host.querySelector('.book-opening-board');
+  const closed = boardScene.querySelector('.opening-board');
+  await boardScene.querySelector('img').decode();
+  const boardIntro = closed.getAnimations()[0];
+  boardIntro.pause(); boardIntro.currentTime = 0;
+  check(Math.abs(closed.getBoundingClientRect().height - 140) < 1, 'the hardback must start from the library cover');
+  boardIntro.finish();
+  const closedRect = closed.getBoundingClientRect();
+  check(Math.abs(closedRect.left + closedRect.width / 2 - innerWidth / 2) < 1, 'the closed book must sit in the middle of the window');
+  await window.captureOpening?.('book-opening-board-closed');
+  const boardDone = board.finish();
+  await until(() => boardScene.querySelector('.opening-board-leaf')?.getAnimations().length);
+  const swing = boardScene.getAnimations({ subtree: true });
+  check(swing.every(animation => animation.effect.getKeyframes().every(frame =>
+    Object.keys(frame).every(key => ['offset', 'easing', 'composite', 'computedOffset', 'transform', 'opacity'].includes(key)))),
+    'the cover must swing with transform and opacity only');
+  for (const animation of swing) { animation.pause(); animation.currentTime = 150; }
+  await window.captureOpening?.('book-opening-board-swing');
+  for (const animation of swing) animation.currentTime = 900;
+  const page = boardScene.querySelector('.opening-board-page').getBoundingClientRect();
+  check(Math.abs(page.left - innerWidth / 2) < 1, 'the open spread must be centred, its first page right of the middle');
+  const inside = boardScene.querySelector('.opening-board-back').getBoundingClientRect();
+  check(Math.abs(inside.right - innerWidth / 2) < 1 && Math.abs(inside.width - page.width) < 1, 'the cover must land flat on the left');
+  await window.captureOpening?.('book-opening-board-open');
+  for (const animation of swing) animation.play();
+  await boardDone;
+  check(!host.querySelector('.book-opening') && !host.classList.contains('book-opening-active'), 'the hardback must release the scene');
+  for (const effect of ['none', 'book', 'cover', 'board']) await new BookOpening(host, effect === 'none', effect).finish();
   check(!host.querySelector('.book-opening'), 'none and disabled effects must not delay loading');
 
   // A stalled first frame (a cold GPU shader cache) must not eat into the expansion.

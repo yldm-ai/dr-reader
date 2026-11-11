@@ -596,6 +596,14 @@ int main()
         require(dr::patch_settings(defaults, {{"application", {{"bookOpeningAnimation", "cover"}}}})
                     ["application"]["bookOpeningAnimation"] == "cover",
                 "full height cover opening choice persists");
+        require(dr::patch_settings(defaults, {{"application", {{"bookOpeningAnimation", "board"}}}})
+                    ["application"]["bookOpeningAnimation"] == "board",
+                "hardback cover opening choice persists");
+        {
+            auto folded = dr::patch_settings(defaults, {{"reading", {{"animation", "turn-fold"}, {"doubleAnimation", "turn-fold-edge"}}}});
+            require(folded["reading"]["animation"] == "turn-fold" && folded["reading"]["doubleAnimation"] == "turn-fold-edge",
+                    "fold page turn persists for single and double layouts");
+        }
         rejects([&] { dr::patch_settings(defaults, {{"application", {{"bookOpeningAnimation", "invalid"}}}}); },
                 "reject invalid opening animation choices");
         auto opening_only = dr::patch_settings(defaults, {{"application", {{"animations", false}, {"bookOpeningEnabled", true}}}});

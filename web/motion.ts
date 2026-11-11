@@ -107,6 +107,8 @@ export class ReaderMotion {
 
   private async turnPage(transaction: Transition, oldPage: HTMLDivElement, newPage: HTMLDivElement,
     effect: string, duration: number, direction: number, corner: 'top' | 'bottom', spread = false) {
+    if (effect === 'turn-fold' || effect === 'turn-fold-edge')
+      return this.foldPage(transaction, oldPage, newPage, duration, direction, corner, spread, effect === 'turn-fold-edge');
     // The new snapshot is only a source for StPageFlip's pages. Left visible it
     // covers the old page for the whole setup and flashes the destination.
     newPage.style.visibility = 'hidden';
@@ -341,13 +343,99 @@ export class ReaderMotion {
       oldPage.remove(); newPage.remove();
       if (signal.aborted) onAbort();
     });
-    // Landing: the turned pages are compositor layers, whose text Chromium draws in grayscale,
-    // while the live page underneath has ClearType. Show the live page and fade the landed
-    // sheet out over it, so the text eases into ClearType instead of jumping in stroke weight.
+    this.land(transaction);
+  }
+
+  /**
+   * Landing: the turned pages are compositor layers, whose text Chromium draws in grayscale,
+   * while the live page underneath has ClearType. Show the live page and fade the landed
+   * sheet out over it, so the text eases into ClearType instead of jumping in stroke weight.
+   */
+  private land(transaction: Transition) {
     transaction.frame.style.visibility = transaction.visibility;
-    const fade = overlay.animate([{ opacity: 1 }, { opacity: 0 }], { duration: LANDING_FADE, easing: 'ease-out', fill: 'forwards' });
+    const fade = transaction.overlay.animate([{ opacity: 1 }, { opacity: 0 }], { duration: LANDING_FADE, easing: 'ease-out', fill: 'forwards' });
     fade.updatePlaybackRate(this.speed);
     transaction.animations.push(fade);
+  }
+
+  /**
+   * grabfold's fold (web/fold-turn.ts): the sheet folds along the perpendicular bisector of where
+   * it was taken and where it is, and its other face is carried over the crease. The snapshots stay
+   * where they are: the sheet's face lies at the bottom, and the page the fold uncovers sits above
+   * it, clipped to what the fold has uncovered, so no iframe is moved (moving one resets it).
+   * Single page: forward folds the page off over its left edge onto a blank back; backward
+   * brings the previous page in over the spine and lays it flat, the fold run backwards.
+   * Spread: the turning half carries a copy of the facing page it lands as. A corner turn takes the
+   * sheet by the corner the pointer is nearest; an edge turn (dge) by the middle of its free edge.
+   */
+  private async foldPage(transaction: Transition, oldPage: HTMLDivElement, newPage: HTMLDivElement,
+    duration: number, direction: number, corner: 'top' | 'bottom', spread: boolean, edge: boolean) {
+    const { overlay, controller } = transaction;
+    const signal = controller.signal;
+    newPage.style.visibility = 'hidden';
+    const { foldFrames } = await import('./fold-turn.ts');
+    const forward = direction > 0;
+    const width = overlay.clientWidth, height = overlay.clientHeight, pageWidth = spread ? width / 2 : width;
+    // turnPage receives the duration at the current wheel speed. The keyframes run at speed 1 and the
+    // playback rate carries the speed, so a later setSpeed retimes them like the other animations.
+    const time = duration * this.speed;
+    const plan = foldFrames({ width: pageWidth, height, spread, forward, corner, edge, duration: time });
+    overlay.dataset.fold = spread ? 'spread' : plan.arriving ? 'arriving' : 'single';
+    // Single backwards the arriving page is the sheet and the page on show is uncovered by it.
+    const sheet = plan.arriving ? newPage : oldPage, under = plan.arriving ? oldPage : newPage;
+    sheet.style.zIndex = '1'; under.style.zIndex = '2';
+    const layer = (className: string, parent: HTMLElement = overlay) => {
+      const element = document.createElement('div');
+      element.className = className;
+      parent.append(element);
+      return element;
+    };
+    // The shadow the standing fold throws, kept to the page it has uncovered.
+    const cast = layer('fold-cast');
+    const castBand = layer('fold-band', cast);
+    castBand.style.width = `${plan.castSpan}px`; castBand.style.height = `${plan.reach}px`;
+    castBand.style.backgroundImage = plan.castGradient;
+    // The folded face, in its own cell, carried over the crease by a translate and a rotate.
+    const cell = layer('fold-cell');
+    // Unanimated, the flap would lie unfolded over the page while its face loads.
+    cell.style.opacity = cast.style.opacity = '0';
+    cell.style.left = `${plan.left}px`; cell.style.width = `${pageWidth}px`;
+    const flap = layer('fold-flap', cell);
+    let lift: HTMLElement | null = null;
+    if (spread) {
+      // The face of the facing page the half lands as: the new spread's left half going forward,
+      // its right half going back. The copy is the whole spread, cropped by the flap.
+      const face = layer('fold-face', flap);
+      face.style.width = `${width}px`;
+      face.style.left = forward ? '0' : `${-pageWidth}px`;
+      await this.snapshot(newPage.querySelector('iframe')!, face, signal);
+      if (signal.aborted) throw new DOMException('Page turn canceled', 'AbortError');
+    } else {
+      // A single page has no facing page: its back is blank paper, lightened as it lifts off the table.
+      layer('motion-page fold-back', flap);
+      lift = layer('fold-lift', flap);
+    }
+    const roll = layer('fold-band', flap);
+    roll.style.width = `${plan.rollSpan}px`; roll.style.height = `${plan.reach}px`;
+    roll.style.backgroundImage = plan.rollGradient;
+    // The spine copy stays above the pages, as the live spine does over the landed spread.
+    overlay.querySelector<HTMLElement>(':scope > .stpageflip-spine')?.style.setProperty('z-index', '6');
+    // Created in one task, the animations start on the same frame; their first keyframe is the
+    // page on show (forward, the fold has not started; backward, the arriving page is folded away),
+    // so the destination can be shown in the same task.
+    const options: KeyframeAnimationOptions = { duration: time, easing: 'linear', fill: 'both' };
+    const animations = [
+      under.animate(plan.uncovered, options), cast.animate(plan.uncovered, options),
+      castBand.animate(plan.cast, options), flap.animate(plan.flap, options), roll.animate(plan.roll, options),
+      ...lift ? [lift.animate(plan.lift, options)] : [],
+    ];
+    for (const animation of animations) animation.updatePlaybackRate(this.speed);
+    transaction.animations.push(...animations);
+    cell.style.opacity = cast.style.opacity = '';
+    newPage.style.visibility = 'visible';
+    await Promise.all(animations.map(animation => animation.finished));
+    if (signal.aborted) throw new DOMException('Page turn canceled', 'AbortError');
+    this.land(transaction);
   }
 
   async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false,

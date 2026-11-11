@@ -2348,6 +2348,39 @@ body[data-animations="false"] .toast { animation: none; }
 .opening-cover-card strong { font-size: clamp(24px, 4vh, 48px); font-weight: 500; overflow-wrap: anywhere; }
 .opening-cover-card small { margin-top: 24px; font-size: clamp(14px, 2vh, 22px); opacity: .75; }
 .opening-cover-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+/* A closed hardback whose cover swings open about the spine (book-opening.ts closedBoard,
+   after grabfold's RigidSheet). The first page lies under the cover; the cover's inside lands
+   on the left. Both carry grabfold's gutter shading on their spine side. */
+/* The book lies on a desk a shade darker than its paper, so the closed book and the open pages read. */
+.book-opening-board .opening-cover-backdrop { background: color-mix(in oklab, var(--opening-background, var(--bg)) 95%, #000); }
+.opening-board { position: absolute; width: var(--board-width); height: var(--board-height); transform-origin: 0 0; }
+.opening-board-shift { position: absolute; inset: 0; perspective: calc(var(--board-width) * 6); perspective-origin: 0% 50%; }
+.opening-board-page, .opening-board-face { position: absolute; inset: 0; overflow: hidden; }
+.opening-board-page {
+  background: linear-gradient(to right, rgb(0 0 0 / .3), rgb(0 0 0 / .102) 8%, transparent 24%), var(--opening-background, var(--bg));
+  box-shadow: 0 10px 34px #00000029, 0 0 1px #00000033;
+}
+.opening-board-cast { position: absolute; left: 0; top: 0; width: 55%; height: 100%; transform-origin: 0 50%; opacity: 0; background: linear-gradient(to right, rgb(0 0 0 / .32), transparent); }
+.opening-board-leaf { position: absolute; inset: 0; transform-style: preserve-3d; transform-origin: 0% 50%; will-change: transform; }
+.opening-board-face { backface-visibility: hidden; }
+.opening-board-front {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8%;
+  background: var(--cover-bg);
+  color: var(--cover-text);
+  box-shadow: 0 10px 34px #00000029;
+}
+.opening-board-front strong { font-size: clamp(22px, 3.6vh, 44px); font-weight: 500; overflow-wrap: anywhere; }
+.opening-board-front small { margin-top: 24px; font-size: clamp(13px, 1.8vh, 20px); opacity: .75; }
+.opening-board-front img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+.opening-board-back {
+  transform: rotateY(180deg);
+  box-shadow: 0 10px 34px #00000029, 0 0 1px #00000033;
+  background: linear-gradient(to left, rgb(0 0 0 / .3), rgb(0 0 0 / .102) 8%, transparent 24%), color-mix(in oklab, var(--opening-background, var(--bg)) 93%, #000);
+}
+.opening-board-shade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; }
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -2927,6 +2960,14 @@ body > .page-surface { max-width: none; }
 }
 /* Above StPageFlip's pages (1–5) and curl shadows (10). */
 .stpageflip-host .stpageflip-spine { z-index: 11; }
+/* grabfold fold (motion.ts foldPage, fold-turn.ts): sheet face (1), uncovered page (2), the
+   shadow cast on it (3), the folded face carried over the crease (4), the spread's spine (6). */
+.fold-cast { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.fold-band { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+.fold-cell { position: absolute; top: 0; height: 100%; z-index: 4; pointer-events: none; }
+.fold-flap { position: absolute; inset: 0; overflow: hidden; transform-origin: 0 0; will-change: transform; }
+.fold-face { position: absolute; top: 0; height: 100%; }
+.fold-lift { position: absolute; inset: 0; background: #fff; opacity: 0; }
 
 .icon-button, .text-button, .nav-item, .toc-tabs button, .theme-swatch, .select-option {
   transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);

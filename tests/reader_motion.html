@@ -269,6 +269,16 @@ try {
     }
     return render;
   };
+  // At the landing fade only a flat copy of the destination may be left over the live page: pages still in
+  // the turn's layers sit at fractional offsets and their resampled text faded soft into the sharp page.
+  const landingFade = async overlay => {
+    for (let i = 0; i < 600; i++) {
+      if (!overlay.isConnected) return null;
+      if (overlay.getAnimations().some(a => a.effect.getComputedTiming().duration === 160)) return overlay;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    return null;
+  };
   host.style.width = '980px';
   const spreadHtml = `<style>html{overflow:hidden}body{margin:0;display:flex;width:2940px;height:360px;background:#fffaf3}section{flex:0 0 490px;box-sizing:border-box;padding:30px;font:20px 'Microsoft YaHei'}</style>${
     Array.from({ length: 6 }, (_, i) => `<section><h1>第 ${i + 1} 页</h1></section>`).join('')}`;
@@ -279,7 +289,19 @@ try {
       const target = direction > 0 ? 1960 : 0;
       pending = motion.change(host, effect, 500, direction, () => frame.contentWindow.scrollTo(target, 0), false,
         direction > 0 ? 'top' : 'bottom', true);
-      await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
+      // Until the turn starts, the old spread stays on show: the flat landing copy, loaded with the
+      // engine's pages, must not appear over it while slower copies are still loading.
+      let early = false;
+      await new Promise(resolve => {
+        const watch = () => {
+          const overlay = host.querySelector('.page-motion');
+          early ||= [...(overlay?.querySelectorAll(':scope > .motion-page') ?? [])].some(pane =>
+            getComputedStyle(pane).visibility === 'visible' && pane.querySelector('iframe')?.contentWindow?.scrollX === target);
+          if (host.querySelector('.stpageflip-host')?.dataset.state === 'flipping') resolve(); else requestAnimationFrame(watch);
+        };
+        watch();
+      });
+      check(!early, `${effect} ${direction}: the new spread must not show before the turn starts`);
       const engine = host.querySelector('.stpageflip-host');
       check(engine.dataset.orientation === 'landscape' && engine.dataset.layout === 'double' && engine.dataset.pageCount === '4',
         `${effect} ${direction}: spreads must use the landscape book with four pages`);
@@ -299,11 +321,35 @@ try {
       const spines = host.querySelectorAll('.stpageflip-spine');
       check(spines.length === 1 && spines[0].parentElement === engine.querySelector('.stf__block') &&
         Number(getComputedStyle(spines[0]).zIndex) > 10, `${effect} ${direction}: the spine must sit above the turning pages and shadows`);
+      const landed = await landingFade(host.querySelector('.page-motion'));
+      check(landed && getComputedStyle(landed.querySelector('.stpageflip-host')).display === 'none' &&
+        [...landed.querySelectorAll(':scope > .motion-page')].some(pane => pane.style.visibility === 'visible' &&
+          pane.querySelector('iframe').contentWindow.scrollX === target) && landed.querySelector(':scope > .stpageflip-spine'),
+        `${effect} ${direction}: the landed spread must be a flat copy under the spine`);
       await pending;
       check(!host.querySelector('.page-motion') && frame.style.visibility === '' && frame.contentWindow.scrollX === target,
         `${effect} ${direction}: a finished spread turn must show the live spread`);
     }
   }
+  // A turn taken while the ready copies are still being made gets its landing copy from them at once and
+  // loads the rest. Until it starts, that copy of the new spread must stay hidden under the old one.
+  await load(spreadHtml);
+  frame.contentWindow.scrollTo(980, 0);
+  motion.prepare(host, 'turn-hard', 'partial-pool', true);
+  await until(() => motion.standby?.pool.length === 1);
+  pending = motion.change(host, 'turn-hard', 500, 1, () => frame.contentWindow.scrollTo(1960, 0), false, 'top', true);
+  let shownEarly = false;
+  await new Promise(resolve => {
+    const watch = () => {
+      shownEarly ||= [...host.querySelectorAll('.page-motion > .motion-page')].some(pane =>
+        getComputedStyle(pane).visibility === 'visible' && pane.querySelector('iframe')?.contentWindow?.scrollX === 1960);
+      if (host.querySelector('.stpageflip-host')?.dataset.state === 'flipping') resolve(); else requestAnimationFrame(watch);
+    };
+    watch();
+  });
+  check(!shownEarly, 'a ready landing copy must stay hidden while the other copies load');
+  await pending;
+  motion.prepare(host, 'none', '');
   // grabfold's fold: single page (forward folds the page off, backward lays the previous one on)
   // and spread, played as Web Animations of transform, clip-path and opacity only; taken by a
   // corner or by the whole free edge.
@@ -350,6 +396,10 @@ try {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await window.captureMotion?.(`${effect}-${spread ? 'spread' : 'single'}-${direction > 0 ? 'forward' : 'backward'}`);
       animations.forEach(animation => animation.play());
+      const landed = await landingFade(overlay);
+      check(landed && !landed.querySelector('.fold-uncovered, .fold-cell') &&
+        (arriving || landed.querySelector(':scope > .fold-page iframe').contentWindow.scrollX === target),
+        `${label}: the landed page must be a flat copy, without the turning windows`);
       await pending;
       check(!host.querySelector('.page-motion') && frame.style.visibility === '' && frame.contentWindow.scrollX === target,
         `${label}: a finished fold must show the live page`);

@@ -18,8 +18,9 @@ type Pool = { doc: Document | null; panes: HTMLDivElement[] };
  * uncovered page and either the facing page's face or, turning back, the arriving page.
  */
 export function poolSize(effect: string, spread: boolean): number {
-  if (effect === 'turn') return spread ? 4 : 3;
-  if (effect === 'turn-hard') return spread ? 4 : 2;
+  // StPageFlip turns also lay one more copy flat over the landed pages (see turnPage).
+  if (effect === 'turn') return spread ? 5 : 4;
+  if (effect === 'turn-hard') return spread ? 5 : 3;
   if (effect === 'turn-fold' || effect === 'turn-fold-edge') return 2;
   return effect === 'none' ? 0 : 1;
 }
@@ -156,8 +157,7 @@ export class ReaderMotion {
       for (let index = 0; index < size && this.standby === standby; index++) {
         await idle();
         if (this.standby !== standby) return;
-        const pane = await this.snapshot(frame, overlay, signal);
-        pane.style.visibility = 'hidden';
+        const pane = await this.snapshot(frame, overlay, signal, false);
         standby.pool.push(pane);
       }
     })().catch(() => { if (this.standby === standby) this.dropStandby(); });
@@ -182,21 +182,24 @@ export class ReaderMotion {
    * Within a chapter every copy is of the same document at another scroll position, so a ready copy
    * from the pool is moved there and scrolled, instead of loading the chapter again. moveBefore keeps
    * the moved frame's document; appending would reload it. Otherwise it loads a fresh snapshot.
+   * A copy that must wait for its moment (`shown` false) stays hidden: a turn awaits all its copies,
+   * and one shown at once (a ready copy) showed for as long as the others took to load.
    */
-  private async place(transaction: Transition, source: HTMLIFrameElement, parent: HTMLElement, signal: AbortSignal) {
+  private async place(transaction: Transition, source: HTMLIFrameElement, parent: HTMLElement, signal: AbortSignal,
+    shown = true) {
     const pool = transaction.pool, from = source.contentWindow;
     // The live frame qualifies only if the turn stayed in the chapter the copies were made of.
     const same = source !== transaction.frame || source.contentDocument === pool?.doc;
     const pane = same && from && 'moveBefore' in Element.prototype ? pool?.panes.pop() : undefined;
     if (pane) {
       try {
+        pane.style.visibility = shown ? 'visible' : 'hidden';
         parent.moveBefore(pane, null);
         pane.querySelector('iframe')!.contentWindow!.scrollTo(from!.scrollX, from!.scrollY);
-        pane.style.visibility = 'visible';
         return pane;
       } catch { pane.remove(); }
     }
-    return this.snapshot(source, parent, signal);
+    return this.snapshot(source, parent, signal, shown);
   }
   cancel() {
     this.dropStandby();
@@ -207,7 +210,7 @@ export class ReaderMotion {
       this.cleanup(this.active);
     }
   }
-  private snapshot(source: HTMLIFrameElement, parent: HTMLElement, signal: AbortSignal): Promise<HTMLDivElement> {
+  private snapshot(source: HTMLIFrameElement, parent: HTMLElement, signal: AbortSignal, shown = true): Promise<HTMLDivElement> {
     const doc = source.contentDocument;
     if (!doc?.body) return Promise.reject(new DOMException('No page to capture', 'SnapshotError'));
     const html = '<!doctype html>' + doc.documentElement.outerHTML;
@@ -224,7 +227,7 @@ export class ReaderMotion {
         settled = true; clearTimeout(timer); signal.removeEventListener('abort', abort);
         frame.onload = null; frame.onerror = null;
         if (error) reject(error);
-        else { pane.style.visibility = 'visible'; resolve(pane); }
+        else { if (shown) pane.style.visibility = 'visible'; resolve(pane); }
       };
       const abort = () => finish(new DOMException('Animation canceled', 'AbortError'));
       const timer = setTimeout(() => finish(new DOMException('Page snapshot timed out', 'SnapshotError')), 1800);
@@ -312,7 +315,10 @@ export class ReaderMotion {
     const sources = spread ? (forward ? [old, old, live, live] : [live, live, old, old])
       : (forward ? [old, live, old] : [live, old, live]).slice(0, pages.length);
     // Load snapshots after StPageFlip has reparented the shells: moving an iframe resets its document.
-    const panes = await Promise.all(pages.map((page, index) => this.place(transaction, sources[index], page, signal)));
+    // The destination as it will look landed, laid flat over the engine and shown when it lands.
+    const [landing, ...panes] = await Promise.all([this.place(transaction, live, overlay, signal, false),
+      ...pages.map((page, index) => this.place(transaction, sources[index], page, signal))]);
+    landing.style.visibility = 'hidden'; landing.style.zIndex = '2';
     if (signal.aborted) throw aborted();
     // Each half of a spread shows the whole spread snapshot, cropped by its half-width shell.
     if (spread) panes.forEach((pane, index) => {
@@ -494,6 +500,12 @@ export class ReaderMotion {
       oldPage.remove();
       if (signal.aborted) onAbort();
     });
+    // The landed pages still sit in the engine's layers at fractional offsets, resampled and a little
+    // soft, and the landing fade blurred that into the sharp live page. A flat copy of the destination
+    // takes their place, with the spine copy above it as the live spine is above the page.
+    if (spine) { overlay.append(spine); spine.style.zIndex = '6'; }
+    landing.style.visibility = 'visible';
+    host.style.display = 'none';
     this.land(transaction);
   }
 
@@ -586,7 +598,7 @@ export class ReaderMotion {
     roll.style.backgroundImage = plan.rollGradient;
     // Arriving, the sheet at the bottom is the new page, under the old one until the turn starts.
     const loads = await Promise.all([this.place(transaction, underSource, page, signal),
-      face && this.place(transaction, live, face, signal), plan.arriving ? this.place(transaction, live, overlay, signal) : null]);
+      face && this.place(transaction, live, face, signal), plan.arriving ? this.place(transaction, live, overlay, signal, false) : null]);
     if (signal.aborted) throw aborted();
     const sheet = loads[2];
     if (sheet) { sheet.style.zIndex = '1'; sheet.style.visibility = 'hidden'; }
@@ -611,6 +623,19 @@ export class ReaderMotion {
     if (sheet) { sheet.style.visibility = 'visible'; oldPage.style.visibility = 'hidden'; }
     await Promise.all(animations.map(animation => animation.finished));
     if (signal.aborted) throw aborted();
+    // Landed, the destination was still drawn through the turned windows: two rotations that cancel
+    // only to rounding, at fractional offsets, so its text was resampled and soft, and the landing
+    // fade blurred it into the sharp live page. Lay the copy that shows it flat on the page instead,
+    // moved out of its window (moveBefore keeps its document), and take the turning parts away. The
+    // uncovered copy holds the whole destination (a spread's both halves); turning back on a single
+    // page, the destination is the flat sheet already underneath.
+    if (!plan.arriving && 'moveBefore' in Element.prototype) {
+      try {
+        overlay.moveBefore(page, null);
+        page.style.left = '0'; page.style.zIndex = '5';
+      } catch { /* Left in its window: the turned copy still shows the right page. */ }
+    }
+    if (plan.arriving || page.parentElement === overlay) { uncoveredCell.remove(); cell.remove(); }
     this.land(transaction);
   }
   async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false,

@@ -59,3 +59,15 @@
   left: 0;
   top: 0;
 }
+/* dr-reader: a fixed box that clips the soft outer shadow to the page it falls on (HTMLRender). */
+.stf__outerShadowClip {
+  position: absolute;
+  overflow: hidden;
+}
+
+/* dr-reader: a shadow's gradient, whose opacity is the shadow's strength (HTMLRender). */
+.stf__shadowTone {
+  position: absolute;
+  inset: 0;
+}
+

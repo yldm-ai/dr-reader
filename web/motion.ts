@@ -218,6 +218,8 @@ export class ReaderMotion {
     let landingShadowOpacity = 1;
     // The spine copy that covered the old snapshot; it moves into the engine at the reveal.
     const spine = overlay.querySelector<HTMLElement>(':scope > .stpageflip-spine');
+    // The engine records each frame's styles for the compositor; the spine fade is one of them.
+    if (spine) render.track(spine);
     // StPageFlip positions pages and shadows with 3D transforms even when nothing
     // is rotated. Any 3D layer under a page drops its text from ClearType to
     // grayscale, so it thins as the turn starts and sharpens again when the live

@@ -98,7 +98,16 @@ export class HTMLPage extends Page {
         setCssText(this.element, newStyle);
     }
 
+    /** dr-reader: where the last soft draw put the page (block coordinates, radians). */
+    private pose = { x: 0, y: 0, angle: 0 };
+
+    /** dr-reader: the transform of the last soft draw, for content that rides on the page. */
+    public getPose(): { x: number; y: number; angle: number } {
+        return this.pose;
+    }
+
     private drawSoft(position: Point, commonStyle = ''): void {
+        this.pose = { x: position.x, y: position.y, angle: this.state.angle };
         let polygon = 'polygon( ';
         for (const p of this.state.area) {
             if (p !== null) {

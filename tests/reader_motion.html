@@ -65,6 +65,12 @@ try {
           [...engine.querySelectorAll('[class*="Shadow"]')].every(item => !item.style.transform.includes('3d')),
           'StPageFlip root and shadows must stay 2D so snapshot text keeps ClearType');
         check(engine.dataset.density === (effect === 'turn-hard' ? 'hard' : 'soft'), 'wrong page material');
+        // The turn plays on the compositor: keyframes of transform, clip-path and opacity only.
+        const playing = engine.getAnimations({ subtree: true });
+        const animated = new Set(playing.flatMap(animation => animation.effect.getKeyframes()
+          .flatMap(keyframe => Object.keys(keyframe).filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key)))));
+        check(playing.length >= 2 && [...animated].every(key => ['transform', 'clipPath', 'opacity'].includes(key)),
+          `${effect} ${corner} ${direction}: the turn must play as compositor animations (${playing.length}: ${[...animated]})`);
         check(engine.dataset.corner === corner, 'wrong curl corner');
         // Soft pages curl forward, or uncurl the previous page backward, with a flap copy.
         const copied = effect !== 'turn-hard';
@@ -117,6 +123,14 @@ try {
   await new Promise(resolve => setTimeout(resolve, 60));
   check(landedSheet && getComputedStyle(landedSheet).display !== 'none' && landedSheet.style.cssText === landedPose,
     'a backward turn must keep its landing pose through the fade instead of redrawing the page it left');
+  // The page being left (engine page 1) must be gone: hidden, or clipped to nothing as the
+  // returned sheet lands. Its starting pose showed it whole, and so did the library's resting state.
+  const leftPage = host.querySelectorAll('.stpageflip-host .stf__item')[1];
+  const clip = getComputedStyle(leftPage).clipPath;
+  const points = [...clip.matchAll(/(-?[\d.]+)px (-?[\d.]+)px/g)].map(match => [Number(match[1]), Number(match[2])]);
+  const area = Math.abs(points.reduce((sum, [x, y], i) => { const [nx, ny] = points[(i + 1) % points.length]; return sum + x * ny - nx * y; }, 0)) / 2;
+  check(getComputedStyle(leftPage).display === 'none' || (points.length > 2 && area < 600 * 360 * .02),
+    `a backward turn must not show the page it left once it lands (clip ${clip})`);
   await pending;
   check(frame.contentWindow.scrollX === 0, 'the backward landing fade must end on the live previous page');
   // A cancelled library turn must tear down its renderer and show the committed live page.
@@ -228,7 +242,7 @@ try {
       render.startAnimation = (frames, time, done) => start(frames.map(draw => () => {
         draw();
         const engine = host.querySelector('.stpageflip-host');
-        const spine = engine?.querySelector('.stpageflip-spine');
+        const spine = host.querySelector('.stpageflip-spine');
         if (engine?.dataset.density === 'soft' && spine?.style.opacity === '0') spineFaded.add(render);
         if (draw !== frames.at(-1) || engine?.dataset.density !== 'soft' || checkedLandings.has(render)) return;
         checkedLandings.add(render);
@@ -240,7 +254,7 @@ try {
           'the last soft-spread frame must land flat before showing the live page');
         check([...engine.querySelectorAll('.stf__outerShadow, .stf__innerShadow')]
           .every(shadow => getComputedStyle(shadow).opacity === '0'), 'curl shadows must vanish before cleanup');
-        check(engine.querySelector('.stpageflip-spine')?.style.opacity === '1',
+        check(host.querySelector('.stpageflip-spine')?.style.opacity === '1',
           'the spine must be fully back on the landing frame so cleanup does not pop it in');
         check(spineFaded.has(render), 'the spine must fade while the soft flap slides over it');
         // The moved pages stay layered: dropping them mid-hold snapped their text to ClearType.
@@ -266,6 +280,8 @@ try {
       check(engine.dataset.orientation === 'landscape' && engine.dataset.layout === 'double' && engine.dataset.pageCount === '4',
         `${effect} ${direction}: spreads must use the landscape book with four pages`);
       check(Math.abs(engine.getBoundingClientRect().width - 980) < 1, 'the spread engine must fill the reading width');
+      check(engine.getAnimations({ subtree: true }).length >= 2 || host.querySelector('.stpageflip-spine')?.getAnimations().length,
+        `${effect} ${direction}: the spread turn must play as compositor animations`);
       const halves = [...engine.querySelectorAll('.stpageflip-page .motion-page')];
       check(halves.length === 4 && halves.every((pane, i) => pane.style.width === '980px' && pane.style.left === (i % 2 ? '-490px' : '0px')),
         `${effect} ${direction}: each half page must crop its side of the spread snapshot`);

@@ -31,6 +31,12 @@ export interface FlipSetting {
     /** Flipping animation time */
     flippingTime: number;
 
+    /**
+     * dr-reader: play flips on the compositor (Render.playOnCompositor), falling back to the render
+     * loop when a flip cannot be played that way. Default true.
+     */
+    compositorPlayback?: boolean;
+
     /** Enable switching to portrait mode */
     usePortrait: boolean;
     /** Initial value to z-index */

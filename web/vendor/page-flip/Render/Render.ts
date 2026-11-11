@@ -53,6 +53,40 @@ export const Orientation = {
 } as const;
 export type Orientation = (typeof Orientation)[keyof typeof Orientation];
 
+/** dr-reader: the render loop's frame interval at 60 Hz; compositor samples are this far apart. */
+const FRAME_INTERVAL = 1000 / 60;
+/** dr-reader: properties the compositor animates, with their Web Animations keyframe names. */
+const ANIMATED = new Map([
+    ['transform', 'transform'],
+    ['clip-path', 'clipPath'],
+    ['opacity', 'opacity'],
+]);
+
+/** An element's inline declarations, as the browser normalises them. */
+function readStyle(element: HTMLElement): Map<string, string> {
+    const style = new Map<string, string>();
+    for (let i = 0; i < element.style.length; i++) {
+        const name = element.style[i];
+        style.set(name, element.style.getPropertyValue(name));
+    }
+    return style;
+}
+
+/**
+ * Gives every polygon in the keyframes the same number of vertices by repeating each polygon's
+ * last vertex. False if a clip-path is something other than a polygon or none throughout.
+ */
+function padPolygons(keyframes: Keyframe[]): boolean {
+    const polygons = keyframes.map(keyframe => /^polygon\((.*)\)$/.exec(String(keyframe.clipPath))?.[1].split(/,\s*/));
+    if (polygons.some(points => !points)) return false;
+    const most = Math.max(...polygons.map(points => points!.length));
+    polygons.forEach((points, index) => {
+        while (points!.length < most) points!.push(points![points!.length - 1]);
+        keyframes[index].clipPath = `polygon(${points!.join(', ')})`;
+    });
+    return true;
+}
+
 /**
  * Class responsible for rendering the book
  */
@@ -89,6 +123,9 @@ export abstract class Render {
     /** dr-reader: the render loop's pending frame, and whether the loop was stopped for good. */
     private raf = 0;
     private stopped = false;
+    /** dr-reader: the flip the compositor is playing (playOnCompositor), and extra recorded elements. */
+    private compositor: { animations: Animation[]; onAnimateEnd: AnimationSuccessAction } | null = null;
+    private readonly tracked = new Set<HTMLElement>();
 
     /**
      * Safari browser definitions for resolving a bug with a css property clip-area
@@ -120,6 +157,12 @@ export abstract class Render {
      * Executed when requestAnimationFrame is called. Performs the current animation process and call drawFrame()
      */
     private render(timer: number): void {
+        // dr-reader: the compositor plays the current flip; nothing to draw until it lands.
+        if (this.compositor !== null) {
+            this.timer = timer;
+            return;
+        }
+
         if (this.animation !== null) {
             // Find current frame of animation
             const frameIndex = Math.round((timer - this.animation.startedAt) / this.animation.durationFrame);
@@ -147,19 +190,28 @@ export abstract class Render {
         this.update();
         this.stopped = false;
 
-        // dr-reader: the next frame is requested even if this one throws. Upstream requested it after
-        // drawing, so one failed frame (degenerate geometry at the page edge) stopped the book for good
-        // and froze a turn mid-flight.
-        const loop = (timer: number): void => {
-            if (this.stopped) return;
-            try {
-                this.render(timer);
-            } finally {
-                if (!this.stopped) this.raf = requestAnimationFrame(loop);
-            }
-        };
+        this.raf = requestAnimationFrame(this.loop);
+    }
 
-        this.raf = requestAnimationFrame(loop);
+    /**
+     * dr-reader: the next frame is requested even if this one throws. Upstream requested it after
+     * drawing, so one failed frame (degenerate geometry at the page edge) stopped the book for good
+     * and froze a turn mid-flight. While the compositor plays a flip the loop pauses: each request
+     * would otherwise make the main thread run a full frame (style, layout, paint) for nothing.
+     */
+    private readonly loop = (timer: number): void => {
+        this.raf = 0;
+        if (this.stopped) return;
+        try {
+            this.render(timer);
+        } finally {
+            if (!this.stopped && this.compositor === null) this.raf = requestAnimationFrame(this.loop);
+        }
+    };
+
+    /** dr-reader: restart the loop after a compositor flip (unless stopped or already scheduled). */
+    private resume(): void {
+        if (!this.stopped && this.raf === 0) this.raf = requestAnimationFrame(this.loop);
     }
 
     /**
@@ -169,6 +221,31 @@ export abstract class Render {
         this.stopped = true;
         cancelAnimationFrame(this.raf);
         this.animation = null;
+        const compositor = this.compositor;
+        this.compositor = null;
+        // The elements' own styles already hold the landing pose (see playOnCompositor).
+        for (const animation of compositor?.animations ?? []) animation.cancel();
+    }
+
+    /**
+     * dr-reader: also record this element's inline style while recording a flip for the compositor,
+     * for callers that style elements outside the book in step with the flip (motion.ts's spine).
+     */
+    public track(element: HTMLElement): void {
+        this.tracked.add(element);
+    }
+
+    /** dr-reader: the Web Animations playing the current flip on the compositor, if any. */
+    public getAnimations(): readonly Animation[] {
+        return this.compositor?.animations ?? [];
+    }
+
+    /**
+     * dr-reader: while the compositor plays a flip, its keyframes own the pages' poses and the
+     * elements' own styles must stay at the landing pose (see playOnCompositor); drawing is skipped.
+     */
+    protected isPlayingOnCompositor(): boolean {
+        return this.compositor !== null;
     }
 
     /**
@@ -180,6 +257,8 @@ export abstract class Render {
      */
     public startAnimation(frames: FrameAction[], duration: number, onAnimateEnd: AnimationSuccessAction): void {
         this.finishAnimation(); // finish the previous animation process
+
+        if (this.setting.compositorPlayback !== false && this.playOnCompositor(frames, duration, onAnimateEnd)) return;
 
         this.animation = {
             frames,
@@ -194,6 +273,15 @@ export abstract class Render {
      * End the current animation process and call the callback
      */
     public finishAnimation(): void {
+        const compositor = this.compositor;
+        if (compositor !== null) {
+            this.compositor = null;
+            for (const animation of compositor.animations) animation.cancel();
+            compositor.onAnimateEnd();
+            this.resume();
+            return;
+        }
+
         if (this.animation !== null) {
             this.animation.frames[this.animation.frames.length - 1]();
 
@@ -203,6 +291,91 @@ export abstract class Render {
         }
 
         this.animation = null;
+    }
+
+    /**
+     * dr-reader: play a flip on the compositor.
+     *
+     * The flip is drawn exactly as the render loop would draw it, one sample per display frame
+     * (every frame of the path the loop would pick at 60 Hz), and each element's resulting inline
+     * style is read back: the engine's page and shadow styles plus whatever a caller changes after
+     * drawFrame (motion.ts normalises flat poses and fades the spine). Values that stay the same
+     * become plain styles; transform, clip-path and opacity values that change become one keyframe
+     * list per element, all sharing the duration, linear timing and start time of the loop. The
+     * compositor then plays the flip without the main thread, and a busy main thread cannot drop its
+     * frames.
+     *
+     * After recording, the elements hold the last sample, the landing pose: that is also what shows
+     * whenever the compositor falls back to the underlying style as the animations end.
+     *
+     * @returns false, with nothing applied, when another property changes during the flip.
+     */
+    private playOnCompositor(frames: FrameAction[], duration: number, onAnimateEnd: AnimationSuccessAction): boolean {
+        if (typeof Element.prototype.animate !== 'function' || frames.length < 2) return false;
+
+        const count = Math.max(2, Math.min(frames.length, Math.round(duration / FRAME_INTERVAL) + 1));
+        const targets = (): HTMLElement[] => [
+            ...this.app.getUI().getDistElement().querySelectorAll<HTMLElement>('[style]'),
+            ...this.tracked,
+        ];
+        const samples: Map<HTMLElement, Map<string, string>>[] = [];
+        for (let i = 0; i < count; i++) {
+            frames[Math.round((i / (count - 1)) * (frames.length - 1))]();
+            this.drawFrame();
+            const sample = new Map<HTMLElement, Map<string, string>>();
+            for (const element of targets()) sample.set(element, readStyle(element));
+            samples.push(sample);
+        }
+
+        const tracks: { element: HTMLElement; keyframes: Keyframe[]; hidden?: string }[] = [];
+        const elements = new Set(samples.flatMap(sample => [...sample.keys()]));
+        for (const element of elements) {
+            const styles = samples.map(sample => sample.get(element) ?? new Map<string, string>());
+            const names = new Set(styles.flatMap(style => [...style.keys()]));
+            const moving: string[] = [];
+            for (const name of names) {
+                const values = styles.map(style => style.get(name));
+                if (values.every(value => value === values[0])) continue;
+                if (name === 'backface-visibility') {
+                    // Only a page rotated about Y shows a back face; the reader marks flat poses
+                    // 'visible' to keep them out of 3D layers. Keep the face that matters while turning.
+                    if (values.includes('hidden')) element.style.backfaceVisibility = 'hidden';
+                    continue;
+                }
+                if (!ANIMATED.has(name) || values.some(value => value === undefined)) return false;
+                moving.push(name);
+            }
+            if (!moving.length) continue;
+            const keyframes = styles.map((style, index) => {
+                const keyframe: Keyframe = { offset: index / (count - 1) };
+                for (const name of moving) keyframe[ANIMATED.get(name)!] = style.get(name)!;
+                return keyframe;
+            });
+            // Polygons interpolate vertex by vertex; pad the ones that lost a vertex (the fold's
+            // corner leaving an edge) with their last vertex, which does not change their shape.
+            if (moving.includes('clip-path') && !padPolygons(keyframes)) return false;
+            tracks.push({ element, keyframes });
+        }
+
+        // Started in one task, the animations share their start time.
+        const animations = tracks.map(({ element, keyframes }) =>
+            element.animate(keyframes, { duration, easing: 'linear', fill: 'both' })
+        );
+        const playback = { animations, onAnimateEnd };
+        this.compositor = playback;
+        Promise.all(animations.map(animation => animation.finished)).then(
+            () => {
+                if (this.compositor !== playback) return;
+                this.compositor = null;
+                onAnimateEnd();
+                // The styles hold the landing pose; the next loop frame (unless stopped) draws the
+                // resting book over them.
+                for (const animation of animations) animation.cancel();
+                this.resume();
+            },
+            (): void => undefined // canceled by finishAnimation or stop
+        );
+        return true;
     }
 
     /**

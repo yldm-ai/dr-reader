@@ -4,12 +4,30 @@ Source: [StPageFlip](https://github.com/Nodlik/StPageFlip) 2.0.7, © 2020 Nodlik
 Taken from the `src/` directory of the `page-flip@2.0.7` npm package. The reader uses it in `web/motion.ts`
 for soft and hard page turns.
 
-The flip logic is upstream's: the same geometry, frame timing, page and shadow styles. Drawn poses are
-pixel-identical to the npm package (`scripts/bench-flip-pose.ts` compares 60 poses: single page and spread,
-soft and hard, both corners and directions).
+The flip logic is upstream's: the same geometry, frame path and linear timing. `scripts/bench-flip-pose.ts`
+compares 60 drawn poses (single page and spread, soft and hard, both corners and directions) with the npm
+package.
 
 ## Changes
 
+- **Compositor playback** (`Render.playOnCompositor`, setting `compositorPlayback`, default on). When a
+  flip starts, it is drawn exactly as the render loop would draw it, one sample per 60 Hz frame of the
+  path, and each element's resulting inline style is read back, including whatever a caller changes after
+  `drawFrame` (`Render.track` adds elements outside the book). Values that stay the same become plain
+  styles; `transform`, `clip-path` and `opacity` values that change become one Web Animations keyframe
+  list per element, with the loop's linear timing and one shared start time. The compositor plays the
+  flip and the render loop pauses, so a busy main thread no longer drops its frames. Recording takes about
+  10–20 ms. After recording the elements hold the landing pose, and draws during playback are skipped, so
+  that pose is what shows whenever the animations let go. If another property changes during a flip, it
+  plays on the render loop as before.
+- **Shadows for the compositor.** Upstream changed shadow widths and gradients every frame. Each shadow now
+  keeps upstream's geometry and gradient but has a box one page wide scaled to that width, and its
+  gradient on a child whose opacity is the shadow strength (the shadow's own opacity stays free for the
+  reader). The soft outer shadow is clipped by a fixed box over its page, and the soft inner shadow rides
+  inside the turning sheet instead of having clip-path masks of their own. The inner gradient (strength at
+  5% and 35%, a fixed 0.05 at 15%) is split exactly into a fixed layer and the strength-scaled child.
+  Drawn poses match the npm package: hard pages pixel for pixel, soft ones in all but ≤0.03% of pixels
+  (anti-aliasing at shadow edges).
 - **Unchanged styles are not reassigned.** Every frame, upstream assigns each page's and shadow's complete
   `cssText`, also for every resting page and hidden shadow whose text is identical to the last frame's.
   `Render/Style.ts` skips an assignment equal to the previous one for that element. What is on screen does

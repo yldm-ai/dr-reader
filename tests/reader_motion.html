@@ -69,7 +69,9 @@ try {
         const playing = engine.getAnimations({ subtree: true });
         const animated = new Set(playing.flatMap(animation => animation.effect.getKeyframes()
           .flatMap(keyframe => Object.keys(keyframe).filter(key => !['offset', 'easing', 'composite', 'computedOffset'].includes(key)))));
-        check(playing.length >= 2 && [...animated].every(key => ['transform', 'clipPath', 'opacity'].includes(key)),
+        // A clip-path animation is advanced by the main thread: busy, it held the cut behind the moving
+        // page and the page beneath showed through. Cuts are windows moved by transforms instead.
+        check(playing.length >= 2 && [...animated].every(key => ['transform', 'opacity'].includes(key)),
           `${effect} ${corner} ${direction}: the turn must play as compositor animations (${playing.length}: ${[...animated]})`);
         check(engine.dataset.corner === corner, 'wrong curl corner');
         // Soft pages curl forward, or uncurl the previous page backward, with a flap copy.
@@ -126,11 +128,25 @@ try {
   // The page being left (engine page 1) must be gone: hidden, or clipped to nothing as the
   // returned sheet lands. Its starting pose showed it whole, and so did the library's resting state.
   const leftPage = host.querySelectorAll('.stpageflip-host .stf__item')[1];
-  const clip = getComputedStyle(leftPage).clipPath;
-  const points = [...clip.matchAll(/(-?[\d.]+)px (-?[\d.]+)px/g)].map(match => [Number(match[1]), Number(match[2])]);
-  const area = Math.abs(points.reduce((sum, [x, y], i) => { const [nx, ny] = points[(i + 1) % points.length]; return sum + x * ny - nx * y; }, 0)) / 2;
-  check(getComputedStyle(leftPage).display === 'none' || (points.length > 2 && area < 600 * 360 * .02),
-    `a backward turn must not show the page it left once it lands (clip ${clip})`);
+  // The engine's cuts are windows turned at the fold (Render.ts cutWindows): what the window keeps
+  // of the page's box is what shows of it.
+  const cut = leftPage.querySelector(':scope > .stf__cut');
+  let area = Infinity;
+  if (cut) {
+    const m = new DOMMatrix(getComputedStyle(cut).transform);
+    const through = m.transformPoint(new DOMPoint(0, cut.offsetHeight / 2)), normal = { x: m.a, y: m.b };
+    const side = ([x, y]) => (x - through.x) * normal.x + (y - through.y) * normal.y;
+    const w = leftPage.offsetWidth, h = leftPage.offsetHeight, kept = [];
+    const box = [[0, 0], [w, 0], [w, h], [0, h]];
+    box.forEach((from, i) => {
+      const to = box[(i + 1) % 4], here = side(from), there = side(to);
+      if (here >= 0) kept.push(from);
+      if (here >= 0 !== there >= 0) { const at = here / (here - there); kept.push([from[0] + (to[0] - from[0]) * at, from[1] + (to[1] - from[1]) * at]); }
+    });
+    area = Math.abs(kept.reduce((sum, [x, y], i) => { const [nx, ny] = kept[(i + 1) % kept.length]; return sum + x * ny - nx * y; }, 0)) / 2;
+  }
+  check(getComputedStyle(leftPage).display === 'none' || area < 600 * 360 * .02,
+    `a backward turn must not show the page it left once it lands (visible ${area})`);
   await pending;
   check(frame.contentWindow.scrollX === 0, 'the backward landing fade must end on the live previous page');
   // A cancelled library turn must tear down its renderer and show the committed live page.
@@ -308,6 +324,14 @@ try {
       check(Math.abs(engine.getBoundingClientRect().width - 980) < 1, 'the spread engine must fill the reading width');
       check(engine.getAnimations({ subtree: true }).length >= 2 || host.querySelector('.stpageflip-spine')?.getAnimations().length,
         `${effect} ${direction}: the spread turn must play as compositor animations`);
+      check(engine.getAnimations({ subtree: true }).every(animation => animation.effect.getKeyframes().every(keyframe => !('clipPath' in keyframe))),
+        `${effect} ${direction}: the spread turn must cut its pages with windows, not animated clip-paths`);
+      // A cut page's paper is cut with it: the shell itself paints nothing, or it covered the page beneath.
+      check([...engine.querySelectorAll('.stf__item')].filter(item => item.querySelector(':scope > .stf__cut')).every(item => {
+        const style = getComputedStyle(item), plane = item.querySelector('.stf__cut-plane');
+        return style.backgroundImage === 'none' && style.backgroundColor === 'rgba(0, 0, 0, 0)' &&
+          getComputedStyle(plane).backgroundColor !== 'rgba(0, 0, 0, 0)';
+      }), `${effect} ${direction}: a cut page must carry its paper inside the window`);
       const halves = [...engine.querySelectorAll('.stpageflip-page .motion-page')];
       check(halves.length === 4 && halves.every((pane, i) => pane.style.width === '980px' && pane.style.left === (i % 2 ? '-490px' : '0px')),
         `${effect} ${direction}: each half page must crop its side of the spread snapshot`);

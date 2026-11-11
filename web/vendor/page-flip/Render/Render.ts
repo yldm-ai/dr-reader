@@ -87,6 +87,137 @@ function padPolygons(keyframes: Keyframe[]): boolean {
     return true;
 }
 
+/** Shoelace area of a polygon. */
+function polygonArea(points: Point[]): number {
+    let sum = 0;
+    for (let i = 0; i < points.length; i++) {
+        const a = points[i], b = points[(i + 1) % points.length];
+        sum += a.x * b.y - b.x * a.y;
+    }
+    return Math.abs(sum) / 2;
+}
+
+/** The part of a convex polygon on the side of a line where `side` is not negative. */
+function keepSide(polygon: Point[], side: (point: Point) => number): Point[] {
+    const kept: Point[] = [];
+    for (let i = 0; i < polygon.length; i++) {
+        const from = polygon[i], to = polygon[(i + 1) % polygon.length];
+        const here = side(from), there = side(to);
+        if (here >= 0) kept.push(from);
+        if (here >= 0 !== there >= 0) {
+            const at = here / (here - there);
+            kept.push({ x: from.x + (to.x - from.x) * at, y: from.y + (to.y - from.y) * at });
+        }
+    }
+    return kept;
+}
+
+/**
+ * dr-reader: an element's moving clip-path, as transform keyframes of a window and a plane.
+ *
+ * The compositor plays transforms and opacity, but a clip-path animation is advanced by the main
+ * thread. While the main thread was busy (a turn starts as the new page is laid out and loaded) the
+ * page shells kept moving with their old cuts: the folded face drew away from the page it uncovers,
+ * and the page under both showed through the gap as a strip (an illustration in white on a dark page).
+ *
+ * Every cut a soft flip makes is its page cut by one line, the fold. So each is drawn as a window: a
+ * square turned so its x runs along the normal of that line, its left edge on the line, overflow
+ * hidden, holding a plane turned back by exactly as much so the page inside stays put. Written as the
+ * same transform functions negated in reverse order, the pair cancel between keyframes too.
+ *
+ * Returns null, and changes nothing, unless every keyframe's polygon is the element's box cut by a
+ * line (or the whole box, or nothing of it).
+ */
+function cutWindows(element: HTMLElement, keyframes: Keyframe[]):
+    { window: HTMLElement; plane: HTMLElement; windowFrames: Keyframe[]; planeFrames: Keyframe[] } | null {
+    if (!('moveBefore' in Element.prototype)) return null;
+    const width = element.offsetWidth, height = element.offsetHeight;
+    if (!width || !height) return null;
+    const box = [{ x: 0, y: 0 }, { x: width, y: 0 }, { x: width, y: height }, { x: 0, y: height }];
+    const diagonal = Math.hypot(width, height), reach = 4 * diagonal, slack = 1;
+    const center = { x: width / 2, y: height / 2 };
+    const onBox = (a: Point, b: Point) =>
+        (Math.abs(a.x) < slack && Math.abs(b.x) < slack) || (Math.abs(a.x - width) < slack && Math.abs(b.x - width) < slack) ||
+        (Math.abs(a.y) < slack && Math.abs(b.y) < slack) || (Math.abs(a.y - height) < slack && Math.abs(b.y - height) < slack);
+    const px = (value: number) => `${value.toFixed(3)}px`;
+    const windowFrames: Keyframe[] = [], planeFrames: Keyframe[] = [];
+    let angle = 0;
+    for (const keyframe of keyframes) {
+        const body = /^polygon\((.*)\)$/.exec(String(keyframe.clipPath))?.[1];
+        if (!body) return null;
+        const points = body.split(/,\s*/).map(pair => {
+            const [x, y] = pair.trim().split(/\s+/).map(value => /px$/.test(value) || value === '0' ? parseFloat(value) : NaN);
+            return { x, y };
+        });
+        if (points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) return null;
+        const area = polygonArea(points);
+        // The cut is the longest edge that does not run along the box.
+        let cut: [Point, Point] | null = null, longest = slack;
+        for (let i = 0; i < points.length; i++) {
+            const a = points[i], b = points[(i + 1) % points.length];
+            const length = Math.hypot(b.x - a.x, b.y - a.y);
+            if (length > longest && !onBox(a, b)) { cut = [a, b]; longest = length; }
+        }
+        let through: Point;
+        if (cut) {
+            const [a, b] = cut;
+            const along = { x: (b.x - a.x) / longest, y: (b.y - a.y) / longest };
+            const t = (center.x - a.x) * along.x + (center.y - a.y) * along.y;
+            through = { x: a.x + along.x * t, y: a.y + along.y * t };
+            // The side the polygon keeps: the one whose cut of the box has the polygon's area. The
+            // engine's polygons may double back along an edge, so their vertices do not tell.
+            const keeps = (normal: Point) =>
+                Math.abs(polygonArea(keepSide(box, point => (point.x - through.x) * normal.x + (point.y - through.y) * normal.y)) - area);
+            let normal = { x: -along.y, y: along.x };
+            if (keeps({ x: -normal.x, y: -normal.y }) < keeps(normal)) normal = { x: -normal.x, y: -normal.y };
+            // It must be the box cut by that line, or the window would show another shape.
+            if (keeps(normal) > slack * (width + height)) return null;
+            let next = Math.atan2(normal.y, normal.x);
+            // A rotate interpolates by its number: never sweep through a full turn between keyframes.
+            next += 2 * Math.PI * Math.round((angle - next) / (2 * Math.PI));
+            angle = next;
+        } else if (Math.abs(area - width * height) < slack * (width + height) || area < slack * (width + height)) {
+            // The whole box, or none of it: the line stands a diagonal behind it, or beyond it.
+            const normal = { x: Math.cos(angle), y: Math.sin(angle) };
+            const sign = area < slack * (width + height) ? 1 : -1;
+            through = { x: center.x + sign * normal.x * diagonal, y: center.y + sign * normal.y * diagonal };
+        } else return null;
+        windowFrames.push({ offset: keyframe.offset,
+            transform: `translate(${px(through.x)}, ${px(through.y)}) rotate(${angle.toFixed(6)}rad) translate(0px, ${px(-reach / 2)})` });
+        planeFrames.push({ offset: keyframe.offset,
+            transform: `translate(0px, ${px(reach / 2)}) rotate(${(-angle).toFixed(6)}rad) translate(${px(-through.x)}, ${px(-through.y)})` });
+    }
+    const window = document.createElement('div');
+    window.className = 'stf__cut';
+    window.style.cssText = `position: absolute; left: 0; top: 0; width: ${reach}px; height: ${reach}px; overflow: hidden; ` +
+        `transform-origin: 0 0; pointer-events: none; transform: ${windowFrames.at(-1)!.transform};`;
+    const plane = document.createElement('div');
+    plane.className = 'stf__cut-plane';
+    plane.style.cssText = `position: absolute; left: 0; top: 0; width: ${width}px; height: ${height}px; ` +
+        `transform-origin: 0 0; transform: ${planeFrames.at(-1)!.transform};`;
+    // moveBefore keeps the snapshot frames' documents (appending them would reload them); it moves
+    // only between connected nodes, so the window goes in first.
+    const children = [...element.childNodes];
+    window.append(plane);
+    element.append(window);
+    const moved: ChildNode[] = [];
+    try {
+        for (const child of children) { plane.moveBefore(child, null); moved.push(child); }
+    } catch {
+        for (const child of moved) element.moveBefore(child, window);
+        window.remove();
+        return null;
+    }
+    // The clip-path cut the page's own paper too: that now lies in the plane, cut by the window.
+    const paper = getComputedStyle(element);
+    for (const name of ['background-color', 'background-image', 'background-size', 'background-position', 'background-repeat'])
+        plane.style.setProperty(name, paper.getPropertyValue(name));
+    element.style.background = 'none';
+    element.style.clipPath = 'none';
+    element.style.setProperty('-webkit-clip-path', 'none');
+    return { window, plane, windowFrames, planeFrames };
+}
+
 /**
  * Class responsible for rendering the book
  */
@@ -355,6 +486,17 @@ export abstract class Render {
             // corner leaving an edge) with their last vertex, which does not change their shape.
             if (moving.includes('clip-path') && !padPolygons(keyframes)) return false;
             tracks.push({ element, keyframes });
+        }
+
+        // dr-reader: cuts become windows turned with transforms (see cutWindows), so the whole flip
+        // plays on the compositor and a busy main thread cannot hold a cut behind its page.
+        for (const track of [...tracks]) {
+            if (!('clipPath' in track.keyframes[0])) continue;
+            const cut = cutWindows(track.element, track.keyframes);
+            if (!cut) continue;
+            tracks.push({ element: cut.window, keyframes: cut.windowFrames }, { element: cut.plane, keyframes: cut.planeFrames });
+            for (const keyframe of track.keyframes) delete keyframe.clipPath;
+            if (Object.keys(track.keyframes[0]).every(key => key === 'offset')) tracks.splice(tracks.indexOf(track), 1);
         }
 
         // Started in one task, the animations share their start time.

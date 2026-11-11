@@ -15,8 +15,12 @@ package.
   path, and each element's resulting inline style is read back, including whatever a caller changes after
   `drawFrame` (`Render.track` adds elements outside the book). Values that stay the same become plain
   styles; `transform`, `clip-path` and `opacity` values that change become one Web Animations keyframe
-  list per element, with the loop's linear timing and one shared start time. The compositor plays the
-  flip and the render loop pauses, so a busy main thread no longer drops its frames. Recording takes about
+  list per element, with the loop's linear timing and one shared start time. A clip-path animation is
+  still advanced by the main thread, so each page's moving cut (its box cut by the fold) is then turned
+  into a window: a square turned along the fold, overflow hidden, holding a plane turned back as much,
+  with the page's paper and content in the plane (`cutWindows`). Otherwise, while the main thread was
+  busy, a cut stood still behind its moving page and the page beneath showed through the gap. The
+  compositor plays the flip and the render loop pauses, so a busy main thread no longer drops its frames. Recording takes about
   10–20 ms. After recording the elements hold the landing pose, and draws during playback are skipped, so
   that pose is what shows whenever the animations let go. If another property changes during a flip, it
   plays on the render loop as before.

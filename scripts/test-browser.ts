@@ -27,7 +27,8 @@ try {
     if (name === 'book_opening') await page.exposeFunction('captureOpening', (label: string) => page.screenshot({ path: resolve(directory, `${label}.png`) }));
     try {
       await page.goto(`http://127.0.0.1:${port}/tests/${name}.html`);
-      await page.waitForSelector('html[data-result]', { timeout: 18000, state: 'attached' });
+      // reader_motion runs some twenty page turns, each with its landing fade.
+      await page.waitForSelector('html[data-result]', { timeout: 30000, state: 'attached' });
       const passed = await page.locator('html').getAttribute('data-result') === 'pass';
       await writeFile(resolve(directory, `${name}.html`), await page.content());
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));
@@ -621,6 +622,54 @@ try {
         await app.locator('.toc-entry').first().click();
         await app.locator('#reader-loading').waitFor({ state: 'hidden' });
         await capture('reader-pinned-sidebar.png');
+        // Sidebar tabs: one accent bar slides under the active tab.
+        const tabBar = () => app.evaluate(() => {
+          const bar = document.querySelector('.toc-tab-indicator').getBoundingClientRect();
+          const tab = document.querySelector('.toc-tabs [data-tab].active').getBoundingClientRect();
+          return { center: bar.left + bar.width / 2, target: tab.left + tab.width / 2, bottom: bar.bottom - tab.bottom };
+        });
+        const animationsSetting = await app.evaluate(() => { const value = document.body.dataset.animations; document.body.dataset.animations = 'true'; return value; });
+        const restingBar = await tabBar();
+        if (Math.abs(restingBar.center - restingBar.target) > 0.5 || Math.abs(restingBar.bottom) > 0.5)
+          throw Error(`the tab bar must sit centred under the active tab: ${JSON.stringify(restingBar)}`);
+        await app.locator('[data-tab="notes"]').click();
+        await page.waitForTimeout(80);
+        const slidingBar = await tabBar();
+        await page.waitForTimeout(320);
+        const landedBar = await tabBar();
+        if (!(slidingBar.center > restingBar.center + 1 && slidingBar.center < landedBar.center - 1) || Math.abs(landedBar.center - landedBar.target) > 0.5)
+          throw Error(`the tab bar must slide to the new tab: ${restingBar.center} → ${slidingBar.center} → ${landedBar.center}`);
+        await app.evaluate(value => { if (value === undefined) delete document.body.dataset.animations; else document.body.dataset.animations = value; }, animationsSetting);
+        // Sidebar scrollbar: the track runs between the sticky tab header and the rounded bottom
+        // corner (or the 问书 form), in a lane the content does not reach.
+        const checkTrack = async (tab: string, filler: string) => {
+          await app.locator(`[data-tab="${tab}"]`).click();
+          await app.evaluate(filler => {
+            const block = document.createElement('div');
+            block.className = 'test-filler'; block.style.height = '3000px';
+            document.querySelector(filler).append(block);
+          }, filler);
+          await app.locator('#toc-panel').hover();
+          await page.waitForTimeout(100);
+          const box = await app.evaluate(() => {
+            const panel = document.getElementById('toc-panel'), track = panel.querySelector<HTMLElement>('.overlay-scrollbar');
+            const thumb = track.querySelector('.overlay-scrollbar-thumb').getBoundingClientRect();
+            const scroll = document.getElementById('toc-scroll');
+            const content = [...scroll.children as HTMLCollectionOf<HTMLElement>].find(child => !child.hidden && child.classList.contains('toc-header') === false && child.getBoundingClientRect().height > 0);
+            const form = document.querySelector('#ask-content:not([hidden]) .ask-form')?.getBoundingClientRect();
+            const t = track.getBoundingClientRect(), p = panel.getBoundingClientRect();
+            return { hidden: track.hidden, top: t.top, bottom: t.bottom, left: thumb.left, header: document.querySelector('.toc-header').getBoundingClientRect().bottom,
+              panelBottom: p.bottom, radius: parseFloat(getComputedStyle(panel).borderBottomRightRadius), contentRight: content.getBoundingClientRect().right, formTop: form?.top };
+          });
+          await page.locator('iframe').screenshot({ path: resolve(directory, `reader-sidebar-scroll-${tab}.png`) });
+          await app.evaluate(() => document.querySelectorAll('.test-filler').forEach(item => item.remove()));
+          if (box.hidden || box.top < box.header || box.bottom > (box.formTop ?? box.panelBottom - box.radius) || box.left < box.contentRight)
+            throw Error(`${tab}: the sidebar scrollbar must stay between the header and the bottom edge, beside the content: ${JSON.stringify(box)}`);
+          return box;
+        };
+        await checkTrack('toc', '#toc-content');
+        if (await app.locator('#ask-content .ask-thread').count()) await checkTrack('ask', '#ask-content .ask-thread');
+        await app.locator('[data-tab="toc"]').click();
         await app.locator('#pin-toc').click();
         await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocPinned === false);
         await app.locator('#book-frame').hover();
@@ -1115,7 +1164,8 @@ try {
       if (name === 'settings_controls') {
         await page.setViewportSize({ width: 360, height: 800 });
         await page.reload();
-        await page.waitForSelector('html[data-result]', { timeout: 18000, state: 'attached' });
+        // reader_motion runs some twenty page turns, each with its landing fade.
+      await page.waitForSelector('html[data-result]', { timeout: 30000, state: 'attached' });
         if (await page.locator('html').getAttribute('data-result') !== 'pass') throw Error(`narrow settings: ${await page.locator('#result').textContent()}`);
       }
       if (name === 'book_opening') {

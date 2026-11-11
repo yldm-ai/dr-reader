@@ -96,6 +96,29 @@ try {
       }
     }
   }
+  // A landed turn fades into the live page (shown underneath) instead of swapping in one frame.
+  host.style.width = '600px';
+  await load(original);
+  pending = motion.change(host, 'turn', 400, 1, () => frame.contentWindow.scrollTo(600, 0));
+  await until(() => host.querySelector('.page-motion')?.getAnimations().some(animation =>
+    animation.effect.getKeyframes().some(keyframe => keyframe.opacity === '0')));
+  check(frame.style.visibility === '' && host.querySelector('.stpageflip-host')?.dataset.state === 'read',
+    'the live page must be visible under the fading landed sheet');
+  await pending;
+  check(!host.querySelector('.page-motion') && frame.contentWindow.scrollX === 600, 'the landing fade must end on the live page');
+  // A backward single page is a forward flip replayed in reverse; when it lands the library would
+  // redraw the page being left. The engine stops at the landing pose, so the fade shows the
+  // returned sheet (on top) and never the old page.
+  pending = motion.change(host, 'turn', 400, -1, () => frame.contentWindow.scrollTo(0, 0));
+  await until(() => host.querySelector('.page-motion')?.getAnimations().some(animation =>
+    animation.effect.getKeyframes().some(keyframe => keyframe.opacity === '0')));
+  const landedSheet = [...host.querySelectorAll('.stpageflip-host .stf__item')].find(item => item.style.zIndex === '5');
+  const landedPose = landedSheet?.style.cssText;
+  await new Promise(resolve => setTimeout(resolve, 60));
+  check(landedSheet && getComputedStyle(landedSheet).display !== 'none' && landedSheet.style.cssText === landedPose,
+    'a backward turn must keep its landing pose through the fade instead of redrawing the page it left');
+  await pending;
+  check(frame.contentWindow.scrollX === 0, 'the backward landing fade must end on the live previous page');
   // A cancelled library turn must tear down its renderer and show the committed live page.
   pending = motion.change(host, 'turn', 600, 1, () => frame.contentWindow.scrollTo(980, 0));
   await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
@@ -191,7 +214,7 @@ try {
   check(frame.contentWindow.scrollX === 3000 && frame.style.visibility === '',
     'a reversed wheel burst must finish on its accumulated destination');
   // Two-page spreads turn as StPageFlip's own landscape book, soft or hard, in both directions.
-  const { PageFlip } = await import('page-flip/dist/js/page-flip.module.js');
+  const { PageFlip } = await import('../web/vendor/page-flip/PageFlip.ts');
   const getRender = PageFlip.prototype.getRender;
   const inspected = new WeakSet();
   const checkedLandings = new WeakSet();
@@ -220,8 +243,9 @@ try {
         check(engine.querySelector('.stpageflip-spine')?.style.opacity === '1',
           'the spine must be fully back on the landing frame so cleanup does not pop it in');
         check(spineFaded.has(render), 'the spine must fade while the soft flap slides over it');
-        check([...engine.querySelectorAll('.stf__item')].every(item => !item.style.willChange),
-          'moved pages must leave their layers during the held landing pose');
+        // The moved pages stay layered: dropping them mid-hold snapped their text to ClearType.
+        check([...engine.querySelectorAll('.stf__item')].some(item => item.style.willChange === 'transform'),
+          'moved pages must keep their layers until the landing fade');
         landed++;
       }), time, done);
     }

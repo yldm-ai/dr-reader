@@ -11,7 +11,7 @@ Dependencies are downloaded at configure time and are not copied from the local 
 | miniz | 3.0.2 | MIT — https://github.com/richgel999/miniz |
 | SQLite | 3.53.4 amalgamation | Public domain — https://www.sqlite.org/copyright.html |
 | Microsoft.Web.WebView2 SDK | 1.0.2903.40 | Microsoft SDK license — https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.2903.40 |
-| StPageFlip (`page-flip`) | 2.0.7 | MIT — https://github.com/Nodlik/StPageFlip |
+| StPageFlip (vendored in `web/vendor/page-flip`, modified) | 2.0.7 | MIT — https://github.com/Nodlik/StPageFlip; changes listed in `web/vendor/page-flip/README.md` |
 | Material Symbols Rounded (`@material-symbols/svg-400`) | 0.48.0 | Apache-2.0 — https://github.com/google/material-design-icons |
 
 Preserve their license texts when distributing compiled artifacts. The `scripts/package.ps1` script collects those texts into the portable output.

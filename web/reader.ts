@@ -97,6 +97,7 @@ export class Reader {
   tapDismissed = false;
   activationPress = false;
   quickMenus?: QuickMenus;
+  tocScrollbar?: OverlayScrollbar;
   tapStart: { x: number; y: number; time: number; selected: boolean } | null = null;
   saveTimer?: Timer;
   tapTimer?: Timer;
@@ -140,7 +141,18 @@ export class Reader {
     $<HTMLButtonElement>("font-smaller").onclick = () => this.stepFontSize(-1);
     $<HTMLButtonElement>("font-larger").onclick = () => this.stepFontSize(1);
     $("reader-search").onclick = () => this.openSearch();
-    new OverlayScrollbar($("toc-scroll"), $("toc-panel"));
+    // The tab header and the 问书 form stay put while the column scrolls; the track runs between them.
+    const tocHeader = document.querySelector<HTMLElement>(".toc-header")!;
+    let watchedForm: Element | null = null;
+    this.tocScrollbar = new OverlayScrollbar($("toc-scroll"), $("toc-panel"), () => {
+      const form = document.querySelector<HTMLElement>("#ask-content:not([hidden]) .ask-form");
+      if (form && form !== watchedForm) { watchedForm = form; this.tocScrollbar?.observe(form); }
+      // The form is stuck to the column's bottom edge (its negative margin reaches into the
+      // padding), so measure where its top really is rather than its height.
+      const scroll = $("toc-scroll").getBoundingClientRect();
+      return { top: tocHeader.offsetHeight + 4, bottom: form ? Math.max(0, scroll.bottom - form.getBoundingClientRect().top) + 4 : 4 };
+    });
+    this.tocScrollbar.observe(tocHeader);
     $<HTMLButtonElement>("collapse-toolbar").onclick = () => this.setToolbarVisible(false);
     $<HTMLButtonElement>("expand-toolbar").onclick = () => this.setToolbarVisible(true);
     $("reader-fullscreen").onclick = () => call("fullscreen").catch(error => toast(errorMessage(error), "error"));
@@ -181,6 +193,9 @@ export class Reader {
       .forEach(
         (button) => (button.onclick = () => this.tab(button.dataset.tab!)),
       );
+    // The panel's width changes as it opens, pins and resizes; the bar follows without sliding.
+    const tabStrip = document.querySelector<HTMLElement>(".toc-tabs");
+    if (tabStrip) new ResizeObserver(() => this.placeTabIndicator(false)).observe(tabStrip);
     $("book-search-form").onsubmit = (event) => {
       event.preventDefault();
       this.search();
@@ -411,6 +426,23 @@ export class Reader {
     if (name === "search") $<HTMLInputElement>("book-search-input").focus();
     if (name === "ask") this.chat.focus();
     if (name === "toc") this.updateTocIndicator();
+    this.placeTabIndicator(true);
+    // Only 问书 has a form at the bottom of the column.
+    this.tocScrollbar?.schedule();
+  }
+
+  /** The sidebar tabs' accent bar sits under the active tab and slides when it changes. */
+  placeTabIndicator(animate: boolean): void {
+    const tabs = document.querySelector<HTMLElement>(".toc-tabs");
+    const active = tabs?.querySelector<HTMLElement>("[data-tab].active");
+    const bar = tabs?.querySelector<HTMLElement>(".toc-tab-indicator");
+    if (!tabs || !active || !bar || !active.offsetWidth) return;
+    const transform = `translateX(${active.offsetLeft + active.offsetWidth / 2 - bar.offsetWidth / 2}px)`;
+    if (bar.style.transform === transform) return;
+    // A first placement or a resize puts it in place; only a tab change slides.
+    if (!animate || !bar.style.transform) bar.style.transition = "none";
+    bar.style.transform = transform;
+    if (bar.style.transition) { void bar.offsetWidth; bar.style.removeProperty("transition"); }
   }
 
   toc() {
@@ -1461,9 +1493,16 @@ export class Reader {
 
   /** Page curls use their own, longer duration; slides and fades keep the short one. */
   motionDuration() {
-    return this.pageEffect().startsWith("turn")
-      ? this.settings.turnDuration ?? 800
-      : this.settings.animationDuration;
+    if (!this.pageEffect().startsWith("turn")) return this.settings.animationDuration;
+    const duration = this.settings.turnDuration ?? 800;
+    if (this.isDouble()) return duration;
+    // The setting is the time for a sheet as wide as the reading width (a spread's page). A
+    // single page often fills the window and is about twice that wide: in the same time its
+    // corner swept twice as far and the turn looked hurried. A wider sheet swings more slowly,
+    // roughly with the square root of its width, like a pendulum's period with its length.
+    const sheet = $<HTMLIFrameElement>("book-frame")?.clientWidth ?? 0;
+    const ratio = sheet / Math.max(1, this.settings.width);
+    return Math.round(duration * Math.min(2, Math.max(1, Math.sqrt(ratio))));
   }
 
   async animatePageChange(direction: number, update: () => void, corner: Corner = "top"): Promise<void> {

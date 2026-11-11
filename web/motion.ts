@@ -13,6 +13,8 @@ type Transition = {
 
 /** Distance (CSS px) over which the spread spine fades as a soft flap's corner reaches it. */
 const SPINE_FADE = 36;
+/** Milliseconds over which a landed page turn fades into the live page (see turnPage). */
+const LANDING_FADE = 160;
 
 /** Two read-only EPUB snapshots; the live document commits exactly once underneath. */
 export class ReaderMotion {
@@ -108,8 +110,9 @@ export class ReaderMotion {
     // The new snapshot is only a source for StPageFlip's pages. Left visible it
     // covers the old page for the whole setup and flashes the destination.
     newPage.style.visibility = 'hidden';
-    // Keep the browser-only library out of Node-side reader tests and non-turn loads.
-    const { PageFlip } = await import('page-flip/dist/js/page-flip.module.js');
+    // Keep the browser-only engine (StPageFlip, vendored in web/vendor/page-flip) out of Node-side
+    // reader tests and non-turn loads.
+    const { PageFlip } = await import('./vendor/page-flip/PageFlip.ts');
     const { overlay, controller } = transaction;
     const signal = controller.signal;
     const host = document.createElement('div');
@@ -159,7 +162,7 @@ export class ReaderMotion {
       if (signal.aborted) onAbort();
     });
     if (signal.aborted) throw aborted();
-    host.dataset.orientation = flip.getOrientation();
+    host.dataset.orientation = flip.getOrientation() ?? '';
     // Portrait lays out one full-width page even in a wide window; a spread needs two.
     if (flip.getOrientation() !== (spread ? 'landscape' : 'portrait')) throw new Error('无法初始化翻页');
     // Single: [resting page, page revealed under the curl, copy of the resting page for the flap].
@@ -200,7 +203,7 @@ export class ReaderMotion {
     // dropping frames. The resting pages stay in the root layer and keep ClearType text.
     // StPageFlip rewrites each page's cssText as it draws, so drawFrame reapplies the hint.
     const resting = spread ? (forward ? [0, 1] : [2, 3]) : [startPage];
-    let moving = [...host.querySelectorAll<HTMLElement>('.stf__item')].filter((_, index) => !resting.includes(index));
+    const moving = [...host.querySelectorAll<HTMLElement>('.stf__item')].filter((_, index) => !resting.includes(index));
     const promote = () => { for (const item of moving) item.style.willChange = 'transform'; };
     promote();
     // Portrait soft flips normally clone a page synchronously. A ready copy preserves
@@ -298,16 +301,11 @@ export class ReaderMotion {
       }
       first = frames[0];
       const hold = Math.ceil(frames.length * 34 / Math.max(time, 1));
-      // While the landing pose is held, return the moved pages to the root layer so their
-      // text is back to ClearType before the live page replaces them; the one-off re-raster
-      // happens while nothing moves.
+      // The moved pages keep their layers while the landing pose is held. Leaving them there
+      // switched their text from grayscale to ClearType in a single frame, a visible jump in
+      // stroke weight on a page that had just come to rest; the landing fade below eases it.
       const pose = frames.at(-1)!;
-      const settle = () => {
-        pose();
-        for (const item of moving) item.style.willChange = '';
-        moving = [];
-      };
-      startAnimation([...frames.slice(0, -1), pose, ...Array(hold).fill(settle)],
+      startAnimation([...frames.slice(0, -1), pose, ...Array(hold).fill(pose)],
         time * (frames.length + hold) / frames.length, done);
     };
     await new Promise(resolve => requestAnimationFrame(resolve));
@@ -324,7 +322,13 @@ export class ReaderMotion {
       signal.addEventListener('abort', onAbort, { once: true });
       flip.on('changeState', event => {
         host.dataset.state = String(event.data);
-        if (event.data === 'read') finish();
+        if (event.data !== 'read') return;
+        // The flip has landed and the engine's last frame shows the landing pose. Stop drawing:
+        // its next frame would show the book's resting spread, which after an uncurl (a forward
+        // flip replayed backwards) is the page being left. That page then showed through the
+        // landing fade, flashing the old page after every backward single-page turn.
+        render.stop();
+        finish();
       });
       if (ahead) flip.flipNext(corner); else flip.flipPrev(corner);
       // The resting spread of an uncurl is the previous page. Pose the fully turned
@@ -335,6 +339,13 @@ export class ReaderMotion {
       oldPage.remove(); newPage.remove();
       if (signal.aborted) onAbort();
     });
+    // Landing: the turned pages are compositor layers, whose text Chromium draws in grayscale,
+    // while the live page underneath has ClearType. Show the live page and fade the landed
+    // sheet out over it, so the text eases into ClearType instead of jumping in stroke weight.
+    transaction.frame.style.visibility = transaction.visibility;
+    const fade = overlay.animate([{ opacity: 1 }, { opacity: 0 }], { duration: LANDING_FADE, easing: 'ease-out', fill: 'forwards' });
+    fade.updatePlaybackRate(this.speed);
+    transaction.animations.push(fade);
   }
 
   async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false,

@@ -162,16 +162,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  page-flip@2.0.7: f1d59e3c5d939b47288e78c9b0b453bb145868993db978cafb3e64c709bad353
-
 importers:
 
   .:
-    dependencies:
-      page-flip:
-        specifier: 2.0.7
-        version: 2.0.7(patch_hash=f1d59e3c5d939b47288e78c9b0b453bb145868993db978cafb3e64c709bad353)
     devDependencies:
       '@material-symbols/svg-400':
         specifier: 0.48.0
@@ -516,9 +509,6 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  page-flip@2.0.7:
-    resolution: {integrity: sha512-96lQFUUz7r/LZzEUZJ3yBIMEKU9+m8HMFDzTvTdD6P7Ag/wXINjp9n0W7b4wanwnDbQETo4uNUoL3zMqpFxwGA==}
-
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -775,8 +765,6 @@ snapshots:
       lightningcss-win32-x64-msvc: 1.33.0
 
   nanoid@3.3.20: {}
-
-  page-flip@2.0.7(patch_hash=f1d59e3c5d939b47288e78c9b0b453bb145868993db978cafb3e64c709bad353): {}
 
   picocolors@1.1.1: {}
 

@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Page flip pose probe</title>
+<!-- Draws single flip poses for scripts/bench-flip-pose.ts, which compares them with the
+     original StPageFlip. Not part of the test suite. -->
+<style>
+  body { margin: 0; background: #fff; }
+  #host { position: absolute; left: 20px; top: 20px; width: 600px; height: 400px; }
+  .page { box-sizing: border-box; padding: 30px; font: 28px/1.6 'Microsoft YaHei'; color: #222; }
+  /* Colours from a stylesheet: the original engine replaces each page's inline cssText. */
+  [data-tone="0"] { background: #fde2e4; } [data-tone="1"] { background: #e2ece9; }
+  [data-tone="2"] { background: #dfe7fd; } [data-tone="3"] { background: #fff1c1; }
+</style>
+<pre id="result" style="position:absolute;top:440px">RUNNING</pre>
+<div id="host"></div>
+<script type="module">
+import { PageFlip } from 'PAGE_FLIP_MODULE';
+const params = new URLSearchParams(location.search);
+const spread = params.get('spread') === '1', density = params.get('density') ?? 'soft';
+const corner = params.get('corner') ?? 'top', forward = params.get('direction') !== 'back';
+const host = document.getElementById('host');
+const width = spread ? 300 : 600;
+const pages = Array.from({ length: spread ? 4 : 3 }, (_, i) => {
+  const page = document.createElement('div');
+  page.className = 'page'; page.dataset.density = density;
+  page.dataset.tone = String(i);
+  page.textContent = `第 ${i + 1} 页 阅读是一段安静的时光。`;
+  return page;
+});
+const flip = new PageFlip(host, { width, height: 400, size: 'fixed', usePortrait: !spread, autoSize: false,
+  startPage: spread ? (forward ? 0 : 2) : 0, drawShadow: true, maxShadowOpacity: .32, flippingTime: 1000,
+  showCover: false, useMouseEvents: false, showPageCorners: false, mobileScrollSupport: false, clickEventForward: false });
+await new Promise(resolve => { flip.on('init', resolve); flip.loadFromHTML(pages); });
+for (let i = 0; i < pages.length; i++) { flip.getPage(i).setDensity(density); flip.getPage(i).setDrawingDensity(density); }
+const render = flip.getRender(), controller = flip.getFlipController();
+const rect = render.getRect();
+// Start the flip the way flipNext/flipPrev do, then pose it at fraction p of its path.
+const start = forward ? { x: rect.left + rect.pageWidth * 2 - 10, y: corner === 'top' ? 1 : rect.height - 2 }
+  : { x: 10, y: corner === 'top' ? 1 : rect.height - 2 };
+const margin = rect.height / 10;
+// start() and the first do() share a task, as in flip(): a draw in between would discard the
+// temporary copy of the turning page while no flip is running yet.
+window.pose = p => {
+  controller.start(start);
+  const from = { x: rect.pageWidth - margin, y: corner === 'top' ? margin : rect.height - margin };
+  const to = { x: -rect.pageWidth, y: corner === 'top' ? 0 : rect.height };
+  controller.do({ x: from.x + (to.x - from.x) * p, y: from.y + (to.y - from.y) * p });
+  render.drawFrame();
+};
+document.documentElement.dataset.result = 'pass';
+</script>

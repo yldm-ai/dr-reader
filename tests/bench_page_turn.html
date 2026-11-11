@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Soft page turn benchmark</title>
+<!-- Run with: node --experimental-strip-types scripts/bench-page-turn.ts (not part of the test suite). -->
+<link rel="stylesheet" href="../web/styles.css">
+<style>body { margin: 0; } .reader-view { position: static; }</style>
+<pre id="result">RUNNING</pre>
+<div id="page-surface" class="page-surface" style="position:relative;width:900px;height:860px;--reading-paper:#fffaf3">
+  <iframe id="book-frame" sandbox="allow-same-origin" style="width:100%;height:100%;border:0"></iframe>
+</div>
+<script type="module">
+import { ReaderMotion } from '../web/motion.ts';
+const host = document.getElementById('page-surface'), frame = document.getElementById('book-frame');
+const load = html => new Promise(resolve => { frame.onload = resolve; frame.srcdoc = html; });
+const paragraph = '阅读是一段安静的时光。纸页翻过时，光线在纸面上缓缓移动，文字随纸张一起弯曲又展平。这是一段用来衡量翻页流畅度的原创测试文字，排满整页，让每一帧都需要真实的绘制工作。';
+const book = (width, columns) => `<style>html{overflow:hidden;background:#fffaf3}body{margin:0;width:${width * 3}px;height:860px;columns:${columns * 3};column-gap:88px;padding:44px;box-sizing:border-box;color:#37352f;font:19px/1.9 'Microsoft YaHei'}p{margin:0 0 1em;text-align:justify}</style>${Array.from({ length: 60 }, () => `<p>${paragraph}</p>`).join('')}`;
+
+/**
+ * One turn. User-timing marks bound the moving phase in the trace (scripts/bench-page-turn.ts);
+ * a MutationObserver sets them, so the benchmark itself asks for no animation frames.
+ */
+async function measure(motion, effect, direction, spread, width) {
+  let moving = false;
+  // ?busy=N blocks the main thread for N ms every 50 ms while the sheet moves, like the app's own
+  // work during a turn (laying out the next chapter, reporting progress, garbage collection).
+  const busy = Number(new URLSearchParams(location.search).get('busy') ?? 0);
+  let blocker;
+  const observer = new MutationObserver(() => {
+    const state = host.querySelector('.stpageflip-host')?.dataset.state;
+    if (state === 'flipping' && !moving) {
+      moving = true; performance.mark('turn-start');
+      if (busy) blocker = setInterval(() => { const end = performance.now() + busy; while (performance.now() < end); }, 50);
+    }
+    if (state !== 'flipping' && moving) { moving = false; performance.mark('turn-end'); clearInterval(blocker); }
+  });
+  observer.observe(host, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
+  const doc = frame.contentDocument;
+  doc.defaultView.scrollTo(direction > 0 ? 0 : width, 0);
+  const t0 = performance.now();
+  await motion.change(host, effect, 700, direction, () => doc.defaultView.scrollTo(direction > 0 ? width : 0, 0), false, 'bottom', spread);
+  const total = performance.now() - t0;
+  if (moving) performance.mark('turn-end');
+  clearInterval(blocker);
+  observer.disconnect();
+  await new Promise(resolve => setTimeout(resolve, 120));
+  return total;
+}
+
+try {
+  const motion = new ReaderMotion();
+  const results = {};
+  const longFrames = [];
+  new PerformanceObserver(list => { for (const entry of list.getEntries()) longFrames.push(entry.duration); })
+    .observe({ type: 'long-animation-frame', buffered: false });
+  // ?single=W runs only a single page W px wide (frame captures).
+  const only = Number(new URLSearchParams(location.search).get('single') ?? 0);
+  for (const [name, spread, width] of only ? [['single', false, only]] : [['single', false, 900], ['spread', true, 1500]]) {
+    host.style.width = `${width}px`;
+    await load(book(width, spread ? 2 : 1));
+    await frame.contentDocument.fonts.ready;
+    for (const direction of [1, -1]) {
+      let totals = 0;
+      longFrames.length = 0;
+      const rounds = Number(new URLSearchParams(location.search).get('rounds') ?? 5);
+      for (let round = 0; round < rounds; round++) totals += await measure(motion, 'turn', direction, spread, width);
+      results[`${name}-${direction > 0 ? 'forward' : 'backward'}`] = { longFrames: longFrames.length, turnMs: Math.round(totals / rounds) };
+    }
+  }
+  window.benchResult = results;
+  document.getElementById('result').textContent = JSON.stringify(results, null, 1);
+  document.documentElement.dataset.result = 'pass';
+} catch (error) {
+  document.getElementById('result').textContent = `FAIL ${error.stack}`;
+  document.documentElement.dataset.result = 'fail';
+}
+</script>

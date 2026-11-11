@@ -999,10 +999,12 @@ body[data-animations="false"] .selection-menu {
   position: relative;
   overflow: hidden;
 }
+/* The right padding is the overlay scrollbar's lane (10px, 2px from the edge), so the thumb never
+   covers text. */
 .toc-scroll {
   height: 100%;
   overflow: auto;
-  padding: 0 8px 16px;
+  padding: 0 14px 16px 8px;
 }
 .toc-panel[data-pinned="false"] {
   position: absolute;
@@ -1036,7 +1038,7 @@ body[data-animations="false"] .selection-menu {
   border-bottom: 1px solid var(--border);
   margin-bottom: 8px;
 }
-.toc-header .toc-tabs { position: static; flex: 1; min-width: 0; border: 0; margin: 0; }
+.toc-header .toc-tabs { position: relative; flex: 1; min-width: 0; border: 0; margin: 0; }
 .toc-header .toc-tabs button { padding: 12px 4px; min-width: 0; }
 .toc-pin { flex: none; width: 28px; height: 28px; justify-content: center; padding: 4px; }
 .toc-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
@@ -1064,16 +1066,19 @@ body[data-animations="false"] .selection-menu {
 .toc-tabs button.active {
   color: var(--text);
 }
-.toc-tabs button.active::after {
-  content: "";
+/* One bar for the strip (reader.ts placeTabIndicator) slides to the active tab. */
+.toc-tab-indicator {
   position: absolute;
+  left: 0;
   bottom: 0;
-  left: calc(50% - 9px);
   width: 18px;
   height: 3px;
   border-radius: 2px;
   background: var(--accent);
+  pointer-events: none;
+  transition: transform 240ms var(--ease-ui);
 }
+body[data-animations="false"] .toc-tab-indicator { transition: none; }
 .toc-entry,
 .mark-entry {
   display: block;
@@ -3032,7 +3037,7 @@ body[data-animations="false"] .reader-footer { transition: none; }
 .ask-meta .text-button { height: 24px; padding: 0 6px; font-size: var(--text-caption); }
 .ask-error { color: var(--danger); overflow-wrap: anywhere; }
 .ask-form {
-  position: sticky; bottom: 0; margin: 0 -8px -16px; padding: 8px 8px 12px;
+  position: sticky; bottom: 0; margin: 0 -14px -16px -8px; padding: 8px 14px 12px 8px;
   background: var(--surface); border-top: 1px solid var(--border);
 }
 .ask-quote { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 6px; }

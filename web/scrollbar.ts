@@ -4,18 +4,25 @@
  * inset from both ends, drawn in a non-scrolling host and only shown while it is useful.
  *
  * `viewport` is the element that scrolls; `host` is a positioned ancestor that does not.
+ * `inset` keeps the track clear of the viewport's ends; a function is re-read on every update, for
+ * sticky headers and footers inside the viewport whose height changes. The track also never
+ * reaches into the host's rounded right-hand corners.
  */
+type Inset = { top: number; bottom: number };
+/** Gap between the track and a rounded corner or a sticky edge. */
+const CLEARANCE = 4;
+
 export class OverlayScrollbar {
   private readonly viewport: HTMLElement;
   private readonly host: HTMLElement;
-  private readonly inset: { top: number; bottom: number };
+  private readonly inset: Inset | (() => Inset);
   private readonly track: HTMLDivElement;
   private readonly thumb: HTMLDivElement;
   private frame = 0;
   private fadeTimer?: ReturnType<typeof setTimeout>;
   private drag?: { pointer: number; y: number; scrollTop: number };
 
-  constructor(viewport: HTMLElement, host: HTMLElement, inset = { top: 6, bottom: 6 }) {
+  constructor(viewport: HTMLElement, host: HTMLElement, inset: Inset | (() => Inset) = { top: 6, bottom: 6 }) {
     this.viewport = viewport;
     this.host = host;
     this.inset = inset;
@@ -46,8 +53,14 @@ export class OverlayScrollbar {
     if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.update(); });
   }
 
+  /** Re-measure the sticky parts an inset function depends on, e.g. after they appear. */
+  observe(...elements: Element[]): void {
+    const observer = new ResizeObserver(() => this.schedule());
+    for (const element of elements) observer.observe(element);
+  }
+
   private update(): void {
-    const { viewport, track, thumb, inset } = this;
+    const { viewport, track, thumb } = this;
     const { clientHeight, scrollHeight, scrollTop } = viewport;
     const scrollable = scrollHeight - clientHeight > 1;
     track.hidden = !scrollable;
@@ -57,6 +70,13 @@ export class OverlayScrollbar {
     for (let node: HTMLElement | null = viewport; node && node !== this.host; node = node.offsetParent as HTMLElement | null) {
       top += node.offsetTop; left += node.offsetLeft;
     }
+    const inset = typeof this.inset === 'function' ? { ...this.inset() } : { ...this.inset };
+    // Keep the ends out of the host's rounded corners (offsets are measured inside its border).
+    const style = getComputedStyle(this.host);
+    const border = parseFloat(style.borderTopWidth) || 0;
+    const below = this.host.clientHeight - top - clientHeight;
+    inset.top = Math.max(inset.top, (parseFloat(style.borderTopRightRadius) || 0) - border + CLEARANCE - top);
+    inset.bottom = Math.max(inset.bottom, (parseFloat(style.borderBottomRightRadius) || 0) - border + CLEARANCE - below);
     const length = Math.max(0, clientHeight - inset.top - inset.bottom);
     track.style.top = `${top + inset.top}px`;
     track.style.height = `${length}px`;

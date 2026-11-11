@@ -2899,7 +2899,7 @@ body[data-animations="false"] :is(.reader-toolbar, .corner-button) { transition:
 .reader-view :is(.page-surface, .reader-loading, .motion-page, .stpageflip-page) { background-image: var(--reading-texture, none); }
 
 /* Snapshot frames keep real EPUB layout and allow both sheets to move concurrently. */
-.page-motion { position: absolute; inset: 0; z-index: 8; overflow: hidden; pointer-events: none; isolation: isolate; perspective: 1600px; }
+.page-motion, .page-motion-standby { position: absolute; inset: 0; z-index: 8; overflow: hidden; pointer-events: none; isolation: isolate; perspective: 1600px; }
 .motion-page { position: absolute; inset: 0; background: var(--reading-paper, var(--paper)); }
 .motion-page iframe { display: block; border: 0; width: 100%; height: 100%; pointer-events: none; }
 /* Resident copies for interruptible slides and covers (page-strip.ts); only shown mid-turn. */
@@ -2960,12 +2960,18 @@ body > .page-surface { max-width: none; }
 }
 /* Above StPageFlip's pages (1–5) and curl shadows (10). */
 .stpageflip-host .stpageflip-spine { z-index: 11; }
-/* grabfold fold (motion.ts foldPage, fold-turn.ts): sheet face (1), uncovered page (2), the
-   shadow cast on it (3), the folded face carried over the crease (4), the spread's spine (6). */
-.fold-cast { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
-.fold-band { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+/* grabfold fold (motion.ts foldPage, fold-turn.ts): sheet face (1), the uncovered page and the
+   shadow cast on it (2), the folded face carried over the crease (4), the spread's spine (6).
+   Each of the last two is seen through a window turning with the crease, with a plane inside
+   turning back, so only transforms move. */
+.fold-uncovered { position: absolute; top: 0; height: 100%; z-index: 2; overflow: hidden; pointer-events: none; }
 .fold-cell { position: absolute; top: 0; height: 100%; z-index: 4; pointer-events: none; }
-.fold-flap { position: absolute; inset: 0; overflow: hidden; transform-origin: 0 0; will-change: transform; }
+.fold-half { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; will-change: transform; }
+.fold-plane { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+.fold-page { position: absolute; top: 0; }
+.fold-band { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+.fold-band.fold-shadow { left: auto; right: 0; transform-origin: 100% 0; }
+.fold-flap { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; will-change: transform; }
 .fold-face { position: absolute; top: 0; height: 100%; }
 .fold-lift { position: absolute; inset: 0; background: #fff; opacity: 0; }
 

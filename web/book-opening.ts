@@ -218,7 +218,8 @@ export class BookOpening {
    * window. Once the chapter is ready the cover swings open about the spine as a rigid board
    * (grabfold src/board.ts RigidSheet: perspective six page widths away, each face darkening as
    * it turns edge-on, a shadow thrown on the page it lifts off), while the book slides from
-   * centred-closed to centred-open (src/physics.ts closedShift), then the reader fades in.
+   * centred-closed to centred-open (src/physics.ts closedShift). As it lifts, the desk and the
+   * blank page under it fade to the reader's real page, and the cover fades as it comes down.
    */
   private closedBoard(source: OpeningCover): void {
     const ratio = source.ratio || 2 / 3;
@@ -284,7 +285,18 @@ export class BookOpening {
         transform: `scaleX(${Math.max(standing, 1e-4).toFixed(4)})` });
     }
     const options: KeyframeAnimationOptions = { duration, easing: 'linear', fill: 'forwards' };
+    // The text is ready: the desk and the blank first page give way to it as the cover lifts, so
+    // the cover opens onto the book's real page rather than onto an empty spread.
+    this.host.style.backgroundColor = 'transparent';
+    const reveal: KeyframeAnimationOptions = { duration: duration * .4, easing: 'ease-out', fill: 'forwards' };
     const animations = [
+      root.querySelector('.opening-cover-backdrop')!.animate([{ opacity: 1 }, { opacity: 0 }], reveal),
+      root.querySelector('.opening-board-page')!.animate([{ opacity: 1 }, { opacity: 0 }], reveal),
+      // Past upright only the cover's blank inside faces the reader; it fades on its way down and
+      // is gone by the time it would lie flat beside the text. (On the faces: opacity on the
+      // swinging board itself would flatten its 3D faces.)
+      root.querySelector('.opening-board-back')!.animate([{ opacity: 1 }, { opacity: 0 }],
+        { delay: duration * .35, duration: duration * .65, easing: 'ease-in', fill: 'both' }),
       root.querySelector('.opening-board-leaf')!.animate(leaf, options),
       root.querySelector('.opening-board-shift')!.animate(shift, options),
       root.querySelector('.opening-board-cast')!.animate(cast, options),
@@ -293,12 +305,8 @@ export class BookOpening {
     this.sheets.push(...animations);
     await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
     if (this.board !== root) return;
-    // The open book gives way to the first page of the text.
-    this.fade = this.host.animate([{ opacity: 1 }, { opacity: 0 }], {
-      delay: 120, duration: 450, easing: 'ease-in-out', fill: 'forwards',
-    });
-    await this.fade.finished.catch(() => {});
-    if (this.board === root) this.cancel();
+    // Nothing is left over the text.
+    this.cancel();
   }
 
   private fit(): void {

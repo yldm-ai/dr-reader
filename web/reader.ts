@@ -912,7 +912,8 @@ export class Reader {
     if (!this.doc || this.settings?.mode !== "paged") { this.motion.prepare(surface, "none", ""); return; }
     const view = this.doc.defaultView!;
     this.motion.prepare(surface, this.pageEffect(),
-      `${this.generation}|${this.chapter}|${view.innerWidth}x${view.innerHeight}|${JSON.stringify(this.settings)}|${this.annotationRevision ?? 0}`);
+      `${this.generation}|${this.chapter}|${view.innerWidth}x${view.innerHeight}|${JSON.stringify(this.settings)}|${this.annotationRevision ?? 0}`,
+      this.isDouble());
   }
 
   apply(settings: AppliedSettings): void {

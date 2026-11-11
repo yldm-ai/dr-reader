@@ -254,6 +254,10 @@ try {
           'the last soft-spread frame must land flat before showing the live page');
         check([...engine.querySelectorAll('.stf__outerShadow, .stf__innerShadow')]
           .every(shadow => getComputedStyle(shadow).opacity === '0'), 'curl shadows must vanish before cleanup');
+        // The sheet lands a fraction of a pixel short of the spine; what is left of the page being
+        // turned stood there as a hairline (white for an illustration on a dark theme).
+        const turned = engine.querySelectorAll('.stf__item')[engine.dataset.direction === 'forward' ? 1 : 2];
+        check(turned.style.opacity === '0', 'the page being turned must not linger as a hairline at the spine');
         check(host.querySelector('.stpageflip-spine')?.style.opacity === '1',
           'the spine must be fully back on the landing frame so cleanup does not pop it in');
         check(spineFaded.has(render), 'the spine must fade while the soft flap slides over it');
@@ -321,26 +325,28 @@ try {
       const label = `${effect} ${spread ? 'spread' : 'single'} ${direction}`;
       check(overlay.dataset.fold === (spread ? 'spread' : direction > 0 ? 'single' : 'arriving'), `${label}: wrong fold plan`);
       const animations = overlay.getAnimations({ subtree: true });
-      check(animations.length === (spread ? 5 : 6), `${label}: expected one animation per moving part (${animations.length})`);
+      check(animations.length === (spread ? 7 : 8), `${label}: expected one animation per moving part (${animations.length})`);
+      // Cuts made by animated clip-paths ran on another clock than the folded face's transform,
+      // which then showed on the wrong side of the crease: only transforms and opacity move.
       check(animations.every(animation => animation.effect.getKeyframes().every(frame =>
-        Object.keys(frame).every(key => ['offset', 'easing', 'composite', 'computedOffset', 'transform', 'clipPath', 'opacity'].includes(key)))),
-        `${label}: the fold may only animate transform, clip-path and opacity`);
-      check(overlay.querySelectorAll('.motion-page iframe').length === (spread ? 3 : 2) &&
+        Object.keys(frame).every(key => ['offset', 'easing', 'composite', 'computedOffset', 'transform', 'opacity'].includes(key)))),
+        `${label}: the fold may only animate transform and opacity`);
+      const arriving = !spread && direction < 0;
+      check(overlay.querySelectorAll('.motion-page iframe').length === (spread || arriving ? 3 : 2) &&
         (!spread || overlay.querySelector('.fold-face iframe').contentWindow.scrollX === target),
         `${label}: a spread's flap carries a copy of the facing page`);
+      const window = overlay.querySelector('.fold-uncovered .fold-half');
+      const shown = window.querySelector('iframe').contentWindow.scrollX;
+      check(shown === (arriving ? start : target), `${label}: the uncovered window must show ${arriving ? 'the page on show' : 'the destination'}`);
       // The first frame is the page on show: nothing of the destination shows yet.
       animations.forEach(animation => { animation.pause(); animation.currentTime = 0; });
-      const panes = [...overlay.querySelectorAll(':scope > .motion-page')];
-      const top = panes.find(pane => pane.style.zIndex === '2');
-      const shown = top.querySelector('iframe').contentWindow.scrollX;
-      const clipArea = () => {
-        const points = getComputedStyle(top).clipPath.replace(/^polygon\(|\)$/g, '').split(', ').map(pair => pair.split(' ').map(parseFloat));
-        return Math.abs(points.reduce((sum, [x, y], i) => { const [nx, ny] = points[(i + 1) % points.length]; return sum + x * ny - nx * y; }, 0)) / 2;
+      const seen = (x, y) => {
+        const local = new DOMMatrix(getComputedStyle(window).transform).inverse().transformPoint(new DOMPoint(x, y));
+        return local.x >= 0 && local.x <= window.offsetWidth && local.y >= 0 && local.y <= window.offsetHeight;
       };
-      if (direction > 0) check(shown === target && clipArea() < 2 * page, `${label}: the destination must start hidden`);
-      else if (!spread) check(shown === start && clipArea() > page * 359, `${label}: the page on show must start whole`);
-      else check(shown === target && clipArea() < 2 * page, `${label}: the destination must start hidden`);
-      animations.forEach(animation => { animation.currentTime = 320; });
+      const middle = seen(page / 2, 180), freeEdge = seen(direction > 0 ? page - 3 : 3, 180);
+      if (arriving) check(middle && freeEdge, `${label}: the page on show must start whole`);
+      else check(!middle && !freeEdge, `${label}: the destination must start hidden`);      animations.forEach(animation => { animation.currentTime = 320; });
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       await window.captureMotion?.(`${effect}-${spread ? 'spread' : 'single'}-${direction > 0 ? 'forward' : 'backward'}`);
       animations.forEach(animation => animation.play());
@@ -349,6 +355,43 @@ try {
         `${label}: a finished fold must show the live page`);
     }
   }
+  // A settled page keeps a loaded copy ready, so the next turn covers the live page at once.
+  host.style.width = '600px';
+  const standbyHtml = `<style>html{overflow:hidden}body{margin:0;display:flex;width:2400px;height:360px;background:#fffaf3}section{flex:0 0 600px;padding:30px;box-sizing:border-box}</style>${
+    Array.from({ length: 4 }, (_, i) => `<section><h1>第 ${i + 1} 页</h1></section>`).join('')}`;
+  await load(standbyHtml);
+  motion.prepare(host, 'turn-fold', 'standby');
+  await until(() => host.querySelector('.page-motion-standby .motion-page')?.style.visibility === 'visible');
+  const standby = host.querySelector('.page-motion-standby');
+  check(standby.querySelector('iframe').contentWindow.scrollX === 0 && getComputedStyle(standby).opacity === '0',
+    'the ready copy must show the page on show without being seen');
+  // Copies for the turn's own windows are loaded too, one at a time, kept out of sight.
+  await until(() => standby.querySelectorAll(':scope > .motion-page').length === 3);
+  const pooled = [...standby.querySelectorAll(':scope > .motion-page')].slice(1);
+  check(pooled.every(pane => pane.style.visibility === 'hidden'), 'pooled copies must stay hidden until placed');
+  // Moving a frame into place must keep its document (moveBefore); a reload would lose this mark.
+  for (const pane of pooled) pane.querySelector('iframe').contentWindow.__pooled = true;
+  pending = motion.change(host, 'turn-fold', 400, 1, () => frame.contentWindow.scrollTo(600, 0));
+  await until(() => host.querySelector('.page-motion .fold-flap')?.getAnimations().length);
+  check(host.querySelector('.page-motion') === standby && !host.querySelector('.page-motion-standby'),
+    'the turn must take over the ready copy instead of loading another');
+  const placed = host.querySelector('.fold-uncovered .motion-page');
+  check(pooled.includes(placed) && placed.querySelector('iframe').contentWindow.__pooled === true &&
+    placed.querySelector('iframe').contentWindow.scrollX === 600,
+    'the uncovered page must be a pooled copy, moved without reloading and scrolled to the destination');
+  await pending;
+  await until(() => host.querySelector('.page-motion-standby .motion-page')?.style.visibility === 'visible');
+  check(host.querySelector('.page-motion-standby iframe').contentWindow.scrollX === 600, 'a new copy must follow the landed page');
+  // A page changed underneath (here scrolled away) makes the copy stale; the turn loads its own.
+  frame.contentWindow.scrollTo(1200, 0);
+  const stale = host.querySelector('.page-motion-standby');
+  pending = motion.change(host, 'turn-fold', 400, 1, () => frame.contentWindow.scrollTo(1800, 0));
+  await until(() => host.querySelector('.page-motion'));
+  check(host.querySelector('.page-motion') !== stale && !stale.isConnected, 'a stale copy must not be used');
+  await pending;
+  check(frame.contentWindow.scrollX === 1800, 'the turn after a stale copy must still land');
+  motion.prepare(host, 'none', '');
+  check(!host.querySelector('.page-motion-standby'), 'turning motion off must drop the ready copy');
   PageFlip.prototype.getRender = getRender;
   check(landed === 2, 'both soft-spread directions must paint their flat landing frame');
   host.style.width = '600px';

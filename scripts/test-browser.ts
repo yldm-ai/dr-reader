@@ -27,8 +27,8 @@ try {
     if (name === 'book_opening') await page.exposeFunction('captureOpening', (label: string) => page.screenshot({ path: resolve(directory, `${label}.png`) }));
     try {
       await page.goto(`http://127.0.0.1:${port}/tests/${name}.html`);
-      // reader_motion runs some twenty page turns, each with its landing fade.
-      await page.waitForSelector('html[data-result]', { timeout: 30000, state: 'attached' });
+      // reader_motion runs some twenty page turns, each with its eased landing and fade.
+      await page.waitForSelector('html[data-result]', { timeout: 45000, state: 'attached' });
       const passed = await page.locator('html').getAttribute('data-result') === 'pass';
       await writeFile(resolve(directory, `${name}.html`), await page.content());
       await writeFile(resolve(directory, `${name}.log`), errors.join('\n'));
@@ -1164,8 +1164,8 @@ try {
       if (name === 'settings_controls') {
         await page.setViewportSize({ width: 360, height: 800 });
         await page.reload();
-        // reader_motion runs some twenty page turns, each with its landing fade.
-      await page.waitForSelector('html[data-result]', { timeout: 30000, state: 'attached' });
+        // reader_motion runs some twenty page turns, each with its eased landing and fade.
+      await page.waitForSelector('html[data-result]', { timeout: 45000, state: 'attached' });
         if (await page.locator('html').getAttribute('data-result') !== 'pass') throw Error(`narrow settings: ${await page.locator('#result').textContent()}`);
       }
       if (name === 'book_opening') {

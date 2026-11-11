@@ -1,6 +1,33 @@
 import { copyHighlights } from './highlight-copy.ts';
 import { PAGE_EASING, PageStrip } from './page-strip.ts';
 
+/** A loaded copy of the page on show, kept so the next transition can cover the live page at once. */
+type Standby = {
+  key: string; revision: number; doc: Document | null; x: number; y: number;
+  overlay: HTMLDivElement; controller: AbortController; pane: HTMLDivElement | null;
+  /** Further loaded copies of the chapter for the turn to place where it needs them (see place). */
+  pool: HTMLDivElement[];
+};
+
+/** Ready copies of the chapter a transition places instead of loading (see place). */
+type Pool = { doc: Document | null; panes: HTMLDivElement[] };
+
+/**
+ * How many copies of the chapter a transition places besides the one covering the live page: each
+ * StPageFlip page has its own (a spread four; a single soft page three, a hard one two), a fold its
+ * uncovered page and either the facing page's face or, turning back, the arriving page.
+ */
+export function poolSize(effect: string, spread: boolean): number {
+  if (effect === 'turn') return spread ? 4 : 3;
+  if (effect === 'turn-hard') return spread ? 4 : 2;
+  if (effect === 'turn-fold' || effect === 'turn-fold-edge') return 2;
+  return effect === 'none' ? 0 : 1;
+}
+
+/** Waits for the main thread to be idle, so background copies do not hold up reading. */
+const idle = () => new Promise<void>(resolve => 'requestIdleCallback' in window
+  ? requestIdleCallback(() => resolve(), { timeout: 600 }) : setTimeout(resolve, 50));
+
 type Transition = {
   controller: AbortController;
   overlay: HTMLDivElement;
@@ -9,10 +36,37 @@ type Transition = {
   animations: Animation[];
   cleaned: boolean;
   disposeFlip?: () => void;
+  pool?: Pool;
 };
 
 /** Distance (CSS px) over which the spread spine fades as a soft flap's corner reaches it. */
 const SPINE_FADE = 36;
+/**
+ * Share of a StPageFlip turn's path over which the sheet slows to rest (see settle). The library
+ * moves the sheet at one speed and stops it dead on the page; the last stretch now eases down.
+ */
+const SETTLE = .22;
+
+/**
+ * Replays a turn's frames at the library's pace and then slows smoothly to rest over the last
+ * SETTLE of the path, ending at zero speed. The middle keeps its speed, so the turn takes SETTLE
+ * longer. The frames are one per pixel or so of the path, so picking the nearest stays smooth
+ * even at the slow end.
+ */
+export function settle<T>(frames: T[], time: number): { frames: T[]; time: number } {
+  const count = frames.length;
+  if (count < 3) return { frames, time };
+  const total = Math.round((count - 1) * (1 + SETTLE)) + 1;
+  // Normalised to the longer turn: the original pace, then a constant deceleration.
+  const speed = 1 + SETTLE, cruise = (1 - SETTLE) / (1 + SETTLE);
+  const braking = speed / (2 * (1 - cruise));
+  return { time: time * (1 + SETTLE), frames: Array.from({ length: total }, (_, index) => {
+    const at = index / (total - 1);
+    const share = at <= cruise ? speed * at : 1 - braking * (1 - at) ** 2;
+    return frames[Math.min(count - 1, Math.round(share * (count - 1)))];
+  }) };
+}
+
 /** Milliseconds over which a landed page turn fades into the live page (see turnPage). */
 const LANDING_FADE = 160;
 
@@ -24,6 +78,11 @@ export class ReaderMotion {
   private stripKey = '';
   private revision = 0;
   private speed = 1;
+  private standby: Standby | null = null;
+  private standbyTimer = 0;
+  private motionKey = '';
+  private surface: HTMLElement | null = null;
+  private poolSize = 0;
 
   /** Wheel input keeps every page transition, speeding up when more turns are waiting. */
   setSpeed(speed: number) {
@@ -41,8 +100,13 @@ export class ReaderMotion {
    * Called once the live chapter's layout has settled. Slides and covers keep loaded copies of
    * it so in-chapter turns start immediately; `key` changes with chapter, layout or highlights.
    */
-  prepare(element: HTMLElement, effect: string, key: string) {
+  prepare(element: HTMLElement, effect: string, key: string, spread = false) {
     const frame = element.querySelector<HTMLIFrameElement>('#book-frame');
+    const size = poolSize(effect, spread);
+    if (key !== this.motionKey || size !== this.poolSize || effect === 'none' || !this.allowed) this.dropStandby();
+    this.motionKey = key; this.surface = element; this.poolSize = size;
+    // In-chapter slides and covers keep their own loaded copies (the strip below).
+    if (frame && this.allowed && effect !== 'none' && effect !== 'slide' && effect !== 'cover') this.scheduleStandby();
     if (!frame || !this.allowed || (effect !== 'slide' && effect !== 'cover')) { this.strip.invalidate(); return; }
     if (key !== this.stripKey && !this.strip.active) this.strip.invalidate();
     this.stripKey = key;
@@ -57,7 +121,85 @@ export class ReaderMotion {
     transaction.frame.style.visibility = transaction.visibility;
     if (this.active === transaction) this.active = null;
   }
+  /**
+   * Every transition first covers the live page with a copy of it, and loading that copy (the whole
+   * chapter again, its images decoded) was most of the pause between a click and the page moving.
+   * Once the page has settled, a copy of it is loaded in the background into an invisible overlay;
+   * the next transition takes it over if the page has not changed since.
+   */
+  private scheduleStandby() {
+    clearTimeout(this.standbyTimer);
+    this.standbyTimer = window.setTimeout(() => this.buildStandby(), 150);
+  }
+  private buildStandby() {
+    const surface = this.surface, frame = surface?.querySelector<HTMLIFrameElement>('#book-frame');
+    if (!surface || !frame || !this.allowed || this.active || !frame.isConnected) return;
+    const view = frame.contentWindow, doc = frame.contentDocument;
+    if (!view || !doc?.body) return;
+    const current = this.standby;
+    if (current && current.key === this.motionKey && current.revision === this.revision && current.doc === doc &&
+      current.x === view.scrollX && current.y === view.scrollY) return;
+    this.dropStandby();
+    const overlay = document.createElement('div');
+    overlay.className = 'page-motion-standby'; overlay.setAttribute('aria-hidden', 'true');
+    // Invisible but laid out: hidden visibility would not hold, the loaded pane opts back in.
+    overlay.style.opacity = '0';
+    surface.append(overlay);
+    const standby: Standby = { key: this.motionKey, revision: this.revision, doc, x: view.scrollX, y: view.scrollY,
+      overlay, controller: new AbortController(), pane: null, pool: [] };
+    this.standby = standby;
+    const signal = standby.controller.signal, size = this.poolSize;
+    // The covering copy first; the rest one at a time when the reader is idle. A turn takes whatever
+    // is ready and loads the remainder itself.
+    void (async () => {
+      standby.pane = await this.snapshot(frame, overlay, signal);
+      for (let index = 0; index < size && this.standby === standby; index++) {
+        await idle();
+        if (this.standby !== standby) return;
+        const pane = await this.snapshot(frame, overlay, signal);
+        pane.style.visibility = 'hidden';
+        standby.pool.push(pane);
+      }
+    })().catch(() => { if (this.standby === standby) this.dropStandby(); });
+  }
+  /** The ready copy, if it still shows exactly what the live frame does; it then belongs to the caller. */
+  private takeStandby(frame: HTMLIFrameElement): Standby | null {
+    const standby = this.standby, view = frame.contentWindow;
+    const fresh = standby?.pane && view && standby.key === this.motionKey && standby.revision === this.revision &&
+      standby.doc === frame.contentDocument && standby.x === view.scrollX && standby.y === view.scrollY;
+    if (!fresh) { this.dropStandby(); return null; }
+    this.standby = null;
+    return standby;
+  }
+  private dropStandby() {
+    clearTimeout(this.standbyTimer);
+    this.standby?.controller.abort();
+    this.standby?.overlay.remove();
+    this.standby = null;
+  }
+  /**
+   * Puts a copy of source (the live frame, or the snapshot of the page turned from) into parent.
+   * Within a chapter every copy is of the same document at another scroll position, so a ready copy
+   * from the pool is moved there and scrolled, instead of loading the chapter again. moveBefore keeps
+   * the moved frame's document; appending would reload it. Otherwise it loads a fresh snapshot.
+   */
+  private async place(transaction: Transition, source: HTMLIFrameElement, parent: HTMLElement, signal: AbortSignal) {
+    const pool = transaction.pool, from = source.contentWindow;
+    // The live frame qualifies only if the turn stayed in the chapter the copies were made of.
+    const same = source !== transaction.frame || source.contentDocument === pool?.doc;
+    const pane = same && from && 'moveBefore' in Element.prototype ? pool?.panes.pop() : undefined;
+    if (pane) {
+      try {
+        parent.moveBefore(pane, null);
+        pane.querySelector('iframe')!.contentWindow!.scrollTo(from!.scrollX, from!.scrollY);
+        pane.style.visibility = 'visible';
+        return pane;
+      } catch { pane.remove(); }
+    }
+    return this.snapshot(source, parent, signal);
+  }
   cancel() {
+    this.dropStandby();
     this.revision++;
     this.strip.reset();
     if (this.active) {
@@ -105,13 +247,8 @@ export class ReaderMotion {
     });
   }
 
-  private async turnPage(transaction: Transition, oldPage: HTMLDivElement, newPage: HTMLDivElement,
+  private async turnPage(transaction: Transition, oldPage: HTMLDivElement,
     effect: string, duration: number, direction: number, corner: 'top' | 'bottom', spread = false) {
-    if (effect === 'turn-fold' || effect === 'turn-fold-edge')
-      return this.foldPage(transaction, oldPage, newPage, duration, direction, corner, spread, effect === 'turn-fold-edge');
-    // The new snapshot is only a source for StPageFlip's pages. Left visible it
-    // covers the old page for the whole setup and flashes the destination.
-    newPage.style.visibility = 'hidden';
     // Keep the browser-only engine (StPageFlip, vendored in web/vendor/page-flip) out of Node-side
     // reader tests and non-turn loads.
     const { PageFlip } = await import('./vendor/page-flip/PageFlip.ts');
@@ -169,11 +306,13 @@ export class ReaderMotion {
     if (flip.getOrientation() !== (spread ? 'landscape' : 'portrait')) throw new Error('无法初始化翻页');
     // Single: [resting page, page revealed under the curl, copy of the resting page for the flap].
     // Spread: book order, so a backward turn starts on the second spread and flips back.
-    const sources = spread ? (forward ? [oldPage, oldPage, newPage, newPage] : [newPage, newPage, oldPage, oldPage])
-      : (forward ? [oldPage, newPage, oldPage] : [newPage, oldPage, newPage]).slice(0, pages.length);
+    // The new page is copied straight from the live frame, which already shows it; the old one only
+    // survives in its snapshot.
+    const old = oldPage.querySelector('iframe')!, live = transaction.frame;
+    const sources = spread ? (forward ? [old, old, live, live] : [live, live, old, old])
+      : (forward ? [old, live, old] : [live, old, live]).slice(0, pages.length);
     // Load snapshots after StPageFlip has reparented the shells: moving an iframe resets its document.
-    const panes = await Promise.all(pages.map((page, index) =>
-      this.snapshot(sources[index].querySelector('iframe')!, page, signal)));
+    const panes = await Promise.all(pages.map((page, index) => this.place(transaction, sources[index], page, signal)));
     if (signal.aborted) throw aborted();
     // Each half of a spread shows the whole spread snapshot, cropped by its half-width shell.
     if (spread) panes.forEach((pane, index) => {
@@ -218,6 +357,12 @@ export class ReaderMotion {
     // the last ~40px when the live page returns. Hold the final pose briefly.
     const render = flip.getRender();
     let landingShadowOpacity = 1;
+    // A soft spread lands a fraction of a pixel short of the spine (see startAnimation): the page
+    // being turned still stood there as a hairline through the hold and the landing fade, a white
+    // line down the middle when that page was an illustration on a dark theme. It fades out as the
+    // sheet comes down, when all that is left of it is that sliver.
+    let frontOpacity = 1;
+    const front = forward ? 1 : 2;
     // The spine copy that covered the old snapshot; it moves into the engine at the reveal.
     const spine = overlay.querySelector<HTMLElement>(':scope > .stpageflip-spine');
     // The engine records each frame's styles for the compositor; the spine fade is one of them.
@@ -243,6 +388,10 @@ export class ReaderMotion {
         item.style.transform = `translate(${x}px, ${y}px)`;
         // A hidden backface also forces a layer; a page facing forward does not need it.
         item.style.backfaceVisibility = 'visible';
+      }
+      if (spread && density === 'soft') {
+        const sheet = host.querySelectorAll<HTMLElement>('.stf__item')[front];
+        if (sheet) sheet.style.opacity = String(frontOpacity);
       }
       // Shadows only ever mirror (rotateY 180deg) around their own edge.
       for (const shadow of host.querySelectorAll<HTMLElement>(
@@ -271,6 +420,7 @@ export class ReaderMotion {
             // The inner gradient has fixed opacity stops even when the library's
             // shadow strength reaches zero. Fade the whole shadow before cleanup.
             landingShadowOpacity = Math.min(1, (1 - t) / .1);
+            frontOpacity = Math.min(1, (1 - t) / .05);
             // The soft flap slides over the spine instead of hinging on it. The crease
             // fades as the flap's free corner (x, relative to the spine) closes in, stays
             // hidden under it, and returns as the sheet settles, so it never pops.
@@ -303,6 +453,7 @@ export class ReaderMotion {
           return () => flipper.do(point);
         });
       }
+      ({ frames, time } = settle(frames, time));
       first = frames[0];
       const hold = Math.ceil(frames.length * 34 / Math.max(time, 1));
       // The moved pages keep their layers while the landing pose is held. Leaving them there
@@ -340,7 +491,7 @@ export class ReaderMotion {
       if (unturn) { first?.(); render.drawFrame(); }
       // Same paint as the reveal: the spine stays on top of the engine's pages and shadows.
       if (spine) host.querySelector('.stf__block')?.append(spine);
-      oldPage.remove(); newPage.remove();
+      oldPage.remove();
       if (signal.aborted) onAbort();
     });
     this.land(transaction);
@@ -360,19 +511,20 @@ export class ReaderMotion {
 
   /**
    * grabfold's fold (web/fold-turn.ts): the sheet folds along the perpendicular bisector of where
-   * it was taken and where it is, and its other face is carried over the crease. The snapshots stay
-   * where they are: the sheet's face lies at the bottom, and the page the fold uncovers sits above
-   * it, clipped to what the fold has uncovered, so no iframe is moved (moving one resets it).
+   * it was taken and where it is, and its other face is carried over the crease. The sheet's face
+   * stays where it is, at the bottom. The page the fold uncovers and the folded face are each seen
+   * through a window that turns with the crease (see fold-turn.ts), so both are fresh copies made
+   * inside their windows: moving an iframe resets its document.
    * Single page: forward folds the page off over its left edge onto a blank back; backward
    * brings the previous page in over the spine and lays it flat, the fold run backwards.
    * Spread: the turning half carries a copy of the facing page it lands as. A corner turn takes the
-   * sheet by the corner the pointer is nearest; an edge turn (dge) by the middle of its free edge.
+   * sheet by the corner the pointer is nearest; an edge turn (`edge`) by the middle of its free edge.
    */
-  private async foldPage(transaction: Transition, oldPage: HTMLDivElement, newPage: HTMLDivElement,
+  private async foldPage(transaction: Transition, oldPage: HTMLDivElement,
     duration: number, direction: number, corner: 'top' | 'bottom', spread: boolean, edge: boolean) {
-    const { overlay, controller } = transaction;
+    const { overlay, controller, frame: live } = transaction;
     const signal = controller.signal;
-    newPage.style.visibility = 'hidden';
+    const aborted = () => new DOMException('Page turn canceled', 'AbortError');
     const { foldFrames } = await import('./fold-turn.ts');
     const forward = direction > 0;
     const width = overlay.clientWidth, height = overlay.clientHeight, pageWidth = spread ? width / 2 : width;
@@ -381,35 +533,49 @@ export class ReaderMotion {
     const time = duration * this.speed;
     const plan = foldFrames({ width: pageWidth, height, spread, forward, corner, edge, duration: time });
     overlay.dataset.fold = spread ? 'spread' : plan.arriving ? 'arriving' : 'single';
-    // Single backwards the arriving page is the sheet and the page on show is uncovered by it.
-    const sheet = plan.arriving ? newPage : oldPage, under = plan.arriving ? oldPage : newPage;
-    sheet.style.zIndex = '1'; under.style.zIndex = '2';
+    // Single backwards the arriving page is the sheet and the page on show is the one uncovered.
+    // The live frame already shows the new page; the old one survives only in its snapshot.
+    const oldSource = oldPage.querySelector('iframe')!;
+    const underSource = plan.arriving ? oldSource : live;
     const layer = (className: string, parent: HTMLElement = overlay) => {
       const element = document.createElement('div');
       element.className = className;
       parent.append(element);
       return element;
     };
-    // The shadow the standing fold throws, kept to the page it has uncovered.
-    const cast = layer('fold-cast');
-    const castBand = layer('fold-band', cast);
-    castBand.style.width = `${plan.castSpan}px`; castBand.style.height = `${plan.reach}px`;
-    castBand.style.backgroundImage = plan.castGradient;
-    // The folded face, in its own cell, carried over the crease by a translate and a rotate.
-    const cell = layer('fold-cell');
-    // Unanimated, the flap would lie unfolded over the page while its face loads.
-    cell.style.opacity = cast.style.opacity = '0';
-    cell.style.left = `${plan.left}px`; cell.style.width = `${pageWidth}px`;
-    const flap = layer('fold-flap', cell);
+    const window = (parent: HTMLElement) => {
+      const half = layer('fold-half', parent);
+      half.style.width = half.style.height = `${plan.reach}px`;
+      return { half, plane: layer('fold-plane', half) };
+    };
+    const box = (className: string) => {
+      const element = layer(className);
+      element.style.left = `${plan.left}px`; element.style.width = `${pageWidth}px`;
+      // Until the animations hold them, the windows would show their pages unturned.
+      element.style.opacity = '0';
+      return element;
+    };
+    // The uncovered page, kept to the cell, with the shadow the standing fold throws on it.
+    const uncoveredCell = box('fold-uncovered');
+    const uncovered = window(uncoveredCell);
+    const page = layer('fold-page', uncovered.plane);
+    page.style.left = `${-plan.left}px`; page.style.width = `${width}px`; page.style.height = `${height}px`;
+    const shadow = layer('fold-band fold-shadow', uncovered.half);
+    shadow.style.width = `${plan.castSpan}px`; shadow.style.height = `${plan.reach}px`;
+    shadow.style.backgroundImage = plan.castGradient;
+    // The folded face, carried over the crease by a translate and a rotate.
+    const cell = box('fold-cell');
+    const folded = window(cell);
+    const flap = layer('fold-flap', folded.plane);
+    flap.style.width = `${pageWidth}px`; flap.style.height = `${height}px`;
     let lift: HTMLElement | null = null;
+    let face: HTMLElement | null = null;
     if (spread) {
       // The face of the facing page the half lands as: the new spread's left half going forward,
       // its right half going back. The copy is the whole spread, cropped by the flap.
-      const face = layer('fold-face', flap);
+      face = layer('fold-face', flap);
       face.style.width = `${width}px`;
       face.style.left = forward ? '0' : `${-pageWidth}px`;
-      await this.snapshot(newPage.querySelector('iframe')!, face, signal);
-      if (signal.aborted) throw new DOMException('Page turn canceled', 'AbortError');
     } else {
       // A single page has no facing page: its back is blank paper, lightened as it lifts off the table.
       layer('motion-page fold-back', flap);
@@ -418,26 +584,35 @@ export class ReaderMotion {
     const roll = layer('fold-band', flap);
     roll.style.width = `${plan.rollSpan}px`; roll.style.height = `${plan.reach}px`;
     roll.style.backgroundImage = plan.rollGradient;
+    // Arriving, the sheet at the bottom is the new page, under the old one until the turn starts.
+    const loads = await Promise.all([this.place(transaction, underSource, page, signal),
+      face && this.place(transaction, live, face, signal), plan.arriving ? this.place(transaction, live, overlay, signal) : null]);
+    if (signal.aborted) throw aborted();
+    const sheet = loads[2];
+    if (sheet) { sheet.style.zIndex = '1'; sheet.style.visibility = 'hidden'; }
+    oldPage.style.zIndex = '1';
     // The spine copy stays above the pages, as the live spine does over the landed spread.
     overlay.querySelector<HTMLElement>(':scope > .stpageflip-spine')?.style.setProperty('z-index', '6');
     // Created in one task, the animations start on the same frame; their first keyframe is the
     // page on show (forward, the fold has not started; backward, the arriving page is folded away),
-    // so the destination can be shown in the same task.
+    // so the windows can replace the panes in the same task.
     const options: KeyframeAnimationOptions = { duration: time, easing: 'linear', fill: 'both' };
     const animations = [
-      under.animate(plan.uncovered, options), cast.animate(plan.uncovered, options),
-      castBand.animate(plan.cast, options), flap.animate(plan.flap, options), roll.animate(plan.roll, options),
+      uncovered.half.animate(plan.uncoveredHalf, options), uncovered.plane.animate(plan.uncoveredPlane, options),
+      shadow.animate(plan.cast, options), folded.half.animate(plan.flapHalf, options),
+      folded.plane.animate(plan.flapPlane, options), flap.animate(plan.flap, options), roll.animate(plan.roll, options),
       ...lift ? [lift.animate(plan.lift, options)] : [],
     ];
     for (const animation of animations) animation.updatePlaybackRate(this.speed);
     transaction.animations.push(...animations);
-    cell.style.opacity = cast.style.opacity = '';
-    newPage.style.visibility = 'visible';
+    uncoveredCell.style.opacity = cell.style.opacity = '';
+    // Arriving, the window now shows the old page and the new one lies under it; otherwise the old
+    // page stays where it is as the sheet.
+    if (sheet) { sheet.style.visibility = 'visible'; oldPage.style.visibility = 'hidden'; }
     await Promise.all(animations.map(animation => animation.finished));
-    if (signal.aborted) throw new DOMException('Page turn canceled', 'AbortError');
+    if (signal.aborted) throw aborted();
     this.land(transaction);
   }
-
   async change(element: HTMLElement, effect: string, duration: number, direction: number, update: () => void | Promise<void>, retainPage = false,
     corner: 'top' | 'bottom' = 'top', spread = false) {
     const animated = this.enabled(effect);
@@ -455,12 +630,13 @@ export class ReaderMotion {
       await this.strip.turn(frame, effect, direction, duration, update);
       return;
     }
+    const ready = this.takeStandby(frame);
     this.cancel();
-    const overlay = document.createElement('div'); overlay.className = `page-motion page-motion-${effect}`;
-    overlay.setAttribute('aria-hidden', 'true'); overlay.style.visibility = 'hidden';
-    element.append(overlay);
+    const overlay = ready?.overlay ?? document.createElement('div'); overlay.className = `page-motion page-motion-${effect}`;
+    overlay.setAttribute('aria-hidden', 'true'); overlay.style.visibility = 'hidden'; overlay.style.opacity = '';
+    if (!ready) element.append(overlay);
     const transaction: Transition = { controller: new AbortController(), overlay, frame,
-      visibility: frame.style.visibility, animations: [], cleaned: false };
+      visibility: frame.style.visibility, animations: [], cleaned: false, pool: ready ? { doc: ready.doc, panes: ready.pool } : undefined };
     this.active = transaction;
     let committed: Promise<void> | undefined;
     const commit = () => committed ??= Promise.resolve().then(update);
@@ -471,14 +647,22 @@ export class ReaderMotion {
       overlay.append(spine);
     }
     try {
-      const oldPage = await this.snapshot(frame, overlay, transaction.controller.signal);
+      const oldPage = ready?.pane ?? await this.snapshot(frame, overlay, transaction.controller.signal);
       overlay.style.visibility = 'visible';
       frame.style.visibility = 'hidden';
       await commit();
       if (transaction.controller.signal.aborted) return;
       // Document replacement must stay covered even when turn animations are off.
       if (!animated) return;
-      const newPage = await this.snapshot(frame, overlay, transaction.controller.signal);
+      // Page turns copy the new page straight from the live frame into wherever they show it.
+      if (effect.startsWith('turn')) {
+        if (effect === 'turn-fold' || effect === 'turn-fold-edge')
+          await this.foldPage(transaction, oldPage, duration / this.speed, direction, corner, spread, effect === 'turn-fold-edge');
+        else await this.turnPage(transaction, oldPage, effect, duration / this.speed, direction, corner, spread);
+        await Promise.all(transaction.animations.map(animation => animation.finished));
+        return;
+      }
+      const newPage = await this.place(transaction, frame, overlay, transaction.controller.signal);
       if (transaction.controller.signal.aborted) return;
       const sign = direction < 0 ? -1 : 1;
       const options: KeyframeAnimationOptions = { duration, fill: 'both', easing: PAGE_EASING };
@@ -496,8 +680,6 @@ export class ReaderMotion {
         top.style.zIndex = '1';
         animate(top, sign > 0 ? [{ transform: 'translateX(0)' }, { transform: 'translateX(-100%)' }]
           : [{ transform: 'translateX(-100%)' }, { transform: 'translateX(0)' }]);
-      } else if (effect.startsWith('turn')) {
-        await this.turnPage(transaction, oldPage, newPage, effect, duration / this.speed, direction, corner, spread);
       } else {
         animate(newPage, [{ opacity: 0 }, { opacity: 1 }]);
       }
@@ -506,6 +688,10 @@ export class ReaderMotion {
       if (!committed) await commit();
       else await committed;
       if (!(error instanceof DOMException && ['AbortError', 'SnapshotError'].includes(error.name))) throw error;
-    } finally { this.cleanup(transaction); }
+    } finally {
+      this.cleanup(transaction);
+      // Ready for the next one once this page has settled.
+      if (this.allowed && this.revision === revision + 1) this.scheduleStandby();
+    }
   }
 }

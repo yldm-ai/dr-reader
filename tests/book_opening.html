@@ -2,6 +2,7 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="../web/styles.css">
 <pre id="result">RUNNING</pre>
+<main style="position:fixed;inset:0;padding:60px 80px;font:20px/1.8 'Microsoft YaHei';color:#37352f;background:#fffaf3">第一章　正文已经排好，翻开封面后应直接看到这段文字。</main>
 <div id="busy" class="busy"><span class="spinner"></span><span>正在打开电子书…</span></div>
 <script type="module">
 import { BookOpening } from '../web/book-opening.ts';
@@ -124,6 +125,9 @@ try {
   check(Math.abs(page.left - innerWidth / 2) < 1, 'the open spread must be centred, its first page right of the middle');
   const inside = boardScene.querySelector('.opening-board-back').getBoundingClientRect();
   check(Math.abs(inside.right - innerWidth / 2) < 1 && Math.abs(inside.width - page.width) < 1, 'the cover must land flat on the left');
+  // The cover opens onto the real text: no blank spread, desk or loading backdrop is left.
+  check(['.opening-cover-backdrop', '.opening-board-page', '.opening-board-back'].every(selector => getComputedStyle(boardScene.querySelector(selector)).opacity === '0') &&
+    getComputedStyle(host).backgroundColor === 'rgba(0, 0, 0, 0)', 'the opened book must show the reader, not blank pages');
   await window.captureOpening?.('book-opening-board-open');
   for (const animation of swing) animation.play();
   await boardDone;

@@ -131,9 +131,10 @@ try {
   window.dispatchEvent(new Event('focus'));
   reader.beginPageTap(press());
   check(!reader.tapStart && reader.tapDismissed, 'the activating press must not start a page tap');
+  check(reader.activationPress, 'a selection dragged by the activating press must still get the menu');
   check(reader.consumeDismissedTap(new MouseEvent('click')), 'the activating click must be consumed');
   reader.beginPageTap(press());
-  check(reader.tapStart && !reader.tapDismissed, 'the press after activation must tap normally');
+  check(reader.tapStart && !reader.tapDismissed && !reader.activationPress, 'the press after activation must tap normally');
 
   const dictionaries = [{ id: 'one', name: '测试词典一' }, { id: 'two', name: '测试词典二' }];
   let pending = reader.chooseDictionary(dictionaries);

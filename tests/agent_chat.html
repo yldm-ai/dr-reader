@@ -27,6 +27,8 @@ try {
 
   // Settings: detection, the agent choice and a per-CLI model.
   doc.getElementById('open-settings').click();
+  doc.getElementById('app-tab-agent').click();
+  check(!doc.getElementById('app-section-agent').hidden && doc.getElementById('app-section-appearance').hidden, 'the AI 助读 tab shows only its group');
   await until(() => doc.querySelectorAll('#app-agent-status li[data-found]').length === 3, 'agent detection listed');
   const status = [...doc.querySelectorAll('#app-agent-status li')].map(item => item.dataset.found);
   check(status.join() === 'true,false,true', `detected agents shown: ${status}`);

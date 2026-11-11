@@ -93,6 +93,7 @@ export class Reader {
   inactive = false;
   activatedAt = -Infinity;
   tapDismissed = false;
+  activationPress = false;
   tapStart: { x: number; y: number; time: number; selected: boolean } | null = null;
   saveTimer?: Timer;
   tapTimer?: Timer;
@@ -802,7 +803,11 @@ export class Reader {
       if (doc.getSelection()?.isCollapsed && !this.selection?.pinned) this.hideSelection();
     });
     doc.addEventListener("mouseup", (event) => {
-      if (this.tapDismissed) return;
+      // The press that activated the window turns no page, but text it dragged over is a real
+      // selection and still gets the menu.
+      const activation = this.activationPress;
+      this.activationPress = false;
+      if (this.tapDismissed && !activation) return;
       if ((event.target as Element | null)?.closest?.("a")) return;
       this.selectionTimer = setTimeout(() => this.readSelection(), 0);
     });
@@ -1083,7 +1088,9 @@ export class Reader {
 
   beginPageTap(event: PointerEvent): void {
     clearTimeout(this.tapTimer);
+    this.activationPress = false;
     if (event.button === 0 && this.takeActivationPress()) {
+      this.activationPress = true;
       // Activation only: no page turn, link, note or selection menu from this press.
       this.tapDismissed = true;
       this.tapStart = null;

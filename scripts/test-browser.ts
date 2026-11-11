@@ -115,7 +115,7 @@ try {
         await app.locator('#toc-panel').screenshot({ path: resolve(directory, 'agent-history.png') });
         await app.locator('.ask-history-close').click();
         await app.locator('#reader-app-settings').click();
-        await app.locator('#app-section-agent').scrollIntoViewIfNeeded();
+        await app.locator('#app-tab-agent').click();
         await app.locator('#app-section-agent').screenshot({ path: resolve(directory, 'agent-settings.png') });
         await app.locator('#app-agent-model-trigger').click();
         await app.locator('#app-agent-model-popup').waitFor();
@@ -407,26 +407,33 @@ try {
           if (ratio(expand(colors[a]), expand(colors[b])) < 4.5) throw Error(`${a}/${b} text contrast is too low`);
         }
         await capture('application-settings-dark.png');
-        // Application settings are an in-app modal over the page; only its content scrolls.
-        if (!await app.evaluate(async () => {
-          const dialog = (document.getElementById('application-settings') as HTMLDialogElement), scroll = document.getElementById('application-settings-scroll');
-          const head = () => document.getElementById('application-settings-title').getBoundingClientRect().top;
-          if (!document.getElementById('application-settings-title').closest('.app-settings-nav')) return false;
-          const before = head();
-          scroll.scrollTop = scroll.scrollHeight;
-          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          const ok = dialog.matches(':modal') && !document.getElementById('app').hidden && head() === before &&
-            document.querySelector<HTMLElement>('.app-settings-nav a[aria-current]')?.dataset.section === 'about' &&
-            document.querySelectorAll('.app-settings-nav a').length === 4;
-          scroll.scrollTop = 0;
-          return ok;
-        })) throw Error('application settings must be a fixed modal whose title stays put while its groups scroll');
+        // Application settings: a caption bar over vertical tabs, each showing one group on its own.
+        const shown = () => app.evaluate(() => [...document.querySelectorAll<HTMLElement>('.app-section')].filter(section => !section.hidden).map(section => section.id));
+        for (const section of ['selection', 'agent', 'about', 'appearance']) {
+          await app.locator(`#app-tab-${section}`).click();
+          const visible = await shown();
+          if (visible.join() !== `app-section-${section}`) throw Error(`tab ${section} must show only its group: ${visible}`);
+        }
+        await app.locator('#app-tab-appearance').focus();
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('ArrowDown');
+        if ((await shown()).join() !== 'app-section-agent' || !await app.evaluate(() => document.activeElement?.id === 'app-tab-agent'))
+          throw Error('arrow keys must move between settings tabs');
+        await page.keyboard.press('End');
+        if ((await shown()).join() !== 'app-section-about') throw Error('End must select the last settings tab');
         if (!await app.evaluate(() => {
-          const close = document.getElementById('application-settings-close').getBoundingClientRect();
-          const scroll = document.getElementById('application-settings-scroll').getBoundingClientRect();
-          const track = document.querySelector('.app-settings-main > .overlay-scrollbar')?.getBoundingClientRect();
-          return close.bottom <= scroll.top && (!track || close.bottom <= track.top);
-        })) throw Error('the close button must not cover the scrolling groups or their scrollbar');
+          const dialog = document.getElementById('application-settings') as HTMLDialogElement;
+          const caption = document.querySelector('.app-settings-caption')!.getBoundingClientRect();
+          const close = document.getElementById('application-settings-close')!.getBoundingClientRect();
+          const scroll = document.getElementById('application-settings-scroll')!.getBoundingClientRect();
+          const selected = document.querySelector('.app-settings-tab[aria-selected="true"]')!;
+          const bar = getComputedStyle(selected, '::before');
+          return dialog.matches(':modal') && caption.height === 38 && caption.width >= dialog.getBoundingClientRect().width - 2 &&
+            close.top >= caption.top && close.bottom <= caption.bottom && close.right <= caption.right && scroll.top >= caption.bottom &&
+            document.querySelectorAll('.app-settings-tab').length === 4 && bar.content !== 'none' && bar.width === '3px' &&
+            document.querySelector('#app-tab-agent .fluent-icon, #app-tab-agent .material-icon') !== null;
+        })) throw Error('settings caption, close button, tabs and selected-tab bar are laid out as designed');
+        await app.locator('#app-tab-appearance').click();
         await app.locator('#application-settings-close').click();
         if (await app.evaluate(() => (document.getElementById('application-settings') as HTMLDialogElement).open)) throw Error('close button must dismiss application settings');
         await app.locator('#back-library').click();

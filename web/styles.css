@@ -2200,10 +2200,12 @@ body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-
   background: var(--hover);
   color: var(--accent);
 }
+/* Translate only: after a scale() entrance, Chromium keeps the labels rastered from the scaled
+   layer until the first repaint, so they visibly jumped by a pixel on the first hover. */
 @keyframes selection-in {
   from {
     opacity: 0;
-    transform: translateY(5px) scale(0.98);
+    transform: translateY(5px);
   }
 }
 .setting-note {
@@ -2344,6 +2346,29 @@ body[data-animations="false"] .toast { animation: none; }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+/* The track stops short of both ends, so the thumb never runs into a rounded corner. The end
+   buttons are empty spacers; each is as long as the corner radius of its scroll box. */
+::-webkit-scrollbar-button:vertical:start:decrement,
+::-webkit-scrollbar-button:vertical:end:increment {
+  display: block;
+  height: 8px;
+  background: transparent;
+}
+::-webkit-scrollbar-button:horizontal:start:decrement,
+::-webkit-scrollbar-button:horizontal:end:increment {
+  display: block;
+  width: 8px;
+  background: transparent;
+}
+.color-picker::-webkit-scrollbar-button:vertical:start:decrement,
+.color-picker::-webkit-scrollbar-button:vertical:end:increment,
+.note-peek-text::-webkit-scrollbar-button:vertical:start:decrement,
+.note-peek-text::-webkit-scrollbar-button:vertical:end:increment { height: 10px; }
+.book-context-menu::-webkit-scrollbar-button:vertical:start:decrement,
+.book-context-menu::-webkit-scrollbar-button:vertical:end:increment { height: 12px; }
+.sidebar::-webkit-scrollbar-button:vertical:start:decrement,
+.sidebar::-webkit-scrollbar-button:vertical:end:increment { height: 14px; }
+::-webkit-scrollbar-corner { background: transparent; }
 /* Self-drawn hover tips (tooltip.ts), after the MSIME settings window: compact, 1px border,
    2px corners, fading in while sliding 2px toward their resting place. */
 .ui-tooltip {
@@ -2456,7 +2481,7 @@ body[data-animations="false"] .ui-tooltip { transition: none; }
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--sidebar);
   color: var(--text);
   box-shadow: var(--shadow-dialog);
   overflow: hidden;
@@ -2464,8 +2489,36 @@ body[data-animations="false"] .ui-tooltip { transition: none; }
 .app-settings[open] {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: 38px minmax(0, 1fr);
   animation: modal-enter 160ms var(--ease-ui);
 }
+/* The caption follows the Windows title bar (as in DR Dict's settings): a 12px title at the
+   top-left and a square close button in the top-right corner; the whole strip drags the dialog. */
+.app-settings-caption {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  padding: 0 5px 0 14px;
+  background: var(--sidebar);
+  user-select: none;
+  touch-action: none;
+}
+.app-settings-title { flex: 1; min-width: 0; margin: 0; color: var(--text); font: 400 12px/38px var(--font-ui); }
+.caption-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+.caption-close .fluent-icon { --icon-size: 10px; }
+.caption-close:hover { background: var(--hover); color: var(--text); }
+.caption-close:active { background: var(--selected); }
+.caption-close:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -2px; }
 .app-settings::backdrop { background: #0f0f0f52; }
 @keyframes modal-enter {
   from { opacity: 0; transform: translateY(4px); }
@@ -2474,44 +2527,60 @@ body[data-animations="false"] .app-settings { animation: none; }
 .app-settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 14px 8px;
+  gap: 2px;
+  padding: 6px 8px 14px;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
 }
-.app-settings-nav a {
+/* Vertical tabs, one per group. The selected tab carries the accent bar on its left edge, the
+   same mark as the library sidebar and the table of contents. */
+.app-settings-tab {
+  position: relative;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 8px;
-  height: 30px;
+  width: 100%;
+  height: 32px;
   padding: 0 10px;
+  border: 0;
   border-radius: 6px;
+  background: transparent;
   color: var(--muted);
   font-size: var(--text-body);
   line-height: 20px;
-  text-decoration: none;
+  text-align: left;
   transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);
 }
-.app-settings-nav a .ui-icon { width: 18px; height: 18px; }
-.app-settings-nav a:hover { background: var(--hover); color: var(--text); }
-.app-settings-nav a[aria-current] { background: var(--selected); color: var(--text); font-weight: 500; }
-/* The title is the sidebar's group label, as in Notion's settings; it never scrolls. */
-.app-settings-title { margin: 4px 10px 6px; color: var(--muted); font-size: var(--text-caption); font-weight: 500; line-height: 20px; }
-/* The top strip belongs to the close button: content and the scrollbar track start below it, so
-   the hover plate never covers a card border or the scrollbar. */
-.app-settings-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-top: 44px; }
-/* A compact hover plate keeps the close button tucked into the corner. */
-.app-settings-close {
+.app-settings-tab .ui-icon { --icon-size: 18px; }
+.app-settings-tab .fluent-icon { --icon-size: 16px; width: 18px; }
+.app-settings-tab:hover { background: var(--hover); color: var(--text); }
+.app-settings-tab[aria-selected="true"] { background: var(--selected); color: var(--text); font-weight: 500; }
+.app-settings-tab[aria-selected="true"]::before {
+  content: "";
   position: absolute;
-  z-index: 31;
-  top: 4px;
-  right: 4px;
-  width: 28px !important;
-  height: 28px !important;
-  border-radius: 4px !important;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+}
+.app-settings-tab:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -2px; }
+/* The page sits inset under the caption, like a sheet below its tabs. */
+.app-settings-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 8px;
+  background: var(--surface);
 }
 .app-settings-scroll { position: relative; flex: 1; min-height: 0; overflow: auto; padding: 0 56px 40px; }
-.app-section + .app-section { margin-top: 40px; }
 /* Each group heading carries a hairline beneath it; the rows below have no borders of their own. */
 .app-section h2 {
   margin: 0 0 6px;
@@ -2553,9 +2622,10 @@ body[data-animations="false"] .app-settings { animation: none; }
   user-select: text;
 }
 @media (max-width: 760px) {
-  .app-settings[open] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .app-settings-nav { flex-direction: row; padding: 8px; border-right: 0; border-bottom: 1px solid var(--border); }
-  .app-settings-title { display: none; }
+  .app-settings[open] { grid-template-columns: minmax(0, 1fr); grid-template-rows: 38px auto minmax(0, 1fr); }
+  .app-settings-nav { flex-direction: row; padding: 0 8px 8px; overflow-x: auto; }
+  .app-settings-tab { width: auto; flex: 0 0 auto; }
+  .app-settings-main { border-left: 0; border-top-left-radius: 0; }
   .app-settings-scroll { padding: 0 20px 24px; }
 }
 
@@ -2806,8 +2876,7 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
 .list-mode .book-add { display: grid; grid-template-columns: 65px minmax(0, 1fr) 130px 100px; align-items: center; gap: 24px; max-width: none; padding: 15px 0; border-bottom: 1px solid var(--border); }
 .list-mode .book-add strong { margin: 0; }
 
-.app-settings-dragbar { position: absolute; top: 0; left: 0; right: 36px; height: 44px; z-index: 30; touch-action: none; }
-.app-settings-title { position: relative; z-index: 30; touch-action: none; }
+
 
 .footer-reveal-zone { position: absolute; bottom: 0; left: 0; right: 0; height: 10px; z-index: 14; }
 .reader-view[data-footer-auto-hide="true"] > .reader-footer {

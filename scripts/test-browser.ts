@@ -421,16 +421,31 @@ try {
           throw Error('arrow keys must move between settings tabs');
         await page.keyboard.press('End');
         if ((await shown()).join() !== 'app-section-about') throw Error('End must select the last settings tab');
+        // The accent bar slides to the selected tab rather than jumping.
+        const barTop = () => app.evaluate(() => document.querySelector('.app-settings-indicator')!.getBoundingClientRect().top);
+        const animations = await app.evaluate(() => { const value = document.body.dataset.animations; document.body.dataset.animations = 'true'; return value; });
+        await page.waitForTimeout(320);
+        const settled = await barTop();
+        await app.locator('#app-tab-appearance').click();
+        await page.waitForTimeout(80);
+        const sliding = await barTop();
+        await page.waitForTimeout(320);
+        const arrived = await barTop();
+        await app.evaluate(value => { if (value === undefined) delete document.body.dataset.animations; else document.body.dataset.animations = value; }, animations);
+        if (!(sliding < settled && sliding > arrived)) throw Error(`settings tab bar must slide between tabs: ${settled} → ${sliding} → ${arrived}`);
+        await page.keyboard.press('End');
+        await page.waitForTimeout(320);
         if (!await app.evaluate(() => {
           const dialog = document.getElementById('application-settings') as HTMLDialogElement;
           const caption = document.querySelector('.app-settings-caption')!.getBoundingClientRect();
           const close = document.getElementById('application-settings-close')!.getBoundingClientRect();
           const scroll = document.getElementById('application-settings-scroll')!.getBoundingClientRect();
-          const selected = document.querySelector('.app-settings-tab[aria-selected="true"]')!;
-          const bar = getComputedStyle(selected, '::before');
+          const tab = document.querySelector('.app-settings-tab[aria-selected="true"]')!.getBoundingClientRect();
+          const bar = document.querySelector('.app-settings-indicator')!.getBoundingClientRect();
           return dialog.matches(':modal') && caption.height === 38 && caption.width >= dialog.getBoundingClientRect().width - 2 &&
             close.top >= caption.top && close.bottom <= caption.bottom && close.right <= caption.right && scroll.top >= caption.bottom &&
-            document.querySelectorAll('.app-settings-tab').length === 4 && bar.content !== 'none' && bar.width === '3px' &&
+            document.querySelectorAll('.app-settings-tab').length === 4 && bar.width === 3 &&
+            Math.abs(bar.left + bar.width / 2 - tab.left) < 0.5 && Math.abs(bar.top + bar.height / 2 - (tab.top + tab.height / 2)) < 0.5 &&
             document.querySelector('#app-tab-agent .fluent-icon, #app-tab-agent .material-icon') !== null;
         })) throw Error('settings caption, close button, tabs and selected-tab bar are laid out as designed');
         await app.locator('#app-tab-appearance').click();
@@ -741,12 +756,96 @@ try {
           document.getElementById('quick-font-size').textContent === String(size + 1), fontSize);
         await app.locator('#font-smaller').click();
         await app.waitForFunction(size => window.nativeProbe.data.settings.reading.fontSize === size, fontSize);
-        await app.locator('[data-quick-theme="dark"]').click();
+        // Page theme: one swatch button opens a panel of paper colours and background textures,
+        // which applies each pick at once and stays open.
+        await app.locator('#reading-theme-button').click();
+        await app.locator('#reading-theme-panel').waitFor({ state: 'visible' });
+        await app.locator('[data-paper="dark"]').click();
         await app.waitForFunction(() => getComputedStyle((document.getElementById('book-frame') as HTMLIFrameElement).contentDocument.body).backgroundColor === 'rgb(25, 25, 25)' &&
-          document.querySelector('[data-quick-theme="dark"]').getAttribute('aria-checked') === 'true');
-        await capture('reader-toolbar-dark-page.png');
-        await app.locator('[data-quick-theme="light"]').click();
-        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'light');
+          document.querySelector('[data-paper="dark"]').getAttribute('aria-checked') === 'true' &&
+          document.getElementById('reading-theme-panel').matches(':popover-open'));
+        await app.locator('[data-texture="grain"]').click();
+        await app.waitForFunction(() => {
+          const doc = (document.getElementById('book-frame') as HTMLIFrameElement).contentDocument;
+          return window.nativeProbe.data.settings.reading.background === 'grain' &&
+            getComputedStyle(doc.documentElement).backgroundImage.includes('data:image/svg+xml') &&
+            getComputedStyle(doc.body).backgroundColor === 'rgba(0, 0, 0, 0)' &&
+            document.querySelector('[data-texture="grain"]').getAttribute('aria-checked') === 'true';
+        });
+        if (!await app.evaluate(() => {
+          const panel = document.getElementById('reading-theme-panel').getBoundingClientRect();
+          const button = document.getElementById('reading-theme-button').getBoundingClientRect();
+          const papers = [...document.querySelectorAll('[data-paper]')].map(paper => paper.getBoundingClientRect());
+          return panel.top >= button.bottom && panel.left >= 0 && panel.right <= innerWidth && papers.length === 7 &&
+            papers[0].top === papers[3].top && papers[4].top > papers[0].top && document.querySelectorAll('[data-texture]').length === 5 &&
+            document.querySelector('[data-paper="dark"] .theme-moon') !== null;
+        })) throw Error('theme panel must sit under its button with a four-column colour grid and five textures');
+        await page.waitForTimeout(150);
+        await capture('reader-theme-panel-dark.png');
+        // Arrow keys move through the colours and apply them; Escape closes and returns focus.
+        await app.locator('[data-paper="dark"]').focus();
+        await page.keyboard.press('ArrowRight');
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'night');
+        await page.keyboard.press('Escape');
+        if (!await app.evaluate(() => !document.getElementById('reading-theme-panel').matches(':popover-open') &&
+          document.activeElement?.id === 'reading-theme-button')) throw Error('Escape must close the theme panel and return focus');
+        await app.locator('#reading-theme-button').click();
+        await app.locator('[data-texture="plain"]').click();
+        await app.locator('[data-paper="light"]').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.theme === 'light' && window.nativeProbe.data.settings.reading.background === 'plain');
+        // A press on the page closes the panel without turning the page.
+        const pageBox = await app.locator('#book-frame').boundingBox();
+        await page.mouse.click(pageBox.x + pageBox.width / 2, pageBox.y + pageBox.height / 2);
+        await app.waitForFunction(() => !document.getElementById('reading-theme-panel').matches(':popover-open'));
+        // Reading mode: 翻页 opens a submenu of 单页 / 双页, 滚动 applies directly.
+        const { mode: savedMode, layout: savedLayout } = await app.evaluate(() => window.nativeProbe.data.settings.reading);
+        const menuOpen = (id: string) => app.evaluate(id => document.getElementById(id).matches(':popover-open'), id);
+        await app.locator('#reading-mode-button').click();
+        await app.locator('[data-mode-item="paged"]').hover();
+        await app.locator('#reading-layout-menu').waitFor({ state: 'visible' });
+        if (!await app.evaluate(() => {
+          const parent = document.querySelector('[data-mode-item="paged"]').getBoundingClientRect();
+          const first = document.querySelector('#reading-layout-menu .reader-menu-item').getBoundingClientRect();
+          const menu = document.getElementById('reading-mode-menu').getBoundingClientRect();
+          return Math.abs(first.top - parent.top) <= 1 && first.left > menu.right - 4;
+        })) throw Error('the layout submenu must open beside 翻页, its first item level with it');
+        await capture('reader-mode-menu.png');
+        // Crossing 滚动 on the way into the submenu must not close it.
+        await app.locator('[data-mode-item="scroll"]').hover();
+        await app.locator('[data-layout-item="double"]').hover();
+        await page.waitForTimeout(350);
+        if (!await menuOpen('reading-layout-menu')) throw Error('a diagonal move into the submenu must keep it open');
+        await app.locator('[data-layout-item="single"]').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.mode === 'paged' && window.nativeProbe.data.settings.reading.layout === 'single' &&
+          !document.getElementById('reading-mode-menu').matches(':popover-open') && document.getElementById('reading-mode-label').textContent === '单页');
+        // Resting on 滚动 closes the submenu.
+        await app.locator('#reading-mode-button').click();
+        await app.locator('[data-mode-item="paged"]').hover();
+        await app.locator('#reading-layout-menu').waitFor({ state: 'visible' });
+        await app.locator('[data-mode-item="scroll"]').hover();
+        await app.waitForFunction(() => !document.getElementById('reading-layout-menu').matches(':popover-open'));
+        await app.locator('[data-mode-item="scroll"]').click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.mode === 'scroll' && document.getElementById('reading-mode-label').textContent === '滚动');
+        // Keyboard: Enter opens on the current mode, arrows walk into the submenu and pick.
+        await app.locator('#reading-mode-button').focus();
+        await page.keyboard.press('Enter');
+        if (!await app.evaluate(() => document.activeElement?.getAttribute('data-mode-item') === 'scroll')) throw Error('the mode menu must focus the current mode');
+        await page.keyboard.press('ArrowUp');
+        await page.keyboard.press('ArrowRight');
+        if (!await app.evaluate(() => document.getElementById('reading-layout-menu').matches(':popover-open') && document.activeElement?.closest('#reading-layout-menu') !== null))
+          throw Error('ArrowRight on 翻页 must open and enter the submenu');
+        await page.keyboard.press('ArrowLeft');
+        if (await menuOpen('reading-layout-menu') || !await app.evaluate(() => document.activeElement?.getAttribute('data-mode-item') === 'paged'))
+          throw Error('ArrowLeft must close the submenu and return to 翻页');
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('End');
+        await page.keyboard.press('Enter');
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.mode === 'paged' && window.nativeProbe.data.settings.reading.layout === 'double' &&
+          document.activeElement?.id === 'reading-mode-button');
+        await app.locator('#reading-mode-button').click();
+        if (savedMode === 'scroll') await app.locator('[data-mode-item="scroll"]').click();
+        else { await app.locator('[data-mode-item="paged"]').click(); await app.locator(`[data-layout-item="${savedLayout}"]`).click(); }
+        await app.waitForFunction(({ mode, layout }) => window.nativeProbe.data.settings.reading.mode === mode && window.nativeProbe.data.settings.reading.layout === layout, { mode: savedMode, layout: savedLayout });
         // The reader is laid out against the window, so narrow the application frame itself.
         const appFrame = page.locator('iframe');
         await appFrame.evaluate(el => el.style.width = '460px');

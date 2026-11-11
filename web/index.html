@@ -157,15 +157,35 @@
           </div>
           <!-- Everyday typesetting stays one click away; the drawer keeps the full set. -->
           <div class="toolbar-quick" role="group" aria-label="快速排版">
-            <div class="quick-segment" role="radiogroup" aria-label="阅读方式">
-              <button type="button" class="quick-button" data-quick-mode="paged" role="radio" title="左右翻页" aria-label="左右翻页"><span data-icon="paged"></span></button
-              ><button type="button" class="quick-button" data-quick-mode="scroll" role="radio" title="上下滚动" aria-label="上下滚动"><span data-icon="scroll"></span></button>
+            <!-- Reading mode: 翻页 opens a submenu for one or two pages; 滚动 applies at once. -->
+            <button type="button" id="reading-mode-button" class="quick-dropdown" aria-haspopup="menu" aria-expanded="false" aria-controls="reading-mode-menu" title="阅读方式">
+              <span id="reading-mode-icon" class="quick-dropdown-icon"></span><span id="reading-mode-label">单页</span><span class="quick-chevron" data-icon="chevron-down"></span>
+            </button>
+            <div id="reading-mode-menu" class="reader-menu" popover="manual" role="menu" aria-label="阅读方式">
+              <button type="button" class="reader-menu-item" role="menuitem" data-mode-item="paged" aria-haspopup="menu" aria-expanded="false" aria-controls="reading-layout-menu" tabindex="-1">
+                <span data-icon="paged"></span><span class="reader-menu-label">翻页</span><span class="reader-menu-check" data-icon="check"></span><span class="reader-menu-more" data-icon="chevron"></span>
+              </button>
+              <button type="button" class="reader-menu-item" role="menuitemradio" data-mode-item="scroll" aria-checked="false" tabindex="-1">
+                <span data-icon="scroll"></span><span class="reader-menu-label">滚动</span><span class="reader-menu-check" data-icon="check"></span>
+              </button>
+              <div id="reading-layout-menu" class="reader-menu reader-submenu" popover="manual" role="menu" aria-label="翻页方式">
+                <button type="button" class="reader-menu-item" role="menuitemradio" data-layout-item="single" aria-checked="false" tabindex="-1">
+                  <span data-icon="page-single"></span><span class="reader-menu-label">单页</span><span class="reader-menu-check" data-icon="check"></span>
+                </button>
+                <button type="button" class="reader-menu-item" role="menuitemradio" data-layout-item="double" aria-checked="false" tabindex="-1">
+                  <span data-icon="page-double"></span><span class="reader-menu-label">双页</span><span class="reader-menu-check" data-icon="check"></span>
+                </button>
+              </div>
             </div>
             <span class="quick-divider" aria-hidden="true"></span>
-            <div class="quick-themes" role="radiogroup" aria-label="页面配色">
-              <button type="button" class="quick-theme" data-quick-theme="light" role="radio" title="明亮" aria-label="明亮"></button
-              ><button type="button" class="quick-theme" data-quick-theme="dark" role="radio" title="黑暗" aria-label="黑暗"></button
-              ><button type="button" class="quick-theme" data-quick-theme="sepia" role="radio" title="纸张" aria-label="纸张"></button>
+            <button type="button" id="reading-theme-button" class="quick-dropdown" aria-haspopup="dialog" aria-expanded="false" aria-controls="reading-theme-panel" title="页面主题">
+              <span id="reading-theme-swatch" class="quick-swatch" aria-hidden="true"></span><span class="quick-chevron" data-icon="chevron-down"></span>
+            </button>
+            <div id="reading-theme-panel" class="reader-menu theme-panel" popover="manual" role="dialog" aria-label="页面主题">
+              <h3 id="theme-panel-colors">颜色</h3>
+              <div id="theme-panel-papers" class="theme-papers" role="radiogroup" aria-labelledby="theme-panel-colors"></div>
+              <h3 id="theme-panel-backgrounds">背景</h3>
+              <div id="theme-panel-textures" class="theme-textures" role="radiogroup" aria-labelledby="theme-panel-backgrounds"></div>
             </div>
             <span class="quick-divider" aria-hidden="true"></span>
             <div class="quick-font" role="group" aria-label="字号">

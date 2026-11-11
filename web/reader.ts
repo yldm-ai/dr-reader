@@ -10,6 +10,8 @@ import { WheelPaging } from "./wheel-paging.ts";
 import { ReaderMotion } from "./motion.ts";
 import { fontStack } from "./fonts.ts";
 import { readingPalette } from "./reading-palette.ts";
+import { backgroundImage } from "./reading-backgrounds.ts";
+import { QuickMenus } from "./reader-quick-menus.ts";
 import { sameReading } from "./settings-state.ts";
 import { pageMargins, pageClickDirection, pageCorner } from "./reading-layout.ts";
 import { ChapterCache } from "./chapter-cache.ts";
@@ -94,6 +96,7 @@ export class Reader {
   activatedAt = -Infinity;
   tapDismissed = false;
   activationPress = false;
+  quickMenus?: QuickMenus;
   tapStart: { x: number; y: number; time: number; selected: boolean } | null = null;
   saveTimer?: Timer;
   tapTimer?: Timer;
@@ -133,14 +136,7 @@ export class Reader {
     }, true);
 
     $("page-surface").addEventListener("wheel", (event) => this.wheel(event), { passive: false });
-    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-mode]"))
-      button.onclick = () => this.onReadingSetting?.({ mode: button.dataset.quickMode as ReadingSettings["mode"] });
-    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-theme]")) {
-      const palette = readingPalette(button.dataset.quickTheme!);
-      button.style.setProperty("--swatch-paper", palette.paper);
-      button.style.setProperty("--swatch-text", palette.text);
-      button.onclick = () => this.onReadingSetting?.({ theme: button.dataset.quickTheme as ReadingSettings["theme"] });
-    }
+    this.quickMenus = new QuickMenus(patch => this.onReadingSetting?.(patch));
     $<HTMLButtonElement>("font-smaller").onclick = () => this.stepFontSize(-1);
     $<HTMLButtonElement>("font-larger").onclick = () => this.stepFontSize(1);
     $("reader-search").onclick = () => this.openSearch();
@@ -946,7 +942,10 @@ export class Reader {
     // document element (src/pyj/read_book/settings.pyj, apply_font_size): books that size text in
     // rem, such as Kindle conversions, then scale with it instead of staying at the 16px default
     // while only the inherited line height grows.
-    this.style.textContent = `html{font-size:${reading.fontSize}px!important;background:${colors.paper}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${colors.paper}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? `calc(100vh - ${vertical}px)` : "100vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:1px}`;
+    // The texture sits on the root, which paints the whole canvas; the body stays transparent so
+    // its box (offset by the page margins) does not start a second, misaligned copy.
+    const texture = backgroundImage(reading.background, colors.dark);
+    this.style.textContent = `html{font-size:${reading.fontSize}px!important;background:${colors.paper} ${texture === "none" ? "" : `${texture} repeat`}!important;color:${colors.text}!important;overflow:${paged ? "hidden" : "auto"}!important;scroll-behavior:auto!important;height:${paged ? "100%" : "auto"}!important;direction:ltr!important}body{font-family:${fontStack(reading.fontFamily)}!important;font-size:${reading.fontSize}px!important;font-weight:${reading.fontWeight}!important;line-height:${reading.lineHeight}!important;letter-spacing:${reading.letterSpacing}px!important;background:${texture === "none" ? colors.paper : "transparent"}!important;color:${colors.text}!important;max-width:none!important;min-width:0!important;box-sizing:border-box!important;${margin}}body p,body li,body div{font-family:inherit!important;font-size:inherit!important;font-weight:inherit!important;line-height:inherit!important;color:inherit!important;overflow-wrap:anywhere}p{orphans:2;widows:2}${spacing}${paragraph}img,svg,video{max-width:100%!important;max-height:${paged ? `calc(100vh - ${vertical}px)` : "100vh"}!important;object-fit:contain}table{max-width:100%!important}pre{white-space:pre-wrap!important;overflow-wrap:anywhere}a{color:${colors.link}!important}h1,h2,h3,h4{color:inherit!important;break-after:avoid}*{scroll-behavior:auto!important}::selection{background:${colors.selection}!important}::-webkit-scrollbar{width:5px}::-webkit-scrollbar-thumb{background:${colors.link}55;border-radius:1px}`;
     if (this.atEnd()) this.style.textContent += `html{height:100%!important;overflow:hidden!important}body{display:flex!important;align-items:center!important;justify-content:center!important;margin:0!important;padding:0!important;width:100vw!important;height:100vh!important;columns:auto!important;user-select:none!important}#dr-end{font-family:"Microsoft YaHei","微软雅黑",sans-serif!important;font-size:clamp(64px,12vmin,120px)!important;font-weight:400!important;line-height:1!important;letter-spacing:0!important}`;
     this.reflow();
   }
@@ -972,8 +971,10 @@ export class Reader {
     this.reportBookPages();
     root.dataset.fullBackground = String(Boolean(r.fullBackground));
     root.dataset.fullWidth = String(Boolean(r.fullWidth));
-    root.style.setProperty("--reading-paper", readingPalette(r.theme).paper);
-    root.style.setProperty("--reading-text", readingPalette(r.theme).text);
+    const palette = readingPalette(r.theme);
+    root.style.setProperty("--reading-paper", palette.paper);
+    root.style.setProperty("--reading-text", palette.text);
+    root.style.setProperty("--reading-texture", backgroundImage(r.background, palette.dark));
     $("toc-panel").hidden = r.showToc === false;
     const panel = $("toc-panel");
     panel.dataset.pinned = String(Boolean(r.tocPinned));
@@ -984,10 +985,7 @@ export class Reader {
     const pinLabel = r.tocPinned ? "取消固定侧边栏" : "固定侧边栏";
     pin.dataset.tooltip = pinLabel;
     pin.setAttribute("aria-label", pinLabel);
-    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-mode]"))
-      button.setAttribute("aria-checked", String(button.dataset.quickMode === r.mode));
-    for (const button of document.querySelectorAll<HTMLElement>("[data-quick-theme]"))
-      button.setAttribute("aria-checked", String(button.dataset.quickTheme === r.theme));
+    this.quickMenus?.sync(r);
     $<HTMLOutputElement>("quick-font-size").value = String(r.fontSize);
     $<HTMLButtonElement>("font-smaller").disabled = r.fontSize <= 10;
     $<HTMLButtonElement>("font-larger").disabled = r.fontSize >= 56;
@@ -1115,8 +1113,10 @@ export class Reader {
   dismissPagePopups() {
     const panel = $("toc-panel");
     const sidebarOpen = !this.settings?.tocPinned && !panel.hidden && panel.dataset.expanded === "true";
+    // Toolbar flyouts close from here too: presses in the book frame never reach their light dismiss.
+    const flyout = this.quickMenus?.closeAll() ?? false;
     const open = this.colorPicker?.isOpen || !$("selection-menu").hidden ||
-      !$("mark-palette").hidden || !$("note-peek").hidden || sidebarOpen;
+      !$("mark-palette").hidden || !$("note-peek").hidden || sidebarOpen || flyout;
     if (!open) return false;
     this.colorPicker?.close(false);
     this.hideSelection();

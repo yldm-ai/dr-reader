@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 
 const symbols = [
   'add', 'arrow_back', 'arrow_forward', 'arrow_upward', 'auto_stories', 'bookmark', 'bookmark-fill',
-  'chat_bubble', 'check', 'chevron_right', 'close', 'content_copy', 'cookie', 'crop_portrait', 'delete', 'dictionary', 'domino_mask', 'draft', 'forum', 'edit', 'edit_note',
+  'chat_bubble', 'check', 'chevron_right', 'close', 'content_copy', 'contrast', 'cookie', 'crop_portrait', 'dark_mode-fill', 'delete', 'dictionary', 'domino_mask', 'draft', 'forum', 'edit', 'edit_note',
   'format_align_center', 'format_align_justify', 'format_align_left', 'format_underlined',
   'fullscreen', 'fullscreen_exit', 'grid_view', 'info', 'ink_highlighter', 'keep', 'keyboard_arrow_down', 'keyboard_double_arrow_down', 'keyboard_double_arrow_up', 'library_books',
   'menu_book', 'menu_open', 'palette', 'person', 'play_arrow', 'refresh', 'remove', 'schedule', 'search', 'settings', 'smart_toy', 'speaker_notes_off', 'stop', 'text_fields',

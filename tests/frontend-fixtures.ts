@@ -29,7 +29,7 @@ export function bootstrapFixture(): Fixture {
     application: { theme: 'light', shell: 'direct2d', animations: false, bookOpeningEnabled: false, bookOpeningAnimation: 'circles',
       selectionActions: { highlight: true, underline: true, note: true, copy: true, search: true, dictionary: true, ask: true },
       dictionaries: [{ id: 'one', name: '测试词典', url: 'https://example.com/?q={text}', enabled: true }] },
-    reading: { theme: 'sepia', mode: 'paged', fontFamily: 'serif', fontSize: 20, fontWeight: 400,
+    reading: { theme: 'sepia', background: 'plain', mode: 'paged', fontFamily: 'serif', fontSize: 20, fontWeight: 400,
       lineHeight: 1.9, paragraphSpacing: 1, letterSpacing: 0, textIndent: 0, alignment: 'justify',
       width: 760, paddingX: 44, paddingY: 38, paddingTop: 38, paddingBottom: 38, paddingLeft: 44, paddingRight: 44,
       showToolbar: true, showToc: true, showChapterTitle: true, showPagination: true, showProgress: true,

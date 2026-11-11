@@ -2,8 +2,11 @@
 export type Theme = 'system' | 'light' | 'sepia' | 'dark';
 /** Reading papers offer more choices than the application chrome. */
 export type ReadingTheme = Theme | 'green' | 'gray' | 'night';
+/** A texture laid over the reading paper (reading-backgrounds.ts). */
+export type ReadingBackground = 'plain' | 'grain' | 'fiber' | 'linen' | 'wash';
 export interface ReadingSettings {
   theme: ReadingTheme;
+  background: ReadingBackground;
   mode: 'paged' | 'scroll';
   /** Paged reading shows one page, or two side by side like an open book. */
   layout: 'single' | 'double';

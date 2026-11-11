@@ -877,45 +877,59 @@ body[data-animations="false"] .selection-menu {
 .reader-toolbar .icon-button :is(svg, .ui-icon) { width: 20px; height: 20px; }
 .reader-toolbar .text-button { border-radius: 9px; padding: 7px 10px; gap: 6px; }
 .reader-toolbar .text-button :is(svg, .ui-icon) { width: 20px; height: 20px; }
+/* Quick typesetting sits directly on the toolbar, each control with its own hover fill, the
+   same as the icon buttons beside it. */
 .toolbar-quick {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 32px;
-  padding: 0 3px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--text) 3%, var(--bg));
+  gap: 2px;
+  height: 36px;
 }
-.quick-segment, .quick-font { display: flex; align-items: center; gap: 2px; }
+.quick-font { display: flex; align-items: center; gap: 2px; }
 .quick-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border-radius: 13px;
+  border-radius: 8px;
   color: var(--muted);
-  transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui), box-shadow 120ms var(--ease-ui);
+  transition: background-color 120ms var(--ease-ui), color 120ms var(--ease-ui);
 }
-.quick-button :is(svg, .ui-icon) { width: 17px; height: 17px; }
+.quick-button :is(svg, .ui-icon) { width: 18px; height: 18px; }
 .quick-button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
-.quick-button[aria-checked="true"] { background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
 .quick-button:disabled { opacity: .35; cursor: default; }
-.quick-divider { width: 1px; height: 16px; margin: 0 5px; background: var(--border); }
-.quick-themes { display: flex; align-items: center; gap: 9px; padding: 0 5px; }
-.quick-theme {
+.quick-divider { width: 1px; height: 16px; margin: 0 6px; background: var(--border); }
+/* A toolbar button that opens a flyout: its value, then a chevron that turns while open. */
+.quick-dropdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: var(--text-body);
+  white-space: nowrap;
+  transition: background-color 120ms var(--ease-ui);
+}
+.quick-dropdown:hover, .quick-dropdown[aria-expanded="true"] { background: var(--hover); }
+.quick-dropdown:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -2px; }
+.quick-dropdown-icon { display: inline-flex; color: var(--muted); }
+.quick-dropdown-icon :is(svg, .ui-icon) { width: 18px; height: 18px; }
+.quick-chevron { display: inline-flex; color: var(--muted); }
+.quick-chevron :is(svg, .ui-icon) { width: 16px; height: 16px; transition: transform 160ms var(--ease-ui); }
+.quick-dropdown[aria-expanded="true"] .quick-chevron :is(svg, .ui-icon) { transform: rotate(180deg); }
+/* The current paper, with its texture, as a small dot. */
+.quick-swatch {
   width: 18px;
   height: 18px;
-  padding: 0;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--swatch-text) 22%, transparent);
-  background: var(--swatch-paper);
-  transition: box-shadow 140ms var(--ease-ui), transform 140ms var(--ease-ui);
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  background-size: 120px;
 }
-.quick-theme:hover { transform: scale(1.08); }
-.quick-theme[aria-checked="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--focus-outline); }
+.quick-swatch[data-theme="system"] { background: linear-gradient(135deg, #ffffff 50%, #191919 50%) !important; }
 .quick-font output {
   min-width: 26px;
   text-align: center;
@@ -1424,6 +1438,8 @@ body[data-animations="false"] .settings-dialog::backdrop { transition: none; }
   box-shadow: 0 0 0 1px var(--accent);
 }
 .theme-options.compact { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.setting-row.texture-row { display: block; margin-top: 14px; }
+.setting-row.texture-row > span { display: block; margin-bottom: 8px; }
 .setting-row {
   display: flex;
   align-items: center;
@@ -1640,7 +1656,7 @@ body[data-animations="false"] .settings-dialog::backdrop { transition: none; }
 .segmented input:disabled + span { opacity: .45; }
 .segmented label:has(input:disabled) { pointer-events: none; }
 /* On dark surfaces the chosen chip must read lighter than its track, not darker. */
-body[data-theme="dark"] :is(.segmented input:checked + span, .quick-button[aria-checked="true"]) { background: #3a3a3a; }
+body[data-theme="dark"] .segmented input:checked + span { background: #3a3a3a; }
 .segmented input:focus-visible + span { outline: 1px solid var(--focus-outline); outline-offset: -2px; }
 .segmented .ui-icon { width: 16px; height: 16px; }
 .action-options {
@@ -2525,6 +2541,7 @@ body[data-animations="false"] .ui-tooltip { transition: none; }
 }
 body[data-animations="false"] .app-settings { animation: none; }
 .app-settings-nav {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2555,17 +2572,20 @@ body[data-animations="false"] .app-settings { animation: none; }
 .app-settings-tab .fluent-icon { --icon-size: 16px; width: 18px; }
 .app-settings-tab:hover { background: var(--hover); color: var(--text); }
 .app-settings-tab[aria-selected="true"] { background: var(--selected); color: var(--text); font-weight: 500; }
-.app-settings-tab[aria-selected="true"]::before {
-  content: "";
+/* One bar for the whole nav (settings.ts placeIndicator) slides to the selected tab. */
+.app-settings-indicator {
   position: absolute;
+  z-index: 1;
   left: 0;
-  top: 50%;
+  top: 0;
   width: 3px;
   height: 18px;
   border-radius: 999px;
   background: var(--accent);
-  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 240ms var(--ease-ui);
 }
+body[data-animations="false"] .app-settings-indicator { transition: none; }
 .app-settings-tab:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -2px; }
 /* The page sits inset under the caption, like a sheet below its tabs. */
 .app-settings-main {
@@ -2692,6 +2712,98 @@ body[data-animations="false"] .app-settings { animation: none; }
 .select-search input[type="search"] { width: 100%; min-width: 0; min-height: 34px; height: 34px; padding: 0; background: transparent; border: 0; border-radius: 0; outline: none; color: var(--text); font-size: var(--text-body); }
 .select-hint { font-size: var(--text-secondary); color: var(--muted); margin: 8px 9px; }
 
+/* Reader toolbar flyouts (reader-quick-menus.ts), drawn like the select popups. */
+.reader-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-flyout);
+}
+.reader-menu:popover-open { display: flex; flex-direction: column; gap: 1px; min-width: 168px; animation: flyout-enter 120ms var(--ease-ui); }
+body[data-animations="false"] .reader-menu { animation: none; }
+/* Check column, icon, label and an optional submenu arrow, as in Windows 11 menus. */
+.reader-menu-item {
+  display: grid;
+  grid-template-columns: 16px 18px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-size: var(--text-body);
+  text-align: left;
+  white-space: nowrap;
+}
+.reader-menu-item > :first-child { grid-column: 2; grid-row: 1; }
+.reader-menu-item .reader-menu-label { grid-column: 3; grid-row: 1; }
+.reader-menu-item .reader-menu-check { grid-column: 1; grid-row: 1; visibility: hidden; color: var(--accent); }
+.reader-menu-item .reader-menu-more { grid-column: 4; grid-row: 1; color: var(--muted); }
+.reader-menu-item .ui-icon { width: 18px; height: 18px; }
+.reader-menu-item :is(.reader-menu-check, .reader-menu-more) .ui-icon { width: 16px; height: 16px; }
+.reader-menu-item > [data-icon]:first-child { display: inline-flex; color: var(--muted); }
+.reader-menu-item:is(:hover, :focus, [aria-expanded="true"]) { background: var(--hover); outline: none; }
+.reader-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-outline); }
+.reader-menu-item:is([aria-checked="true"], [data-selected="true"]) .reader-menu-check { visibility: visible; }
+.reader-menu-item:is([aria-checked="true"], [data-selected="true"]) { font-weight: 500; }
+.reader-menu-item:is([aria-checked="true"], [data-selected="true"]) > [data-icon]:first-child { color: var(--accent); }
+.reader-submenu:popover-open { min-width: 132px; }
+
+/* Page theme panel: paper colours on top, background textures below. */
+.theme-panel { padding: 12px 14px 14px; }
+.theme-panel:popover-open { width: 324px; gap: 0; }
+.theme-panel h3 { margin: 0 0 8px; color: var(--muted); font-size: var(--text-secondary); font-weight: 500; }
+.theme-panel h3 + div + h3 { margin-top: 14px; }
+.theme-papers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.theme-paper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 10px;
+  font-size: var(--text-caption);
+  transition: outline-color 120ms var(--ease-ui);
+}
+.theme-paper .ui-icon { width: 14px; height: 14px; }
+.theme-moon { display: inline-flex; }
+.theme-paper[data-paper="system"] { background: var(--bg); color: var(--text); }
+/* Selection rings: an accent outline just off the swatch, like the reference pickers. */
+:is(.theme-paper, .theme-texture-sample) { outline: 2px solid transparent; outline-offset: 2px; }
+.theme-paper:hover, .theme-texture:hover .theme-texture-sample { outline-color: var(--border); }
+.theme-paper[aria-checked="true"], .theme-texture[aria-checked="true"] .theme-texture-sample { outline-color: var(--accent); }
+.theme-paper:focus-visible, .theme-texture:focus-visible .theme-texture-sample { outline-color: var(--focus-outline); }
+.theme-paper:focus-visible, .theme-texture:focus-visible { box-shadow: none; }
+.theme-textures { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.theme-texture {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--text-caption);
+  outline: none;
+}
+.theme-texture[aria-checked="true"] { color: var(--text); }
+.theme-texture-sample {
+  width: 100%;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--swatch-text, var(--text)) 14%, transparent);
+  border-radius: 999px;
+  background-size: 160px;
+  transition: outline-color 120ms var(--ease-ui);
+}
+
 /* Collapsing slides the toolbar up out of the (clipped) reader view and lets the page follow. */
 .reader-view[data-toolbar="false"] > .reader-toolbar {
   margin-top: -52px;
@@ -2744,6 +2856,9 @@ body[data-animations="false"] :is(.reader-toolbar, .corner-button) { transition:
 .reader-view[data-full-width="true"] .reading-area { padding: 0; }
 .reader-view[data-full-width="true"] .page-surface { max-width: none; }
 .reader-view .page-surface, .reader-view #book-frame, .reader-view .reader-loading { background: var(--reading-paper, var(--paper)); }
+/* The page background texture (reading-backgrounds.ts) continues around the page and under turns. */
+.reader-view[data-full-background="true"],
+.reader-view :is(.page-surface, .reader-loading, .motion-page, .stpageflip-page) { background-image: var(--reading-texture, none); }
 
 /* Snapshot frames keep real EPUB layout and allow both sheets to move concurrently. */
 .page-motion { position: absolute; inset: 0; z-index: 8; overflow: hidden; pointer-events: none; isolation: isolate; perspective: 1600px; }

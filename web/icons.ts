@@ -55,7 +55,7 @@ const material: Record<string, string> = {
   pin: 'keep', copy: 'content_copy', note: 'edit_note', underline: 'format_underlined',
   'note-off': 'speaker_notes_off', ask: 'forum', stop: 'stop', refresh: 'refresh', agent: 'smart_toy', 'caption-close': 'close',
   dictionary: 'dictionary', fullscreen: 'fullscreen', 'fullscreen-exit': 'fullscreen_exit',
-  paged: 'auto_stories', scroll: 'view_day', 'align-justify': 'format_align_justify',
+  paged: 'auto_stories', scroll: 'view_day', moon: 'dark_mode-fill', 'theme-system': 'contrast', 'align-justify': 'format_align_justify',
   'align-left': 'format_align_left', 'align-center': 'format_align_center',
 };
 

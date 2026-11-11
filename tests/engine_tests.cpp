@@ -645,6 +645,12 @@ int main()
                 "legacy horizontal and vertical margins migrate without losing customization");
         rejects([&] { dr::patch_settings(defaults, {{"reading", {{"showToolbar", "false"}}}}); },
                 "immersive switches require boolean values");
+        require(defaults["reading"]["background"] == "plain" &&
+                    dr::patch_settings(defaults, {{"reading", {{"background", "linen"}}}})["reading"]["background"] == "linen" &&
+                    dr::normalize_settings({{"reading", {{"theme", "dark"}}}})["reading"]["background"] == "plain",
+                "page backgrounds default to plain, and settings saved before them load as plain");
+        rejects([&] { dr::patch_settings(defaults, {{"reading", {{"background", "marble"}}}}); },
+                "page backgrounds are limited to the built-in textures");
         auto legacy = dr::normalize_settings(
             {{"shell", "direct2d"}, {"theme", "sepia"}, {"fontSize", 22}, {"mode", "paged"}});
         require(legacy["application"]["shell"] == "direct2d" &&

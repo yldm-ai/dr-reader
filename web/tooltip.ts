@@ -54,7 +54,8 @@ export class Tooltips {
     const owner = element?.closest?.('[data-tooltip]') ?? null;
     if (owner === this.target) return;
     this.hide();
-    if (!owner || (owner as HTMLButtonElement).disabled) return;
+    // A button whose flyout is open would only cover it with its own tip.
+    if (!owner || (owner as HTMLButtonElement).disabled || owner.getAttribute('aria-expanded') === 'true') return;
     this.target = owner;
     this.timer = setTimeout(() => {
       if (this.target === owner && owner.isConnected) this.show(owner.getBoundingClientRect(), owner.getAttribute('data-tooltip') ?? '');

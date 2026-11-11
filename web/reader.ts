@@ -41,6 +41,10 @@ type AnnotationValues = Partial<TextAnchor> & Partial<Pick<Annotation, "id" | "n
 type AppliedSettings = Settings | (ReadingSettings & { application?: undefined; reading?: undefined }) |
   { reading: ReadingSettings; application?: ApplicationSettings };
 type ActivationTarget = Window & { drActivationTracked?: boolean };
+const TOC_DEFAULT_WIDTH = 248;
+const TOC_MIN_WIDTH = 220;
+const TOC_MAX_WIDTH = 640;
+const TOC_KEYBOARD_STEP = 16;
 
 export class Reader {
   onUpdate: (book: Book) => void;
@@ -98,6 +102,8 @@ export class Reader {
   activationPress = false;
   quickMenus?: QuickMenus;
   tocScrollbar?: OverlayScrollbar;
+  askScrollbar?: OverlayScrollbar;
+  tocResize?: { pointer: number; startX: number; startWidth: number; width: number };
   tapStart: { x: number; y: number; time: number; selected: boolean } | null = null;
   saveTimer?: Timer;
   tapTimer?: Timer;
@@ -128,7 +134,10 @@ export class Reader {
       this.hideSelection();
       this.hideNotePeek();
     }, true);
-    window.addEventListener("resize", () => this.hideSelection());
+    window.addEventListener("resize", () => {
+      this.hideSelection();
+      if (this.settings && !this.tocResize) this.applyTocWidth(this.settings.tocWidth ?? TOC_DEFAULT_WIDTH);
+    });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && this.dismissSelection()) {
         event.preventDefault();
@@ -141,16 +150,11 @@ export class Reader {
     $<HTMLButtonElement>("font-smaller").onclick = () => this.stepFontSize(-1);
     $<HTMLButtonElement>("font-larger").onclick = () => this.stepFontSize(1);
     $("reader-search").onclick = () => this.openSearch();
-    // The tab header and the 问书 form stay put while the column scrolls; the track runs between them.
+    // The tab header stays put while the column scrolls; the track runs below it. 问书 has its own
+    // scroll viewport above the composer, so its track never reaches into the form.
     const tocHeader = document.querySelector<HTMLElement>(".toc-header")!;
-    let watchedForm: Element | null = null;
     this.tocScrollbar = new OverlayScrollbar($("toc-scroll"), $("toc-panel"), () => {
-      const form = document.querySelector<HTMLElement>("#ask-content:not([hidden]) .ask-form");
-      if (form && form !== watchedForm) { watchedForm = form; this.tocScrollbar?.observe(form); }
-      // The form is stuck to the column's bottom edge (its negative margin reaches into the
-      // padding), so measure where its top really is rather than its height.
-      const scroll = $("toc-scroll").getBoundingClientRect();
-      return { top: tocHeader.offsetHeight + 4, bottom: form ? Math.max(0, scroll.bottom - form.getBoundingClientRect().top) + 4 : 4 };
+      return { top: tocHeader.offsetHeight + 4, bottom: 4 };
     });
     this.tocScrollbar.observe(tocHeader);
     $<HTMLButtonElement>("collapse-toolbar").onclick = () => this.setToolbarVisible(false);
@@ -233,6 +237,8 @@ export class Reader {
         return { agent, model: this.appSettings?.agentModels?.[agent] ?? "", effort: this.appSettings?.agentEfforts?.[agent] ?? "" };
       },
     });
+    this.askScrollbar = new OverlayScrollbar(this.chat.scroller, $("toc-panel"), { top: 4, bottom: 4 });
+    this.attachTocResize();
     $("annotation-swatches").onclick = (event) => {
       const button = (event.target as Element).closest("button");
       if (!button) return;
@@ -255,6 +261,98 @@ export class Reader {
     this.attachAnnotationDrag();
     this.observer = new ResizeObserver(() => { this.motion.cancel(); this.reflow(); this.updateTocIndicator(); });
     this.observer.observe($<HTMLIFrameElement>("book-frame"));
+  }
+
+  attachTocResize() {
+    const handle = $("toc-resize");
+    const keepOpen = () => {
+      clearTimeout(this.tocHideTimer);
+      this.tocHideTimer = undefined;
+    };
+    handle.addEventListener("pointerenter", keepOpen);
+    handle.addEventListener("pointermove", keepOpen);
+    handle.addEventListener("focus", keepOpen);
+    handle.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.setTocExpanded(true);
+      keepOpen();
+      try { handle.setPointerCapture(event.pointerId); } catch { /* Window listeners still track the drag. */ }
+      const startWidth = $("toc-panel").getBoundingClientRect().width;
+      this.tocResize = {
+        pointer: event.pointerId,
+        startX: event.clientX,
+        startWidth,
+        width: startWidth,
+      };
+      document.body.dataset.tocResizing = "true";
+    });
+    const move = (event: PointerEvent) => {
+      const drag = this.tocResize;
+      if (!drag || event.pointerId !== drag.pointer) return;
+      event.preventDefault();
+      drag.width = this.applyTocWidth(drag.startWidth + event.clientX - drag.startX);
+    };
+    const finish = (event?: PointerEvent) => {
+      const drag = this.tocResize;
+      if (!drag || (event && event.pointerId !== drag.pointer)) return;
+      this.tocResize = undefined;
+      delete document.body.dataset.tocResizing;
+      try {
+        if (handle.hasPointerCapture(drag.pointer)) handle.releasePointerCapture(drag.pointer);
+      } catch { /* The pointer may already have been released by the host. */ }
+      if (drag.width !== drag.startWidth) this.persistTocWidth(drag.width);
+      if (!this.settings?.tocPinned && !$("toc-panel").matches(":hover")) this.scheduleTocHide();
+    };
+    // Window-level listeners keep a drag alive if WebView2 loses pointer capture while the panel
+    // is changing width underneath the pointer.
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", finish, true);
+    window.addEventListener("blur", () => finish());
+    handle.addEventListener("dblclick", event => {
+      event.preventDefault();
+      this.persistTocWidth(this.applyTocWidth(TOC_DEFAULT_WIDTH));
+    });
+    handle.addEventListener("keydown", event => {
+      const max = this.tocWidthBounds().max;
+      const current = this.applyTocWidth(this.settings?.tocWidth ?? TOC_DEFAULT_WIDTH);
+      const step = event.shiftKey ? TOC_KEYBOARD_STEP * 2 : TOC_KEYBOARD_STEP;
+      const next = event.key === "ArrowLeft" ? current - step
+        : event.key === "ArrowRight" ? current + step
+        : event.key === "Home" ? TOC_MIN_WIDTH
+        : event.key === "End" ? max
+        : undefined;
+      if (next === undefined) return;
+      event.preventDefault();
+      this.persistTocWidth(this.applyTocWidth(next));
+    });
+  }
+
+  /** Keeps a wide sidebar useful without squeezing the book below a readable width. */
+  tocWidthBounds(): { min: number; max: number } {
+    const workspace = document.querySelector<HTMLElement>(".reader-workspace");
+    const available = workspace ? workspace.clientWidth - 360 : TOC_MAX_WIDTH;
+    return { min: TOC_MIN_WIDTH, max: Math.max(TOC_MIN_WIDTH, Math.min(TOC_MAX_WIDTH, Math.floor(available))) };
+  }
+
+  applyTocWidth(width: number): number {
+    const bounds = this.tocWidthBounds();
+    const next = Math.round(Math.min(bounds.max, Math.max(bounds.min, width)));
+    const workspace = document.querySelector<HTMLElement>(".reader-workspace");
+    workspace?.style.setProperty("--toc-panel-width", `${next}px`);
+    const handle = $("toc-resize");
+    handle.setAttribute("aria-valuemin", String(bounds.min));
+    handle.setAttribute("aria-valuemax", String(bounds.max));
+    handle.setAttribute("aria-valuenow", String(next));
+    return next;
+  }
+
+  persistTocWidth(width: number): void {
+    if (this.settings?.tocWidth === width) return;
+    if (this.settings) this.settings = { ...this.settings, tocWidth: width };
+    if (this.onReadingSetting) this.onReadingSetting({ tocWidth: width });
   }
 
   attachTocHover() {
@@ -298,9 +396,16 @@ export class Reader {
 
   trackTocPointer(x: number, y: number): void {
     this.tocPointer = { x, y };
+    if (this.tocResize) return;
     const panel = $("toc-panel");
     if (!this.book || this.settings?.tocPinned || panel.hidden || panel.dataset.expanded !== "true") return;
     const rect = panel.getBoundingClientRect();
+    const handle = $("toc-resize").getBoundingClientRect();
+    if (x >= handle.left && x <= handle.right && y >= handle.top && y <= handle.bottom) {
+      clearTimeout(this.tocHideTimer);
+      this.tocHideTimer = undefined;
+      return;
+    }
     const edge = $("toc-reveal-zone").getBoundingClientRect();
     if (x >= edge.left && x <= edge.right && y >= edge.top && y <= edge.bottom && !this.tocCornerProtected(x, y)) {
       clearTimeout(this.tocHideTimer); this.tocHideTimer = undefined; return;
@@ -312,14 +417,15 @@ export class Reader {
 
   /** Hides the auto-hide panel 500ms after the pointer leaves it, so sweeping along the edge cannot make it flicker. */
   scheduleTocHide() {
-    if (this.tocHideTimer) return;
+    if (this.tocHideTimer || this.tocResize) return;
     this.tocHideTimer = setTimeout(() => {
       this.tocHideTimer = undefined;
       const panel = $("toc-panel");
       const pointer = this.tocPointer;
       const overEdge = $("toc-reveal-zone").matches(":hover") &&
         !(pointer && this.tocCornerProtected(pointer.x, pointer.y));
-      if (!panel.matches(":hover") && !overEdge && !panel.querySelector(":focus-visible"))
+      const overHandle = $("toc-resize").matches(":hover");
+      if (!panel.matches(":hover") && !overHandle && !overEdge && !panel.querySelector(":focus-visible"))
         this.setTocExpanded(false);
     }, 500);
   }
@@ -415,6 +521,7 @@ export class Reader {
   }
 
   tab(name: string): void {
+    $("toc-panel").dataset.tab = name;
     document
       .querySelectorAll<HTMLElement>("[data-tab]")
       .forEach((button) =>
@@ -427,8 +534,8 @@ export class Reader {
     if (name === "ask") this.chat.focus();
     if (name === "toc") this.updateTocIndicator();
     this.placeTabIndicator(true);
-    // Only 问书 has a form at the bottom of the column.
     this.tocScrollbar?.schedule();
+    this.askScrollbar?.schedule();
   }
 
   /** The sidebar tabs' accent bar sits under the active tab and slides when it changes. */
@@ -1011,6 +1118,9 @@ export class Reader {
     $("toc-panel").hidden = r.showToc === false;
     const panel = $("toc-panel");
     panel.dataset.pinned = String(Boolean(r.tocPinned));
+    // A settings response can arrive while the pointer is still dragging. It must not replace
+    // the live width with the last saved value, or the panel snaps back under the pointer.
+    if (!this.tocResize) this.applyTocWidth(r.tocWidth ?? TOC_DEFAULT_WIDTH);
     panel.inert = !r.tocPinned && panel.dataset.expanded !== "true";
     $("toc-reveal-zone").hidden = r.showToc === false || Boolean(r.tocPinned);
     const pin = $("pin-toc");

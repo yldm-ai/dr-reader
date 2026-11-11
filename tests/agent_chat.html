@@ -143,6 +143,16 @@ try {
   check(doc.querySelectorAll('.ask-answer-body li').length === 2, 'answer list rendered');
   check(doc.querySelector('.ask-meta').textContent.includes('Codex'), 'agent label shown');
   check(quote.hidden, 'quote cleared after asking');
+  const askPanel = doc.getElementById('toc-panel');
+  const askBody = doc.querySelector('.ask-body');
+  const askForm = doc.querySelector('.ask-form');
+  const panelRect = askPanel.getBoundingClientRect();
+  const bodyRect = askBody.getBoundingClientRect();
+  const formRect = askForm.getBoundingClientRect();
+  check(askPanel.dataset.tab === 'ask' && win.getComputedStyle(askBody).overflowY === 'auto',
+    'ask conversation has its own scroll viewport');
+  check(Math.abs(bodyRect.bottom - formRect.top) <= 1, 'conversation scrolls only above the composer');
+  check(Math.abs(formRect.bottom - panelRect.bottom) <= 2, 'composer surface reaches the panel bottom');
   const first = asks()[0].params;
   check(first.agent === 'claude' && first.model === 'opus[1m]' && first.effort === 'turbo', 'configured agent, model and effort sent');
   check(first.prompt.includes('<selection>\n阅读是一段安静的时光') && first.prompt.includes('读者的问题：这句话想表达什么？'), 'passage and question in prompt');

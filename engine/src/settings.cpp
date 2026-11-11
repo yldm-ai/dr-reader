@@ -84,6 +84,7 @@ Json default_settings()
     "textIndent": 0.0,
     "theme": "system",
     "tocPinned": false,
+    "tocWidth": 248,
     "turnDuration": 500,
     "width": 760
   },
@@ -113,7 +114,7 @@ Json patch_settings(const Json& current,const Json& patch){if(!patch.is_object()
  if(p.contains("dictionaries")){if(!p["dictionaries"].is_array()||p["dictionaries"].size()>12)throw std::runtime_error("最多添加 12 个查词网站");Json dictionaries=Json::array();std::set<std::string> ids;for(auto& item:p["dictionaries"]){auto id=item.at("id").get<std::string>(),name=item.at("name").get<std::string>(),url=item.at("url").get<std::string>();if(id.empty()||id.size()>64||name.empty()||name.size()>128||!ids.insert(id).second)throw std::runtime_error("查词网站名称或标识无效");validate_url(url);dictionaries.push_back({{"id",id},{"name",name},{"url",url},{"enabled",item.value("enabled",true)}});}a["dictionaries"]=dictionaries;}}
  if(patch.contains("reading")){auto p=patch["reading"];if(!p.is_object())throw std::runtime_error("排版设置格式无效");auto& r=result["reading"];enumeration(r,p,"theme",{"system","light","dark","sepia","green","gray","night"});enumeration(r,p,"background",{"plain","grain","fiber","linen","wash"});enumeration(r,p,"mode",{"scroll","paged"});enumeration(r,p,"layout",{"single","double"});enumeration(r,p,"doubleAnimation",{"none","turn","turn-fold","turn-fold-edge","turn-hard"});enumeration(r,p,"alignment",{"justify","left","center"});if(p.contains("animation")&&p["animation"]=="turn-bottom")p["animation"]="turn";/* The soft-page corner now follows the pointer; keep saved bottom-corner choices loadable. */enumeration(r,p,"animation",{"none","slide","cover","fade","turn","turn-fold","turn-fold-edge","turn-hard"});
  if(p.contains("fontFamily")){auto font=p.at("fontFamily").get<std::string>();if(font.empty()||font.size()>256||font.find_first_of("\r\n")!=font.npos)throw std::runtime_error("无效字体名称");r["fontFamily"]=font;}
- number(r,p,"fontSize",10,56,true);number(r,p,"fontWeight",300,800,true);number(r,p,"lineHeight",1.0,3.0);number(r,p,"paragraphSpacing",0,3);number(r,p,"letterSpacing",-1,6);number(r,p,"textIndent",0,4);number(r,p,"width",400,1600,true);number(r,p,"paddingX",0,240,true);number(r,p,"paddingY",0,240,true);
+ number(r,p,"fontSize",10,56,true);number(r,p,"fontWeight",300,800,true);number(r,p,"lineHeight",1.0,3.0);number(r,p,"paragraphSpacing",0,3);number(r,p,"letterSpacing",-1,6);number(r,p,"textIndent",0,4);number(r,p,"width",400,1600,true);number(r,p,"tocWidth",220,640,true);number(r,p,"paddingX",0,240,true);number(r,p,"paddingY",0,240,true);
  if(p.contains("paddingX")){if(!p.contains("paddingLeft"))r["paddingLeft"]=r["paddingX"];if(!p.contains("paddingRight"))r["paddingRight"]=r["paddingX"];}
  if(p.contains("paddingY")){if(!p.contains("paddingTop"))r["paddingTop"]=r["paddingY"];if(!p.contains("paddingBottom"))r["paddingBottom"]=r["paddingY"];}
  for(auto key:{"paddingTop","paddingBottom","paddingLeft","paddingRight"})number(r,p,key,0,240,true);

@@ -106,6 +106,81 @@ try {
         await app.locator('.ask-input').fill('用一句话概括这一章。');
         await app.locator('.ask-input').press('Enter');
         await app.locator('.ask-copy').waitFor();
+        const panel = app.locator('#toc-panel');
+        const handle = app.locator('#toc-resize');
+        const pin = app.locator('#pin-toc');
+        if (await pin.getAttribute('aria-pressed') !== 'true') {
+          await pin.click();
+          await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocPinned === true);
+        }
+        const panelWidth = (await panel.boundingBox())?.width;
+        const handleBox = await handle.boundingBox();
+        if (!panelWidth || !handleBox) throw Error('sidebar resize handle must be available beside the open panel');
+        await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+        await page.waitForTimeout(650);
+        if (!await panel.isVisible() || await panel.getAttribute('data-expanded') !== 'true')
+          throw Error('pinned sidebar must stay put while the pointer rests on its resize edge');
+        await page.mouse.down();
+        await app.waitForFunction(() => document.body.dataset.tocResizing === 'true' &&
+          getComputedStyle(document.getElementById('toc-resize-shield')!).display === 'block');
+        const pressedCursor = await app.evaluate(() => {
+          const shield = document.getElementById('toc-resize-shield')!;
+          const handle = document.getElementById('toc-resize')!;
+          return {
+            shield: getComputedStyle(shield).cursor,
+            handle: getComputedStyle(handle).cursor,
+            body: getComputedStyle(document.body).cursor,
+            covers: document.elementFromPoint(innerWidth / 2, innerHeight / 2) === shield,
+          };
+        });
+        if (!pressedCursor.covers || ['shield', 'handle', 'body'].some(key => pressedCursor[key as keyof typeof pressedCursor] !== 'ew-resize'))
+          throw Error(`resize cursor must be fixed from pointer down: ${JSON.stringify(pressedCursor)}`);
+        await page.mouse.move(handleBox.x + handleBox.width / 2 + 72, handleBox.y + handleBox.height / 2, { steps: 4 });
+        const draggedWidth = Math.round(panelWidth + 72);
+        await app.waitForFunction(width => Math.abs(document.getElementById('toc-panel').getBoundingClientRect().width - width) <= 1, draggedWidth);
+        // A reading-settings response can arrive mid-drag; it must not restore the saved width.
+        await app.evaluate(() => document.getElementById('font-smaller')!.click());
+        await page.waitForTimeout(400);
+        if (Math.abs((await panel.boundingBox()).width - draggedWidth) > 1)
+          throw Error('a settings sync must not snap the sidebar back during a drag');
+        const dragCursor = await app.evaluate(() => {
+          const shield = document.getElementById('toc-resize-shield')!;
+          return {
+            resizing: document.body.dataset.tocResizing === 'true',
+            display: getComputedStyle(shield).display,
+            cursor: getComputedStyle(shield).cursor,
+            covers: document.elementFromPoint(innerWidth / 2, innerHeight / 2) === shield,
+          };
+        });
+        if (!dragCursor.resizing || dragCursor.display !== 'block' || dragCursor.cursor !== 'ew-resize' || !dragCursor.covers)
+          throw Error(`resize cursor must stay stable for the whole drag: ${JSON.stringify(dragCursor)}`);
+        await page.mouse.up();
+        await app.waitForFunction(() => document.body.dataset.tocResizing !== 'true' &&
+          getComputedStyle(document.getElementById('toc-resize-shield')).display === 'none');
+        await app.waitForFunction(width => window.nativeProbe.data.settings.reading.tocWidth === width, draggedWidth);
+        const askLayout = await app.evaluate(() => {
+          const body = document.querySelector('.ask-body')!.getBoundingClientRect();
+          const form = document.querySelector('.ask-form')!.getBoundingClientRect();
+          const panel = document.getElementById('toc-panel')!.getBoundingClientRect();
+          return { bodyBottom: body.bottom, formTop: form.top, formBottom: form.bottom, panelBottom: panel.bottom };
+        });
+        if (Math.abs(askLayout.bodyBottom - askLayout.formTop) > 1) throw Error('ask text must stop above the composer');
+        if (Math.abs(askLayout.formBottom - askLayout.panelBottom) > 2) throw Error('ask composer must reach the panel bottom');
+        await handle.dblclick();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocWidth === 248 &&
+          Math.abs(document.getElementById('toc-panel')!.getBoundingClientRect().width - 248) <= 1);
+        await pin.click();
+        await app.waitForFunction(() => window.nativeProbe.data.settings.reading.tocPinned === false);
+        await app.locator('#book-frame').hover();
+        await panel.waitFor({ state: 'hidden' });
+        const view = await app.locator('#reader-view').boundingBox();
+        await page.mouse.move(view.x + 4, view.y + view.height / 2);
+        await panel.waitFor({ state: 'visible' });
+        const autoHandle = await handle.boundingBox();
+        await page.mouse.move(autoHandle.x + autoHandle.width / 2, autoHandle.y + autoHandle.height / 2);
+        await page.waitForTimeout(700);
+        if (!await panel.isVisible() || await panel.getAttribute('data-expanded') !== 'true')
+          throw Error('auto-hide sidebar must stay open while the pointer rests on its resize edge');
         for (const theme of ['light', 'dark']) {
           await app.evaluate(value => { document.body.dataset.theme = value; }, theme);
           await app.locator('#toc-panel').screenshot({ path: resolve(directory, `agent-chat-${theme}.png`) });
@@ -641,7 +716,8 @@ try {
           throw Error(`the tab bar must slide to the new tab: ${restingBar.center} → ${slidingBar.center} → ${landedBar.center}`);
         await app.evaluate(value => { if (value === undefined) delete document.body.dataset.animations; else document.body.dataset.animations = value; }, animationsSetting);
         // Sidebar scrollbar: the track runs between the sticky tab header and the rounded bottom
-        // corner (or the 问书 form), in a lane the content does not reach.
+        // corner (or the 问书 form), in a lane the content does not reach. 问书 scrolls in its own
+        // viewport, so its track is the one beside the conversation rather than the outer column.
         const checkTrack = async (tab: string, filler: string) => {
           await app.locator(`[data-tab="${tab}"]`).click();
           await app.evaluate(filler => {
@@ -652,11 +728,16 @@ try {
           await app.locator('#toc-panel').hover();
           await page.waitForTimeout(100);
           const box = await app.evaluate(() => {
-            const panel = document.getElementById('toc-panel'), track = panel.querySelector<HTMLElement>('.overlay-scrollbar');
+            const panel = document.getElementById('toc-panel');
+            const tracks = [...panel.querySelectorAll<HTMLElement>('.overlay-scrollbar')];
+            const track = tracks.find(item => !item.hidden) ?? tracks[0];
             const thumb = track.querySelector('.overlay-scrollbar-thumb').getBoundingClientRect();
             const scroll = document.getElementById('toc-scroll');
-            const content = [...scroll.children as HTMLCollectionOf<HTMLElement>].find(child => !child.hidden && child.classList.contains('toc-header') === false && child.getBoundingClientRect().height > 0);
-            const form = document.querySelector('#ask-content:not([hidden]) .ask-form')?.getBoundingClientRect();
+            const ask = document.getElementById('toc-panel')!.dataset.tab === 'ask';
+            const content = ask
+              ? document.querySelector('.ask-body :is(.ask-thread, .ask-history):not([hidden])')!
+              : [...scroll.children as HTMLCollectionOf<HTMLElement>].find(child => !child.hidden && child.classList.contains('toc-header') === false && child.getBoundingClientRect().height > 0)!;
+            const form = ask ? document.querySelector('.ask-form')?.getBoundingClientRect() : undefined;
             const t = track.getBoundingClientRect(), p = panel.getBoundingClientRect();
             return { hidden: track.hidden, top: t.top, bottom: t.bottom, left: thumb.left, header: document.querySelector('.toc-header').getBoundingClientRect().bottom,
               panelBottom: p.bottom, radius: parseFloat(getComputedStyle(panel).borderBottomRightRadius), contentRight: content.getBoundingClientRect().right, formTop: form?.top };

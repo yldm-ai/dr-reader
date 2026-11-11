@@ -28,6 +28,8 @@ export interface ReadingSettings {
   showToolbar: boolean;
   showToc: boolean;
   tocPinned: boolean;
+  /** Width of the reader's sidebar in CSS pixels, dragged at its right edge (220–640). */
+  tocWidth?: number;
   showChapterTitle: boolean;
   showPagination: boolean;
   showProgress: boolean;

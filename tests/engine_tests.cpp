@@ -578,6 +578,15 @@ int main()
                     library.settings()["reading"]["tocPinned"].get<bool>(), "sidebar pin preference persists");
         rejects([&] { library.save_settings({{"reading", {{"tocPinned", "true"}}}}); },
                 "sidebar pin requires a boolean");
+        require(defaults["reading"]["tocWidth"] == 248, "sidebar starts at its original width");
+        auto wide_sidebar = library.save_settings({{"reading", {{"tocWidth", 420}}}});
+        require(wide_sidebar["reading"]["tocWidth"] == 420 && library.settings()["reading"]["tocWidth"] == 420,
+                "a dragged sidebar width persists");
+        require(dr::patch_settings(defaults, {{"reading", {{"tocWidth", 100}}}})["reading"]["tocWidth"] == 220 &&
+                    dr::patch_settings(defaults, {{"reading", {{"tocWidth", 2000}}}})["reading"]["tocWidth"] == 640 &&
+                    dr::patch_settings(defaults, {{"reading", {{"tocWidth", 300.6}}}})["reading"]["tocWidth"] == 301,
+                "sidebar width is clamped to whole pixels between 220 and 640");
+        rejects([&] { library.save_settings({{"reading", {{"tocWidth", "420"}}}}); }, "sidebar width requires a number");
         auto scroll_preferences = dr::normalize_settings(
             {{"version", 2}, {"reading", {{"mode", "scroll"}}}});
         require(scroll_preferences["reading"]["mode"] == "scroll",

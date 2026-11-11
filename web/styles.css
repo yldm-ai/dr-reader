@@ -999,6 +999,50 @@ body[data-animations="false"] .selection-menu {
   position: relative;
   overflow: hidden;
 }
+/* The invisible hit area straddles the panel's right border. The resize cursor is the only
+   hover affordance, so the panel edge stays visually unchanged. */
+.toc-resize {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  bottom: 12px;
+  left: calc(12px + var(--toc-panel-width));
+  width: 12px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+.toc-resize:focus-visible {
+  outline: 1px solid var(--focus-outline);
+  outline-offset: 2px;
+}
+.toc-resize-shield {
+  display: none;
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  cursor: ew-resize !important;
+  touch-action: none;
+}
+body[data-toc-resizing="true"] .toc-resize-shield { display: block; }
+.toc-panel[hidden] + .toc-resize,
+.toc-panel[data-pinned="false"]:not([data-expanded="true"]) + .toc-resize {
+  visibility: hidden;
+  pointer-events: none;
+}
+body[data-toc-resizing="true"] {
+  cursor: ew-resize;
+  user-select: none;
+}
+/* Iframes and controls keep their own cursors. One forced cursor avoids a flicker when the
+   reflowing edge moves under the pressed pointer. */
+body[data-toc-resizing="true"],
+body[data-toc-resizing="true"] * {
+  cursor: ew-resize !important;
+}
+body[data-toc-resizing="true"] .toc-panel {
+  transition: none;
+}
 /* The right padding is the overlay scrollbar's lane (10px, 2px from the edge), so the thumb never
    covers text. */
 .toc-scroll {
@@ -3058,8 +3102,24 @@ body[data-animations="false"] .reader-footer { transition: none; }
 
 /* 问书: a conversation with a local agent CLI about the open book. Answers read like body text,
    questions sit in a quiet tinted block, and the composer stays at the bottom of the panel. */
-#ask-content:not([hidden]) { display: flex; flex-direction: column; min-height: calc(100% - 48px); }
-.ask-thread { flex: 1; padding: 4px 4px 12px; }
+/* 问书 owns the full panel height: only the conversation scrolls, and the composer's surface ends
+   at the panel's bottom edge instead of floating over the last answer. */
+#toc-panel[data-tab="ask"] .toc-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+#toc-panel[data-tab="ask"] .toc-header { flex: 0 0 auto; }
+#ask-content:not([hidden]) { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.ask-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 -14px 0 -8px;
+  padding: 4px 18px 12px 12px;
+}
+.ask-thread { padding: 0 0 12px; }
 .ask-turn { margin: 0 0 14px; font-size: var(--text-body); line-height: 1.75; color: var(--text); }
 .ask-user { padding: 8px 10px; border-radius: 6px; background: var(--hover); }
 .ask-user p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -3084,7 +3144,7 @@ body[data-animations="false"] .reader-footer { transition: none; }
 .ask-meta .text-button { height: 24px; padding: 0 6px; font-size: var(--text-caption); }
 .ask-error { color: var(--danger); overflow-wrap: anywhere; }
 .ask-form {
-  position: sticky; bottom: 0; margin: 0 -14px -16px -8px; padding: 8px 14px 12px 8px;
+  flex: 0 0 auto; margin: 0 -14px 0 -8px; padding: 8px 14px 8px 8px;
   background: var(--surface); border-top: 1px solid var(--border);
 }
 .ask-quote { display: flex; align-items: flex-start; gap: 4px; margin-bottom: 6px; }

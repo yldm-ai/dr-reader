@@ -257,6 +257,11 @@
             <div id="ask-content" hidden></div>
             </div>
           </aside>
+          <!-- Drags the sidebar's width; it straddles the panel's right edge. -->
+          <div id="toc-resize" class="toc-resize" role="separator" tabindex="0" aria-orientation="vertical"
+            aria-controls="toc-panel" aria-label="调整侧边栏宽度" aria-valuemin="220" aria-valuemax="640" title="拖动调整宽度，双击恢复默认"></div>
+          <!-- Keeps one resize cursor while the panel reflows under the pointer. -->
+          <div id="toc-resize-shield" class="toc-resize-shield" aria-hidden="true"></div>
           <section class="reading-area">
             <div id="chapter-label" class="chapter-label"></div>
             <div id="page-surface" class="page-surface">

@@ -74,6 +74,7 @@ function when(seconds: number): string {
  */
 export class AgentChat {
   readonly root: HTMLElement;
+  readonly scroller: HTMLElement;
   private host: AgentChatHost;
   private thread: HTMLElement;
   private historyPanel: HTMLElement;
@@ -92,13 +93,16 @@ export class AgentChat {
     this.root = root;
     this.host = host;
     root.classList.add('ask-panel');
-    root.innerHTML = `<div class="ask-thread" aria-live="polite"></div>
+    root.innerHTML = `<div class="ask-body">
+<div class="ask-thread" aria-live="polite"></div>
 <div class="ask-history" hidden><div class="ask-history-head"><span>历史对话</span><button type="button" class="text-button ask-history-close">返回</button></div><div class="ask-history-list"></div></div>
+</div>
 <form class="ask-form">
   <div class="ask-quote" hidden><span class="ask-quote-text"></span><button type="button" class="icon-button ask-quote-remove" aria-label="移除引用的文字" title="移除引用">${icon('close')}</button></div>
   <textarea class="ask-input" rows="3" maxlength="4000" placeholder="问问这本书…" aria-label="向 AI 提问"></textarea>
   <div class="ask-actions"><button type="button" class="text-button ask-reset">新对话</button><button type="button" class="text-button ask-history-open" aria-pressed="false">历史</button><span class="ask-hint" title="Shift+Enter 换行">Enter 发送</span><button type="submit" class="icon-button ask-send" aria-label="发送" title="发送">${icon('arrow-up')}</button></div>
 </form>`;
+    this.scroller = root.querySelector('.ask-body')!;
     this.thread = root.querySelector('.ask-thread')!;
     this.historyPanel = root.querySelector('.ask-history')!;
     this.historyList = root.querySelector('.ask-history-list')!;
@@ -179,13 +183,14 @@ export class AgentChat {
       message.role === 'user' ? this.userTurn(message.text, message.quote ?? '') : this.answerTurn(message)));
     if (!this.session.messages.length) this.renderEmpty();
     this.hideHistory();
-    this.thread.lastElementChild?.scrollIntoView({ block: 'end' });
+    this.scroller.scrollTop = this.scroller.scrollHeight;
   }
 
   private async showHistory(): Promise<void> {
     if (!this.bookId) { toast('请先打开一本书'); return; }
     this.historyPanel.hidden = false;
     this.thread.hidden = true;
+    this.scroller.scrollTop = 0;
     this.root.querySelector('.ask-history-open')!.setAttribute('aria-pressed', 'true');
     if (!this.historyList.childElementCount) this.historyList.innerHTML = '<p class="panel-hint">正在读取…</p>';
     try {
@@ -199,6 +204,7 @@ export class AgentChat {
   private hideHistory(): void {
     this.historyPanel.hidden = true;
     this.thread.hidden = false;
+    this.scroller.scrollTop = this.scroller.scrollHeight;
     this.root.querySelector('.ask-history-open')?.setAttribute('aria-pressed', 'false');
   }
 
@@ -409,8 +415,7 @@ export class AgentChat {
 
   /** Keeps the newest answer in view while it streams, unless the reader scrolled up. */
   private reveal(turn: HTMLElement, streaming = false): void {
-    const scroller = this.root.closest<HTMLElement>('.toc-scroll');
-    if (!scroller) return;
+    const scroller = this.scroller;
     const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
     if (!streaming || nearBottom) turn.scrollIntoView({ block: 'nearest' });
   }

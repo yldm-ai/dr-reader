@@ -27,7 +27,7 @@ export function bootstrapFixture(): Fixture {
   const settings = {
     version: 2,
     application: { theme: 'light', shell: 'direct2d', animations: false, bookOpeningEnabled: false, bookOpeningAnimation: 'circles',
-      selectionActions: { highlight: true, underline: true, note: true, copy: true, search: true, dictionary: true, ask: true },
+      selectionActions: { highlight: true, underline: true, note: true, copy: true, search: true, dictionary: true, drDict: true, ask: true },
       dictionaries: [{ id: 'one', name: '测试词典', url: 'https://example.com/?q={text}', enabled: true }] },
     reading: { theme: 'sepia', background: 'plain', mode: 'paged', fontFamily: 'serif', fontSize: 20, fontWeight: 400,
       lineHeight: 1.9, paragraphSpacing: 1, letterSpacing: 0, textIndent: 0, alignment: 'justify',

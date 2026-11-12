@@ -38,7 +38,7 @@ export interface Annotation extends TextAnchor {
 }
 
 export interface Dictionary { id: string; name: string; url: string; enabled: boolean }
-export type SelectionAction = 'highlight' | 'underline' | 'note' | 'copy' | 'search' | 'dictionary' | 'ask';
+export type SelectionAction = 'highlight' | 'underline' | 'note' | 'copy' | 'search' | 'dictionary' | 'drDict' | 'ask';
 /** Local agent CLIs that can answer questions about the book. */
 export type AgentId = 'codex' | 'claude' | 'opencode';
 export type AgentChoice = 'auto' | AgentId;

@@ -202,6 +202,12 @@ void agent_checks()
     require(settings["application"]["agent"] == "claude" && settings["application"]["agentModels"]["claude"] == "opus" &&
                 settings["application"]["agentModels"]["codex"] == "" && settings["application"]["selectionActions"]["ask"] == true,
             "agent settings");
+    // The DR Dict lookup action defaults on and can be turned off from the selection menu settings.
+    require(settings["application"]["selectionActions"]["drDict"] == true, "DR Dict selection action defaults on");
+    auto without_dr_dict = dr::patch_settings(dr::default_settings(), {{"application", {{"selectionActions", {{"drDict", false}}}}}});
+    require(without_dr_dict["application"]["selectionActions"]["drDict"] == false &&
+                without_dr_dict["application"]["selectionActions"]["dictionary"] == true,
+            "DR Dict selection action toggles alone");
     rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agent", "gemini"}}}}); }, "unknown agent");
     rejects([] { dr::patch_settings(dr::default_settings(), {{"application", {{"agentModels", {{"codex", "a;b"}}}}}}); }, "unsafe model");
     auto effort = dr::patch_settings(dr::default_settings(), {{"application", {{"agentEfforts", {{"codex", "xhigh"}}}}}});

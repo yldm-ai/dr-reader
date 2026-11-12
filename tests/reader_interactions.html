@@ -136,6 +136,21 @@ try {
   reader.beginPageTap(press());
   check(reader.tapStart && !reader.tapDismissed && !reader.activationPress, 'the press after activation must tap normally');
 
+  // “查词典” follows its setting and hands the selected text to DR Dict's popup through the host.
+  reader.appSettings = { selectionActions: { drDict: false }, dictionaries: [] };
+  reader.showSelectionMenu(range);
+  check(document.getElementById('selection-dr-dict').hidden, 'the DR Dict action must follow its setting');
+  reader.appSettings = { selectionActions: { drDict: true }, dictionaries: [] };
+  reader.showSelectionMenu(range);
+  check(!document.getElementById('selection-dr-dict').hidden, 'the DR Dict action must show when enabled');
+  reader.selection = { text: '  原创词条 \n' };
+  requests.length = 0;
+  await reader.lookupInDrDict();
+  check(requests.length === 1 && requests[0].method === 'dict.popup' && requests[0].params.text === '原创词条',
+    'the DR Dict action must send the trimmed selection');
+  check(document.getElementById('selection-menu').hidden, 'the selection menu closes when DR Dict opens');
+  reader.appSettings = { selectionActions: {}, dictionaries: [] };
+
   const dictionaries = [{ id: 'one', name: '测试词典一' }, { id: 'two', name: '测试词典二' }];
   let pending = reader.chooseDictionary(dictionaries);
   let dialog = document.querySelector('.dictionary-picker');

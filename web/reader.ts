@@ -227,6 +227,7 @@ export class Reader {
     peek.addEventListener("pointerleave", () => this.scheduleNotePeekHide());
     $("selection-copy").onclick = () => this.copySelection();
     $("selection-search").onclick = () => this.searchSelection();
+    $("selection-dr-dict").onclick = () => this.lookupInDrDict();
     $("selection-dictionary").onclick = () => this.lookupSelection();
     $("selection-ask").onclick = () => this.askSelection();
     this.chat = new AgentChat($("ask-content"), {
@@ -1755,6 +1756,7 @@ export class Reader {
     $("selection-copy").hidden = !actions.copy;
     $("selection-search").hidden = !actions.search;
     $("selection-ask").hidden = !actions.ask;
+    $("selection-dr-dict").hidden = !actions.drDict;
     const dictionaries =
       this.appSettings.dictionaries?.filter(
         (dictionary) => dictionary.enabled,
@@ -2197,6 +2199,18 @@ export class Reader {
     this.tab("search");
     $<HTMLInputElement>("book-search-input").value = query;
     this.search();
+  }
+
+  // DR Dict's lookup popup opens beside the pointer, which is on this menu.
+  async lookupInDrDict() {
+    const text = this.selection?.text.trim();
+    if (!text) return;
+    this.hideSelection();
+    try {
+      await call("dict.popup", { text: text.slice(0, 1024) });
+    } catch (error) {
+      toast(errorMessage(error), "error");
+    }
   }
 
   async lookupSelection() {

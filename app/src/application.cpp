@@ -44,6 +44,54 @@ Json installed_fonts(){Microsoft::WRL::ComPtr<IDWriteFactory> factory;Json resul
  for(auto& name:names)result.push_back(name);return result;}
 void copy_text(HWND owner,const std::string& text){if(text.size()>65536)throw std::runtime_error("复制内容过长");auto wide=widen(text);auto bytes=(wide.size()+1)*sizeof(wchar_t);HGLOBAL memory=GlobalAlloc(GMEM_MOVEABLE,bytes);if(!memory)throw std::runtime_error("无法分配剪贴板内存");auto data=GlobalLock(memory);if(!data){GlobalFree(memory);throw std::runtime_error("无法锁定剪贴板内存");}memcpy(data,wide.c_str(),bytes);GlobalUnlock(memory);
  if(!OpenClipboard(owner)){GlobalFree(memory);throw std::runtime_error("剪贴板正被其他程序使用");}EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,memory)){CloseClipboard();GlobalFree(memory);throw std::runtime_error("无法写入剪贴板");}CloseClipboard();}
+// One argument as CommandLineToArgvW reads it back: quoted, inner quotes and the backslashes
+// before them escaped.
+std::wstring command_line_argument(const std::wstring &text)
+{
+    std::wstring quoted = L"\"";
+    size_t backslashes = 0;
+    for (wchar_t c : text)
+    {
+        if (c == L'\\') { ++backslashes; quoted += c; continue; }
+        if (c == L'"') quoted.append(backslashes + 1, L'\\');
+        backslashes = 0;
+        quoted += c;
+    }
+    quoted.append(backslashes, L'\\');
+    return quoted + L"\"";
+}
+// “查词典”: shows the word in DR Dict's lookup popup (../dr-dict, app/src/popup.h) beside the
+// pointer, which is on the selection menu just clicked. A running DR Dict is asked through
+// WM_COPYDATA to its popup host; otherwise DR Dict is started with --lookup, found through the
+// App Paths entry DR Dict registers when it runs.
+void lookup_in_dr_dict(HWND owner, const std::string &word)
+{
+    constexpr ULONG_PTR lookup_request = 0x4B4C5244; // "DRLK", DR Dict's dr::lookup_request
+    POINT at{};
+    GetCursorPos(&at);
+    if (HWND popup = FindWindowW(L"DrDictPopup", nullptr))
+    {
+        DWORD process = 0;
+        GetWindowThreadProcessId(popup, &process);
+        AllowSetForegroundWindow(process); // so the popup may take focus from us
+        const auto payload = Json{{"word", word}, {"x", at.x}, {"y", at.y}}.dump();
+        COPYDATASTRUCT data{lookup_request, static_cast<DWORD>(payload.size()), const_cast<char *>(payload.data())};
+        DWORD_PTR handled = 0;
+        if (SendMessageTimeoutW(popup, WM_COPYDATA, reinterpret_cast<WPARAM>(owner), reinterpret_cast<LPARAM>(&data),
+                                SMTO_ABORTIFHUNG, 3000, &handled) && handled)
+            return;
+    }
+    const auto arguments = L"--lookup " + command_line_argument(widen(word));
+    SHELLEXECUTEINFOW info{sizeof(info)};
+    info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
+    info.hwnd = owner;
+    info.lpVerb = L"open";
+    info.lpFile = L"dr-dict.exe";
+    info.lpParameters = arguments.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info))
+        throw std::runtime_error("未找到 DR Dict，请先运行一次 DR Dict");
+}
 // Matches the toolbar: titles past 20 characters (code points, not UTF-16 units) end in an ellipsis.
 std::wstring short_title(const std::wstring& title,size_t max=20){size_t count=0;for(size_t i=0;i<title.size();++i){if(IS_LOW_SURROGATE(title[i]))continue;if(count++==max)return title.substr(0,i)+L"…";}return title;}
 ShellStyle shell_style(const std::string &shell)
@@ -281,6 +329,16 @@ void Application::receive(const Json &request)
         return;
     }
     if (method.starts_with("agent.") && receive_agent(id, method, params)) return;
+    if (method == "dict.popup")
+    {
+        try
+        {
+            lookup_in_dr_dict(window_.handle(), params.at("text").get<std::string>());
+            webview_.send({{"id", id}, {"result", true}});
+        }
+        catch (const std::exception &e) { webview_.send({{"id", id}, {"error", e.what()}}); }
+        return;
+    }
     if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;
     fs::path notes_file;

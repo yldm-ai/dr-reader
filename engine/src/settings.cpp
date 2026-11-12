@@ -42,6 +42,7 @@ Json default_settings()
       "ask": true,
       "copy": true,
       "dictionary": true,
+      "drDict": true,
       "highlight": true,
       "note": true,
       "search": true,
@@ -106,7 +107,7 @@ Json patch_settings(const Json& current,const Json& patch){if(!patch.is_object()
  // Most recent highlight colours first; the reader pushes a new pick to the front.
  if(p.contains("highlightColors")){auto colors=p["highlightColors"];if(!colors.is_array()||colors.empty()||colors.size()>8)throw std::runtime_error("高亮颜色需要 1 到 8 个");Json palette=Json::array();for(auto& color:colors){if(!color.is_string())throw std::runtime_error("高亮颜色格式无效");auto value=color.get<std::string>();std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});if(value.size()!=7||value[0]!='#'||!std::all_of(value.begin()+1,value.end(),[](unsigned char c){return std::isxdigit(c)!=0;}))throw std::runtime_error("高亮颜色必须是 #rrggbb");palette.push_back(value);}a["highlightColors"]=palette;}
  if(p.contains("underlineColor")){auto color=p["underlineColor"];if(!color.is_string())throw std::runtime_error("下划线颜色格式无效");auto value=color.get<std::string>();std::transform(value.begin(),value.end(),value.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));});if(value.size()!=7||value[0]!='#'||!std::all_of(value.begin()+1,value.end(),[](unsigned char c){return std::isxdigit(c)!=0;}))throw std::runtime_error("下划线颜色必须是 #rrggbb");a["underlineColor"]=value;}
- if(p.contains("selectionActions")){auto actions=p["selectionActions"];if(!actions.is_object())throw std::runtime_error("选词菜单设置无效");for(auto key:{"highlight","underline","note","copy","search","dictionary","ask"})boolean(a["selectionActions"],actions,key);}
+ if(p.contains("selectionActions")){auto actions=p["selectionActions"];if(!actions.is_object())throw std::runtime_error("选词菜单设置无效");for(auto key:{"highlight","underline","note","copy","search","dictionary","drDict","ask"})boolean(a["selectionActions"],actions,key);}
  // Reading assistance: which local agent CLI answers, and an optional model and reasoning effort per CLI.
  enumeration(a,p,"agent",{"auto","codex","claude","opencode"});
  if(p.contains("agentModels")){auto models=p["agentModels"];if(!models.is_object())throw std::runtime_error("模型设置格式无效");for(auto key:{"codex","claude","opencode"}){if(!models.contains(key))continue;if(!models[key].is_string())throw std::runtime_error("模型名称格式无效");auto model=models[key].get<std::string>();validate_agent_model(model);a["agentModels"][key]=model;}}

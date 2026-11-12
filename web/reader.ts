@@ -1207,12 +1207,16 @@ export class Reader {
    * buttons, so reaching for the page does not flash them; once shown, they stay while the
    * pointer is over them.
    */
-  trackCorners(x: number, y: number): void {
+  trackCorners(x: number, windowY: number): void {
     if (this.settings?.showToolbar !== false || !this.book) return;
+    // The strips are measured from the top of the reader, not the window: a WebView2 title bar
+    // is part of the page (app.ts showCaption), and the native window hit-tests it, so the page
+    // never sees the pointer there.
+    const y = windowY - $("reader-view").getBoundingClientRect().top;
     const shown = $("reader-view").dataset.corner ?? "";
     const overEnd = ["end", "both"].includes(shown) && ["corner-settings", "expand-toolbar"].some(id => {
       const r = $(id).getBoundingClientRect();
-      return x >= r.left - 6 && x <= r.right + 6 && y >= r.top - 6 && y <= r.bottom + 6;
+      return x >= r.left - 6 && x <= r.right + 6 && windowY >= r.top - 6 && windowY <= r.bottom + 6;
     });
     // Hidden buttons keep their layout box, so the strip follows the label's real width.
     const endStrip = y >= 0 && y < 6 && x >= $("corner-settings").getBoundingClientRect().left;

@@ -1193,6 +1193,23 @@ try {
         await app.waitForFunction(() => getComputedStyle(document.getElementById('corner-library')).visibility === 'visible');
         await at(size.width * .5, size.height * .5);
         await app.waitForFunction(() => getComputedStyle(document.getElementById('corner-library')).visibility === 'hidden');
+        // A WebView2 title bar is part of the page, and the native window keeps its pointer input,
+        // so the strip sits just under it rather than at the top of the page.
+        await app.evaluate(() => {
+          document.documentElement.dataset.caption = 'web';
+          document.documentElement.style.setProperty('--caption-height', '32px');
+        });
+        await at(stripLeft + 4, 32 + 3);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('expand-toolbar')).visibility === 'visible');
+        await at(size.width * .5, size.height * .5);
+        await app.waitForFunction(() => getComputedStyle(document.getElementById('expand-toolbar')).visibility === 'hidden');
+        await at(stripLeft + 4, 32 + 8);
+        await page.waitForTimeout(300);
+        if (await corner() !== 'hidden,hidden') throw Error('under a WebView2 title bar the top-right trigger must stay a 6px strip');
+        await app.evaluate(() => {
+          delete document.documentElement.dataset.caption;
+          document.documentElement.style.removeProperty('--caption-height');
+        });
         await book.locator('html').click({ position: { x: size.width * .5, y: size.height * .5 } });
         await app.waitForFunction(() => document.getElementById('reader-view').dataset.corner === 'both');
         await app.locator('#expand-toolbar').click();

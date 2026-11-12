@@ -978,10 +978,26 @@ try {
         await app.waitForFunction(({ mode, layout }) => window.nativeProbe.data.settings.reading.mode === mode && window.nativeProbe.data.settings.reading.layout === layout, { mode: savedMode, layout: savedLayout });
         // The reader is laid out against the window, so narrow the application frame itself.
         const appFrame = page.locator('iframe');
+        // Between the wide and narrow layouts the actions keep to the right edge and the title,
+        // not empty space, takes what the hidden quick group gave up.
+        const actionsAtRightEdge = () => app.evaluate(() => {
+          const actions = document.querySelector('.reader-actions').lastElementChild!.getBoundingClientRect();
+          return innerWidth - actions.right <= 16;
+        });
+        for (const width of [1000, 800]) {
+          await appFrame.evaluate((el, w) => el.style.width = `${w}px`, width);
+          await app.waitForFunction(w => innerWidth === w, width);
+          if (!await actionsAtRightEdge() || !await checkToolbar()) throw Error(`reader toolbar actions must stay at the right edge at ${width}px`);
+        }
+        if (await app.locator('.toolbar-quick').isVisible()) throw Error('quick controls must yield to the title at 800px');
+        if (!await app.evaluate(() => {
+          const title = document.getElementById('reader-book-title').getBoundingClientRect();
+          return title.width > 200 || title.width >= document.getElementById('reader-book-title').scrollWidth;
+        })) throw Error('the book title must use the width the quick group gave up');
         await appFrame.evaluate(el => el.style.width = '460px');
         await app.waitForFunction(() => innerWidth === 460);
         if (await app.locator('.toolbar-quick').isVisible()) throw Error('quick controls must yield to actions on narrow windows');
-        if (!await checkToolbar()) throw Error('narrow reader toolbar overlaps or loses left alignment');
+        if (!await checkToolbar() || !await actionsAtRightEdge()) throw Error('narrow reader toolbar overlaps or loses left alignment');
         await appFrame.evaluate(el => el.style.width = '1200px');
         await app.waitForFunction(() => innerWidth === 1200);
         await app.locator('#reader-settings').click();

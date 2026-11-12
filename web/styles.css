@@ -885,13 +885,14 @@ body[data-animations="false"] .selection-menu {
   animation: none !important;
   transition: none !important;
 }
-/* Three columns keep the quick typesetting group centred between navigation and actions. */
+/* Navigation and actions share the width equally, which keeps the quick typesetting group
+   centred between them. A flex row rather than a grid: the toolbar is its own size container,
+   and a container query can restyle its children but not the toolbar's own columns. */
 .reader-toolbar {
   container-type: inline-size;
   height: 52px;
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: 16px;
   padding: 0 10px 0 4px;
@@ -900,6 +901,7 @@ body[data-animations="false"] .selection-menu {
   transition: margin-top var(--toolbar-motion), opacity 200ms ease 60ms, visibility 0s;
 }
 .toolbar-start {
+  flex: 1 1 0;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -916,6 +918,7 @@ body[data-animations="false"] .selection-menu {
 /* Quick typesetting sits directly on the toolbar, each control with its own hover fill, the
    same as the icon buttons beside it. */
 .toolbar-quick {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -981,9 +984,19 @@ body[data-animations="false"] .selection-menu {
 #add-bookmark.selected .bookmark-on, body[data-fullscreen="true"] #reader-fullscreen .fullscreen-leave { display: block; }
 #add-bookmark.selected { background: none; color: var(--accent); }
 #add-bookmark.selected:hover { background: var(--hover); }
-@container (max-width: 960px) {
-  .reader-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+/* Narrower toolbars give up chrome in steps, keeping the actions at the right edge and leaving
+   the rest to the title: first the reading-mode name (its icon stays), then the quick group
+   (阅读设置 has all of it), then the 阅读设置 label. */
+@container (max-width: 1040px) {
+  .quick-dropdown-label { display: none; }
+}
+@container (max-width: 880px) {
   .toolbar-quick { display: none; }
+  .reader-actions { flex: none; }
+}
+@container (max-width: 620px) {
+  .reader-settings-button .toolbar-label { display: none; }
+  .reader-toolbar .reader-settings-button { padding: 8px; }
 }
 .text-button {
   font-size: var(--text-body);
@@ -1013,7 +1026,8 @@ body[data-animations="false"] .selection-menu {
   cursor: default;
 }
 .reader-actions {
-  justify-self: end;
+  flex: 1 1 0;
+  justify-content: flex-end;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -2407,7 +2421,24 @@ body[data-animations="false"] .toast { animation: none; }
   flex: 0 0 auto;
   filter: drop-shadow(0 4px 5px #0008);
 }
-.book-opening-book { width: min(296px, 80vw, 70vh); height: auto; aspect-ratio: 1.48; filter: none; }
+/* 翻开书本 (book-opening.ts openBook): an open spread of two covers, the book's own cover on the
+   front board. Pages are light or dark after the reading paper (data-tone). */
+.book-opening-book {
+  --opening-book-board: #6b6a66;
+  --opening-book-page: #f4f2ec;
+  --opening-book-endpaper: #e8e5dc;
+  --opening-book-rule: #0000002e;
+  width: min(296px, 80vw, calc(70vh * var(--opening-book-ratio, 1.48)));
+  height: auto;
+  aspect-ratio: var(--opening-book-ratio, 1.48);
+  filter: none;
+}
+.book-opening-book[data-tone="dark"] {
+  --opening-book-board: #3a3a38;
+  --opening-book-page: #2a2a29;
+  --opening-book-endpaper: #232322;
+  --opening-book-rule: #ffffff24;
+}
 .opening-book-scene { position: relative; width: 100%; height: 100%; perspective: 1440px; }
 .opening-book-cover, .opening-book-paper {
   position: absolute;
@@ -2416,17 +2447,43 @@ body[data-animations="false"] .toast { animation: none; }
   width: 50%;
   height: 100%;
   transform-origin: left bottom;
-  border-radius: 5px 0 0 5px;
+  border-radius: 0 3px 3px 0;
   box-shadow: inset 3px 0 20px #0003, 0 0 15px #0000001a;
-  background: #ff8c00;
+  background: var(--opening-book-board);
 }
-.opening-book-paper { top: 2%; width: 48.65%; height: 96%; background: #e9e6c4; }
+.opening-book-paper { top: 2%; width: 48.65%; height: 96%; background: var(--opening-book-page); }
 .opening-book-paper::before {
   content: "";
   position: absolute;
   inset: 18px 16px;
-  background: repeating-linear-gradient(to bottom, #0003 0 1px, transparent 1px 18px);
-  opacity: .6;
+  background: repeating-linear-gradient(to bottom, var(--opening-book-rule) 0 1px, transparent 1px 18px);
+}
+/* The front board turns as one rigid piece; its two faces are the cover and the endpaper. */
+.opening-book-front { transform-style: preserve-3d; background: none; box-shadow: none; }
+.opening-book-face { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; backface-visibility: hidden; }
+.opening-book-outside {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 10%;
+  background: var(--cover-bg);
+  color: var(--cover-text);
+  box-shadow: 0 0 15px #0000001a;
+}
+.opening-book-outside strong { font-size: 14px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+.opening-book-outside small { margin-top: 10px; font-size: 11px; opacity: .75; }
+.opening-book-outside img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* The spine's crease across the cover, above the picture. */
+.opening-book-outside::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to right, #0000004d, #0000001a 5%, transparent 12%);
+}
+.opening-book-inside {
+  transform: rotateY(180deg);
+  background: var(--opening-book-endpaper);
+  box-shadow: inset 3px 0 20px #0003;
 }
 .book-opening-cover { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; filter: none; }
 .busy.book-opening-cover-active > :not(.book-opening-cover) { visibility: hidden; }
@@ -2453,7 +2510,7 @@ body[data-animations="false"] .toast { animation: none; }
 /* The book lies on a desk a shade darker than its paper, so the closed book and the open pages read. */
 .book-opening-board .opening-cover-backdrop { background: color-mix(in oklab, var(--opening-background, var(--bg)) 95%, #000); }
 .opening-board { position: absolute; width: var(--board-width); height: var(--board-height); transform-origin: 0 0; }
-.opening-board-shift { position: absolute; inset: 0; perspective: calc(var(--board-width) * 6); perspective-origin: 0% 50%; }
+.opening-board-shift { position: absolute; inset: 0; perspective: var(--board-perspective, calc(var(--board-width) * 6)); perspective-origin: 0% 50%; }
 .opening-board-page, .opening-board-face { position: absolute; inset: 0; overflow: hidden; }
 .opening-board-page {
   background: linear-gradient(to right, rgb(0 0 0 / .3), rgb(0 0 0 / .102) 8%, transparent 24%), var(--opening-background, var(--bg));
@@ -2473,7 +2530,8 @@ body[data-animations="false"] .toast { animation: none; }
 }
 .opening-board-front strong { font-size: clamp(22px, 3.6vh, 44px); font-weight: 500; overflow-wrap: anywhere; }
 .opening-board-front small { margin-top: 24px; font-size: clamp(13px, 1.8vh, 20px); opacity: .75; }
-.opening-board-front img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; }
+/* A board narrower than the cover (a tall reading area in a narrow window) crops it rather than squeezing it. */
+.opening-board-front img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .opening-board-back {
   transform: rotateY(180deg);
   box-shadow: 0 10px 34px #00000029, 0 0 1px #00000033;

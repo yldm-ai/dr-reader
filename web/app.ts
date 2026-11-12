@@ -303,6 +303,8 @@ async function openBook(id: string, coverElement: HTMLElement | null = null) {
     ratio: coverElement instanceof HTMLImageElement && coverElement.naturalHeight
       ? coverElement.naturalWidth / coverElement.naturalHeight : rect?.height ? rect.width / rect.height : undefined,
     rect: rect?.width && rect?.height ? rect : undefined,
+    area: () => document.querySelector<HTMLElement>("#reader-view .reading-area")?.getBoundingClientRect(),
+    dark: paper.dark,
   });
   // Under an opaque opening, switch views before the animation starts: with a cold GPU
   // shader cache the reader's first raster stalls a frame, which BookOpening absorbs before

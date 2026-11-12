@@ -10,6 +10,10 @@ interface OpeningCover {
   author?: string;
   ratio?: number;
   rect?: { left: number; top: number; width: number; height: number };
+  /** The reader's reading area (viewport coordinates); 翻开封面 fills its height. */
+  area?: () => DOMRect | undefined;
+  /** The reading paper is dark; 翻开书本 uses dark pages. */
+  dark?: boolean;
 }
 
 /** UIAnimation's accelerate/decelerate profile, with a constant-speed middle if needed. */
@@ -25,6 +29,7 @@ function transition(time: number, acceleration: number, deceleration: number): n
 export class BookOpening {
   private cover?: HTMLDivElement;
   private board?: HTMLDivElement;
+  private boardPlaced?: Promise<void>;
   private coverIntro?: Animation;
   private book?: HTMLDivElement;
   private sheets: Animation[] = [];
@@ -55,7 +60,7 @@ export class BookOpening {
     if (!enabled || effect === 'none' || this.reduced.matches) { this.resolve?.(); return; }
     if (effect === 'cover') { this.openCover(cover); return; }
     if (effect === 'board') { this.closedBoard(cover); return; }
-    if (effect === 'book') { this.openBook(); return; }
+    if (effect === 'book') { this.openBook(cover); return; }
     const canvas = document.createElement('canvas');
     canvas.className = 'book-opening';
     canvas.setAttribute('aria-hidden', 'true');
@@ -117,15 +122,37 @@ export class BookOpening {
     this.resolve?.();
   }
 
-  /** Layered cover and paper turns inspired by missarray's CodePen oQmgzW. */
-  private openBook(): void {
+  /**
+   * Layered cover and paper turns inspired by missarray's CodePen oQmgzW. The front board carries
+   * the book's own cover (or its title and author) outside and a plain endpaper inside; the book
+   * takes the cover's proportions, and its pages are light or dark after the reading paper.
+   */
+  private openBook(source: OpeningCover): void {
     const book = document.createElement('div');
     book.className = 'book-opening book-opening-book';
     book.setAttribute('aria-hidden', 'true');
+    book.dataset.tone = source.dark ? 'dark' : 'light';
+    // Each half of the open spread is one cover; keep odd ratios from making a sliver or a slab.
+    const ratio = Math.min(.9, Math.max(.5, source.ratio || .74));
+    book.style.setProperty('--opening-book-ratio', String(ratio * 2));
     book.innerHTML = `<div class="opening-book-scene"><span class="opening-book-cover"></span>
       <span class="opening-book-paper"></span>
       ${Array.from({ length: 6 }, () => '<span class="opening-book-paper opening-book-turn"></span>').join('')}
-      <span class="opening-book-cover opening-book-turn"></span></div>`;
+      <span class="opening-book-cover opening-book-front opening-book-turn"><span class="opening-book-face opening-book-outside"></span>
+      <span class="opening-book-face opening-book-inside"></span></span></div>`;
+    const outside = book.querySelector<HTMLElement>('.opening-book-outside')!;
+    const title = document.createElement('strong');
+    title.textContent = source.title || 'DR Reader';
+    const author = document.createElement('small');
+    author.textContent = source.author || '';
+    outside.append(title, author);
+    if (source.image) {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.src = source.image;
+      image.addEventListener('error', () => image.remove(), { once: true });
+      outside.append(image);
+    }
     this.book = book;
     this.host.classList.add('book-opening-active');
     this.host.prepend(book);
@@ -222,13 +249,9 @@ export class BookOpening {
    * blank page under it fade to the reader's real page, and the cover fades as it comes down.
    */
   private closedBoard(source: OpeningCover): void {
-    const ratio = source.ratio || 2 / 3;
-    const height = Math.min(innerHeight * .8, innerWidth * .86 / (2 * ratio)), width = height * ratio;
     const root = document.createElement('div');
     root.className = 'book-opening book-opening-cover book-opening-board';
     root.setAttribute('aria-hidden', 'true');
-    root.style.setProperty('--board-width', `${width}px`);
-    root.style.setProperty('--board-height', `${height}px`);
     root.innerHTML = `<div class="opening-cover-backdrop"></div><div class="opening-board">
       <div class="opening-board-shift"><div class="opening-board-page"><span class="opening-board-cast"></span></div>
       <div class="opening-board-leaf"><div class="opening-board-face opening-board-front"><span class="opening-board-shade"></span></div>
@@ -250,14 +273,44 @@ export class BookOpening {
     this.host.classList.add('book-opening-active', 'book-opening-cover-active');
     this.host.prepend(root);
     this.reduced.addEventListener('change', this.stopOnReduced);
-    // Closed, the book is one page wide and sits in the middle of the window.
-    const left = (innerWidth - width) / 2, top = (innerHeight - height) / 2;
+    // The reader is shown beneath the opening in the same task (app.ts openBook), so its reading
+    // area can be measured in the next frame, before anything is painted.
+    this.boardPlaced = new Promise(resolve => requestAnimationFrame(() => {
+      if (this.board === root) this.placeBoard(root, source);
+      resolve();
+    }));
+  }
+
+  /**
+   * Closed, the book is as tall as the reading area and centred in it; it is a cover wide, at most
+   * half the area, so the open spread (two covers) lands inside the area — on the reader's two
+   * pages in double-page mode.
+   */
+  private placeBoard(root: HTMLDivElement, source: OpeningCover): void {
+    const host = this.host.getBoundingClientRect();
+    const measured = source.area?.();
+    const area = measured && measured.width > 0 && measured.height > 0
+      ? { left: measured.left - host.left, top: measured.top - host.top, width: measured.width, height: measured.height }
+      : { left: 0, top: host.height * .1, width: host.width, height: host.height * .8 };
+    const height = area.height, width = Math.min(height * (source.ratio || 2 / 3), area.width / 2);
+    root.style.setProperty('--board-width', `${width}px`);
+    root.style.setProperty('--board-height', `${height}px`);
+    // Swinging towards the viewer, the cover's free edge grows by d / (d - width) about the middle
+    // of the spine. grabfold's six widths (x1.2) would push a full-height cover past the window,
+    // so the eye moves back until the edge stays within the room above and below the area.
+    const room = Math.max(0, Math.min(area.top, host.height - area.top - height));
+    const growth = 1 + 2 * room / height;
+    const distance = Math.min(16, Math.max(6, growth / (growth - 1)));
+    root.style.setProperty('--board-perspective', `${(width * distance).toFixed(1)}px`);
+    const left = area.left + (area.width - width) / 2, top = area.top;
     const book = root.querySelector<HTMLElement>('.opening-board')!;
     book.style.left = `${left}px`;
     book.style.top = `${top}px`;
+    // The library cover's rectangle is in viewport coordinates; the opening is laid out in the
+    // host, which starts below the caption.
     const from = source.rect;
     const transform = from
-      ? `translate(${from.left - left}px, ${from.top - top}px) scale(${from.width / width}, ${from.height / height})`
+      ? `translate(${from.left - host.left - left}px, ${from.top - host.top - top}px) scale(${from.width / width}, ${from.height / height})`
       : 'translateY(18px) scale(.88)';
     this.coverIntro = book.animate([{ transform, opacity: from ? 1 : 0 }, { transform: 'none', opacity: 1 }], {
       duration: 600, easing: 'cubic-bezier(.16, 1, .3, 1)', fill: 'forwards',
@@ -267,6 +320,7 @@ export class BookOpening {
   }
 
   private async swingBoard(root: HTMLDivElement): Promise<void> {
+    await this.boardPlaced;
     await this.coverIntro?.finished.catch(() => {});
     if (this.board !== root) return;
     const width = root.querySelector<HTMLElement>('.opening-board')!.offsetWidth;

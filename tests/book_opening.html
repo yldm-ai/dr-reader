@@ -42,9 +42,26 @@ try {
   check(!host.querySelector('canvas'), 'cancelling during loading must release the animation');
   await new BookOpening(host, false).finish();
   check(!host.querySelector('canvas'), 'disabled animations must not create a canvas or delay opening');
-  const book = new BookOpening(host, true, 'book');
+  const bookImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#506b7c"/><path d="M24 32H176M24 268H176" stroke="#d7c8a2"/><text x="100" y="143" fill="#fffaf3" font-size="22" text-anchor="middle">阅读与时光</text><text x="100" y="175" fill="#d7c8a2" font-size="10" text-anchor="middle">DR READER</text></svg>');
+  const book = new BookOpening(host, true, 'book', { title: '阅读与时光', author: 'DR Reader', ratio: 2 / 3, image: bookImage });
   const scene = host.querySelector('.book-opening-book');
   check(scene && scene.querySelectorAll('.opening-book-turn').length === 7, 'book opening must animate its cover and six paper layers');
+  const bookCover = scene.querySelector('.opening-book-front .opening-book-outside img');
+  check(bookCover?.getAttribute('src') === bookImage, 'the front board must carry the book\'s own cover');
+  await bookCover.decode();
+  const sceneRect = scene.getBoundingClientRect();
+  check(Math.abs(sceneRect.width / sceneRect.height - 4 / 3) < .01, 'the open spread must be two covers of the book\'s proportions');
+  check(scene.dataset.tone === 'light' && getComputedStyle(scene.querySelector('.opening-book-paper')).backgroundColor === 'rgb(244, 242, 236)',
+    'a light reading paper must use light pages');
+  {
+    const closed = scene.getAnimations({ subtree: true });
+    for (const animation of closed) { animation.pause(); animation.currentTime = 0; }
+    const front = scene.querySelector('.opening-book-front').getBoundingClientRect();
+    check(Math.abs(front.left - (sceneRect.left + sceneRect.width / 2)) < 1 && Math.abs(front.width - sceneRect.width / 2) < 1,
+      'closed, the cover must lie on the right half');
+    await window.captureOpening?.('book-opening-closed');
+    for (const animation of closed) animation.play();
+  }
   check(getComputedStyle(host).backgroundColor.startsWith('rgb(') && getComputedStyle(host).backdropFilter === 'none',
     'opening animations must fully cover the loading document');
   const turns = scene.getAnimations({ subtree: true });
@@ -64,10 +81,21 @@ try {
   const abortedBook = new BookOpening(host, true, 'book');
   const abortedDone = abortedBook.finish(); abortedBook.cancel(); await abortedDone;
   check(!host.querySelector('.book-opening') && host.getAnimations().length === 0, 'cancelled books must release pages and fade animations');
+  const darkBook = new BookOpening(host, true, 'book', { title: '没有封面的书', author: '佚名', dark: true });
+  const darkScene = host.querySelector('.book-opening-book');
+  check(darkScene.dataset.tone === 'dark' && getComputedStyle(darkScene.querySelector('.opening-book-paper')).backgroundColor === 'rgb(42, 42, 41)',
+    'a dark reading paper must use dark pages');
+  check(!darkScene.querySelector('img') && darkScene.querySelector('.opening-book-outside strong').textContent === '没有封面的书',
+    'a book without a cover image must show its title on the front board');
+  check(Math.abs(darkScene.getBoundingClientRect().width / darkScene.getBoundingClientRect().height - 1.48) < .01,
+    'without a cover ratio the book keeps its default proportions');
+  for (const animation of darkScene.getAnimations({ subtree: true })) { animation.pause(); animation.currentTime = 500; }
+  await window.captureOpening?.('book-opening-dark');
+  const darkDone = darkBook.finish(); darkBook.cancel(); await darkDone;
 
   const cover = new BookOpening(host, true, 'cover', {
     title: '阅读与时光', author: 'DR Reader', ratio: 2 / 3,
-    image: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#506b7c"/><path d="M24 32H176M24 268H176" stroke="#d7c8a2"/><text x="100" y="143" fill="#fffaf3" font-size="22" text-anchor="middle">阅读与时光</text><text x="100" y="175" fill="#d7c8a2" font-size="10" text-anchor="middle">DR READER</text></svg>'),
+    image: bookImage,
     rect: { left: 120, top: 160, width: 90, height: 140 },
   });
   const coverScene = host.querySelector('.book-opening-cover');
@@ -99,18 +127,27 @@ try {
   // A closed hardback, after grabfold's cover: centred closed, the cover swings open about the
   // spine while the book slides to centre the open spread, then the reader fades in.
   const coverImage = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="300"><rect width="200" height="300" fill="#506b7c"/><path d="M24 32H176M24 268H176" stroke="#d7c8a2"/><text x="100" y="143" fill="#fffaf3" font-size="22" text-anchor="middle">阅读与时光</text></svg>');
+  // The reader's reading area: below a 52px toolbar, above a 42px footer.
+  const readingArea = Object.assign(document.createElement('section'), { className: 'test-reading-area' });
+  readingArea.style.cssText = 'position:fixed;left:0;right:0;top:52px;bottom:42px;pointer-events:none';
+  document.body.prepend(readingArea);
+  const area = () => readingArea.getBoundingClientRect();
   const board = new BookOpening(host, true, 'board', { title: '阅读与时光', author: 'DR Reader', ratio: 2 / 3, image: coverImage,
-    rect: { left: 120, top: 160, width: 90, height: 140 } });
+    rect: { left: 120, top: 160, width: 90, height: 140 }, area });
   check(board.covering, 'the hardback covers the window while the book loads');
   const boardScene = host.querySelector('.book-opening-board');
   const closed = boardScene.querySelector('.opening-board');
   await boardScene.querySelector('img').decode();
+  await until(() => closed.getAnimations().length);
   const boardIntro = closed.getAnimations()[0];
   boardIntro.pause(); boardIntro.currentTime = 0;
   check(Math.abs(closed.getBoundingClientRect().height - 140) < 1, 'the hardback must start from the library cover');
   boardIntro.finish();
-  const closedRect = closed.getBoundingClientRect();
-  check(Math.abs(closedRect.left + closedRect.width / 2 - innerWidth / 2) < 1, 'the closed book must sit in the middle of the window');
+  const closedRect = closed.getBoundingClientRect(), areaRect = area();
+  check(Math.abs(closedRect.height - areaRect.height) < 1 && Math.abs(closedRect.top - areaRect.top) < 1,
+    'the closed book must fill the reading area from top to bottom');
+  check(Math.abs(closedRect.width - Math.min(areaRect.height * 2 / 3, areaRect.width / 2)) < 1, 'the closed book keeps the cover proportions while it fits');
+  check(Math.abs(closedRect.left + closedRect.width / 2 - (areaRect.left + areaRect.width / 2)) < 1, 'the closed book must sit in the middle of the reading area');
   await window.captureOpening?.('book-opening-board-closed');
   const boardDone = board.finish();
   await until(() => boardScene.querySelector('.opening-board-leaf')?.getAnimations().length);
@@ -118,11 +155,19 @@ try {
   check(swing.every(animation => animation.effect.getKeyframes().every(frame =>
     Object.keys(frame).every(key => ['offset', 'easing', 'composite', 'computedOffset', 'transform', 'opacity'].includes(key)))),
     'the cover must swing with transform and opacity only');
-  for (const animation of swing) { animation.pause(); animation.currentTime = 150; }
+  // The full-height cover swings towards the viewer without leaving the window.
+  for (let time = 0; time <= 900; time += 30) {
+    for (const animation of swing) { animation.pause(); animation.currentTime = time; }
+    const leaf = boardScene.querySelector('.opening-board-front').getBoundingClientRect();
+    check(leaf.top >= -1 && leaf.bottom <= innerHeight + 1, `the swinging cover must stay inside the window (${time} ms)`);
+  }
+  for (const animation of swing) animation.currentTime = 150;
   await window.captureOpening?.('book-opening-board-swing');
   for (const animation of swing) animation.currentTime = 900;
   const page = boardScene.querySelector('.opening-board-page').getBoundingClientRect();
   check(Math.abs(page.left - innerWidth / 2) < 1, 'the open spread must be centred, its first page right of the middle');
+  check(Math.abs(page.height - areaRect.height) < 1 && Math.abs(page.top - areaRect.top) < 1,
+    `the open page must fill the reading area height (page ${page.top}+${page.height}, area ${areaRect.top}+${areaRect.height})`);
   const inside = boardScene.querySelector('.opening-board-back').getBoundingClientRect();
   check(Math.abs(inside.right - innerWidth / 2) < 1 && Math.abs(inside.width - page.width) < 1, 'the cover must land flat on the left');
   // The cover opens onto the real text: no blank spread, desk or loading backdrop is left.
@@ -132,6 +177,17 @@ try {
   for (const animation of swing) animation.play();
   await boardDone;
   check(!host.querySelector('.book-opening') && !host.classList.contains('book-opening-active'), 'the hardback must release the scene');
+  // A tall, narrow reading area: still full height, the open spread no wider than the area.
+  readingArea.style.cssText = 'position:fixed;left:40px;width:420px;top:52px;bottom:42px;pointer-events:none';
+  const narrow = new BookOpening(host, true, 'board', { ratio: 2 / 3, area });
+  const narrowBook = host.querySelector('.opening-board');
+  await until(() => narrowBook.getAnimations().length);
+  narrowBook.getAnimations()[0].finish();
+  const narrowRect = narrowBook.getBoundingClientRect();
+  check(Math.abs(narrowRect.height - area().height) < 1 && Math.abs(narrowRect.width - 210) < 1 &&
+    Math.abs(narrowRect.left - (40 + 105)) < 1, 'a narrow reading area keeps the full height and the open spread inside it');
+  const narrowDone = narrow.finish(); narrow.cancel(); await narrowDone;
+  readingArea.remove();
   for (const effect of ['none', 'book', 'cover', 'board']) await new BookOpening(host, effect === 'none', effect).finish();
   check(!host.querySelector('.book-opening'), 'none and disabled effects must not delay loading');
 

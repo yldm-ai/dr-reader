@@ -89,27 +89,24 @@ std::vector<std::string> agent_arguments(AgentKind kind, std::string_view model,
         break;
     case AgentKind::Codex:
     {
-        // `codex exec` keeps the user's config (model, provider) but runs read-only, never asks
-        // for approval and switches tool features off. Feature names change between releases;
-        // unknown ones only produce a warning item, and the read-only sandbox stays the guard.
-        // Values are bare words: Codex reads a value that is not valid TOML as a string.
-        args = {"exec", "--json", "--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only",
-                "-c", "approval_policy=never", "-c", "web_search=disabled", "-c", "project_doc_max_bytes=0",
-                "-c", "notify=[]"};
+        // `codex app-server` keeps the user's config (model, provider); the thread itself is
+        // started read-only, ephemeral and without approvals (AgentStream). Tool features are
+        // switched off here. Feature names change between releases; unknown ones are ignored, and
+        // the read-only sandbox stays the guard. Values are bare words: Codex reads a value that
+        // is not valid TOML as a string.
+        args = {"app-server", "--listen", "stdio://", "-c", "approval_policy=never", "-c", "web_search=disabled",
+                "-c", "project_doc_max_bytes=0", "-c", "notify=[]"};
         for (auto feature : {"shell_tool", "unified_exec", "hooks", "plugins", "apps", "multi_agent", "code_mode",
                              "code_mode_host", "view_image", "image_generation", "browser_use", "computer_use"})
             args.insert(args.end(), {"-c", std::string("features.") + feature + "=false"});
         for (auto &name : codex_mcp_servers)
             if (identifier(name)) args.insert(args.end(), {"-c", "mcp_servers." + name + ".enabled=false"});
-        if (!model.empty()) args.insert(args.end(), {"--model", std::string(model)});
-        if (!effort.empty()) args.insert(args.end(), {"-c", "model_reasoning_effort=" + std::string(effort)});
-        args.push_back("-"); // read the prompt from stdin
         break;
     }
     case AgentKind::OpenCode:
-        args = {"run", "--format", "json"};
-        if (!model.empty()) args.insert(args.end(), {"--model", std::string(model)});
-        if (!effort.empty()) args.insert(args.end(), {"--variant", std::string(effort)});
+        // The Agent Client Protocol server; tools and permissions are switched off through
+        // OPENCODE_CONFIG_CONTENT, model and variant are session options.
+        args = {"acp"};
         break;
     }
     return args;
@@ -170,12 +167,98 @@ void AgentStream::fail(std::vector<AgentEvent> &events, std::string message)
     last_error_ = message;
     events.push_back({AgentEvent::Type::Error, std::move(message)});
 }
+// Request ids of the two server conversations, in the order they are sent.
+namespace
+{
+enum CodexRequest
+{
+    CodexInitialize = 1,
+    CodexThread,
+    CodexTurn
+};
+enum AcpRequest
+{
+    AcpInitialize = 1,
+    AcpSession,
+    AcpModel,
+    AcpEffort,
+    AcpPrompt
+};
+std::string rpc_error(const Json &error)
+{
+    auto message = string_at(error, "message");
+    // opencode puts the provider's explanation in data.message; Codex has no data.
+    auto detail = string_at(child(error, "data"), "message");
+    if (!detail.empty() && detail != message) message = message.empty() ? detail : message + "：" + detail;
+    return message;
+}
+} // namespace
+
+void AgentStream::send(int id, const char *method, const std::string &params)
+{
+    reply_ += Json{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}, {"params", Json::parse(params)}}.dump() + "\n";
+}
+std::string AgentStream::start(std::string prompt, std::string model, std::string effort, std::string cwd)
+{
+    validate_agent_model(model);
+    validate_agent_effort(effort);
+    prompt_ = std::move(prompt);
+    model_ = std::move(model);
+    effort_ = std::move(effort);
+    cwd_ = std::move(cwd);
+    switch (kind_)
+    {
+    case AgentKind::Claude: return std::exchange(prompt_, {});
+    case AgentKind::Codex:
+        send(CodexInitialize, "initialize", R"({"clientInfo":{"name":"dr-reader","version":"0.1.0"},"capabilities":{}})");
+        break;
+    case AgentKind::OpenCode:
+        // The client offers nothing back: no file system and no terminal.
+        send(AcpInitialize, "initialize",
+             R"({"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},)"
+             R"("clientInfo":{"name":"dr-reader","version":"0.1.0"}})");
+        break;
+    }
+    return take_reply();
+}
+void AgentStream::opencode_next(int after)
+{
+    if (after < AcpModel && !model_.empty())
+        send(AcpModel, "session/set_config_option", Json{{"sessionId", session_}, {"configId", "model"}, {"value", model_}}.dump());
+    else if (after < AcpEffort && !effort_.empty())
+        send(AcpEffort, "session/set_config_option", Json{{"sessionId", session_}, {"configId", "effort"}, {"value", effort_}}.dump());
+    else
+        send(AcpPrompt, "session/prompt",
+             Json{{"sessionId", session_}, {"prompt", Json::array({{{"type", "text"}, {"text", std::exchange(prompt_, {})}}})}}.dump());
+}
 std::vector<AgentEvent> AgentStream::line(std::string_view text)
 {
     std::vector<AgentEvent> events;
     auto event = Json::parse(text, nullptr, false);
-    if (event.is_discarded() || !event.is_object() || failed_) return events;
+    if (event.is_discarded() || !event.is_object() || finished()) return events;
     const auto type = string_at(event, "type");
+    // The servers speak JSON-RPC: requests and notifications carry a method, responses an id.
+    const auto method = string_at(event, "method");
+    const bool has_id = event.contains("id") && !event["id"].is_null();
+    const auto &params = child(event, "params");
+    if (interactive() && !method.empty() && has_id)
+    {
+        // Requests from the server. opencode asks before running a tool (all are off): decline.
+        // Anything else is an operation this client does not offer.
+        if (kind_ == AgentKind::OpenCode && method == "session/request_permission")
+            reply_ += Json{{"jsonrpc", "2.0"}, {"id", event["id"]}, {"result", {{"outcome", {{"outcome", "cancelled"}}}}}}.dump() + "\n";
+        else
+            reply_ += Json{{"jsonrpc", "2.0"}, {"id", event["id"]},
+                           {"error", {{"code", -32601}, {"message", "dr-reader only asks questions"}}}}.dump() + "\n";
+        return events;
+    }
+    const int id = interactive() && method.empty() && has_id && event["id"].is_number_integer() ? event["id"].get<int>() : 0;
+    if (id && event.contains("error") && !event["error"].is_null())
+    {
+        fail(events, rpc_error(child(event, "error")));
+        return events;
+    }
+    const auto &result = child(event, "result");
     switch (kind_)
     {
     case AgentKind::Claude:
@@ -212,35 +295,78 @@ std::vector<AgentEvent> AgentStream::line(std::string_view text)
     }
     case AgentKind::Codex:
     {
-        const auto &item = child(event, "item");
-        // Item-level "error" entries are configuration warnings; the turn decides success.
-        if (type == "item.completed" && string_at(item, "type") == "agent_message")
-            append(events, string_at(item, "text"), true);
-        else if (type == "turn.completed") succeeded_ = true;
-        else if (type == "turn.failed") fail(events, string_at(child(event, "error"), "message"));
-        else if (type == "error")
+        if (id == CodexInitialize)
         {
-            last_error_ = string_at(event, "message");
-            if (!last_error_.empty()) events.push_back({AgentEvent::Type::Status, last_error_});
+            reply_ += Json{{"method", "initialized"}, {"params", Json::object()}}.dump() + "\n";
+            Json thread{{"approvalPolicy", "never"}, {"sandbox", "read-only"}, {"ephemeral", true}};
+            if (!model_.empty()) thread["model"] = model_;
+            send(CodexThread, "thread/start", thread.dump());
+        }
+        else if (id == CodexThread)
+        {
+            session_ = string_at(child(result, "thread"), "id");
+            if (session_.empty()) return fail(events, "Codex 没有创建对话"), events;
+            Json turn{{"threadId", session_},
+                      {"input", Json::array({{{"type", "text"}, {"text", std::exchange(prompt_, {})}, {"text_elements", Json::array()}}})}};
+            if (!effort_.empty()) turn["effort"] = effort_;
+            send(CodexTurn, "turn/start", turn.dump());
+        }
+        else if (method == "item/agentMessage/delta")
+        {
+            // Each agent message is its own item; a new item starts a new paragraph.
+            auto item = string_at(params, "itemId");
+            append(events, string_at(params, "delta"), item != last_part_);
+            last_part_ = item;
+        }
+        else if (method == "turn/completed")
+        {
+            const auto &turn = child(params, "turn");
+            const auto status = string_at(turn, "status");
+            if (status == "completed") succeeded_ = true;
+            else
+            {
+                auto message = string_at(child(turn, "error"), "message");
+                fail(events, !message.empty() ? message : !last_error_.empty() ? last_error_
+                                                 : status == "interrupted"    ? "Codex 中断了回答"
+                                                                              : std::string());
+            }
+        }
+        else if (method == "error")
+        {
+            // A retried error is progress; a final one explains the failed turn that follows.
+            last_error_ = string_at(child(params, "error"), "message");
+            if (!last_error_.empty() && params.value("willRetry", false)) events.push_back({AgentEvent::Type::Status, last_error_});
         }
         break;
     }
     case AgentKind::OpenCode:
     {
-        const auto &part = child(event, "part");
-        if (type == "text")
+        if (id == AcpInitialize) send(AcpSession, "session/new", Json{{"cwd", cwd_}, {"mcpServers", Json::array()}}.dump());
+        else if (id == AcpSession)
         {
-            // Each text part arrives complete; a new part id starts a new paragraph.
-            auto id = string_at(part, "id");
-            append(events, string_at(part, "text"), id != last_part_);
-            last_part_ = id;
+            session_ = string_at(result, "sessionId");
+            if (session_.empty()) return fail(events, "opencode 没有创建会话"), events;
+            opencode_next(AcpSession);
         }
-        else if (type == "step_finish" && string_at(part, "reason") == "stop") succeeded_ = true;
-        else if (type == "error")
+        else if (id == AcpModel || id == AcpEffort) opencode_next(id);
+        else if (id == AcpPrompt)
         {
-            const auto &error = child(event, "error");
-            auto message = string_at(child(error, "data"), "message");
-            fail(events, message.empty() ? string_at(error, "name") : message);
+            // The prompt answers after the turn's last update.
+            const auto reason = string_at(result, "stopReason");
+            if (reason == "end_turn" || reason == "max_tokens" || reason == "max_turn_requests") succeeded_ = true;
+            else fail(events, reason == "refusal" ? "模型拒绝回答这个问题" : reason == "cancelled" ? "已停止回答" : "opencode 没有完成回答");
+        }
+        else if (method == "session/update")
+        {
+            const auto &update = child(params, "update");
+            const auto &content = child(update, "content");
+            if (string_at(update, "sessionUpdate") == "agent_message_chunk" && string_at(content, "type") == "text")
+            {
+                // Each assistant message (one per model step) starts a new paragraph.
+                auto message = string_at(update, "messageId");
+                append(events, string_at(content, "text"), message != last_part_);
+                last_part_ = message;
+            }
         }
         break;
     }

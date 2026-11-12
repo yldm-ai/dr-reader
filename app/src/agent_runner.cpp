@@ -165,6 +165,8 @@ struct ProcessSpec
     std::string input;
     /** Keep stdin open after `input` so `line` can answer; otherwise stdin closes once written. */
     bool interactive = false;
+    /** When set, produces `input` from the process's working directory (created by run_process). */
+    std::function<std::string(const std::filesystem::path &)> begin;
     HANDLE cancel = nullptr;
     unsigned long timeout_ms = 0;
     /** Called per stdout line; returns input to write back (interactive only). */
@@ -202,6 +204,7 @@ ProcessResult run_process(const ProcessSpec &spec)
             std::filesystem::remove_all(dir, ignored);
         }
     } cleanup{workdir};
+    const std::string input = spec.begin ? spec.begin(workdir) : spec.input;
 
     std::wstring command = quote(spec.agent.path.native());
     for (auto &arg : spec.arguments) command += L" " + quote(wide(arg));
@@ -301,10 +304,10 @@ ProcessResult run_process(const ProcessSpec &spec)
                 break;
     };
     std::thread writer;
-    if (spec.interactive) write(spec.input); // a short request; replies follow from this thread
+    if (spec.interactive) write(input); // a short request; replies follow from this thread
     else
         writer = std::thread([&] {
-            write(spec.input);
+            write(input);
             in_write.reset(); // end of input: the CLIs start once stdin closes
         });
     std::thread error_reader([&] {
@@ -420,7 +423,11 @@ void AgentRunner::execute(std::shared_ptr<Run> run, AgentExecutable agent, std::
     try
     {
         AgentStream stream(agent.kind);
-        ProcessSpec spec{agent, agent_arguments(agent.kind, model, effort, codex_servers(agent.kind)), std::move(prompt)};
+        ProcessSpec spec{agent, agent_arguments(agent.kind, model, effort, codex_servers(agent.kind))};
+        // Codex and opencode run as servers: stdin stays open for the conversation, and the
+        // server is ended once the turn is over (see AgentStream).
+        spec.begin = [&](const std::filesystem::path &workdir) { return stream.start(std::move(prompt), model, effort, utf8(workdir)); };
+        spec.interactive = stream.interactive();
         spec.cancel = run->cancel.get();
         spec.timeout_ms = timeout_ms;
         spec.line = [&](std::string_view line) {
@@ -430,8 +437,10 @@ void AgentRunner::execute(std::shared_ptr<Run> run, AgentExecutable agent, std::
                 if (event.type == AgentEvent::Type::Text) sink_({run->request, AgentUpdate::Type::Text, event.text});
                 else if (event.type == AgentEvent::Type::Status) sink_({run->request, AgentUpdate::Type::Status, event.text});
             }
-            return std::string();
+            return stream.take_reply();
         };
+        // Claude Code exits by itself, and its exit code still has to be seen.
+        if (stream.interactive()) spec.done = [&] { return stream.finished(); };
         auto result = run_process(spec);
         if (run->cancelled && !result.timed_out) return finish(AgentUpdate::Type::Error, "已停止回答");
         if (result.timed_out) return finish(AgentUpdate::Type::Error, label + " 超过 15 分钟没有完成回答，已停止");
@@ -440,7 +449,8 @@ void AgentRunner::execute(std::shared_ptr<Run> run, AgentExecutable agent, std::
             // The stream already explained the failure; repeat it as the final word.
             return finish(AgentUpdate::Type::Error, stream.last_error().empty() ? label + " 返回了错误" : stream.last_error());
         }
-        if (stream.succeeded() && result.code == 0) return finish(AgentUpdate::Type::Done, {});
+        // A server that answered is ended by the runner, so only Claude Code's own exit code counts.
+        if (stream.succeeded() && (stream.interactive() || result.code == 0)) return finish(AgentUpdate::Type::Done, {});
         auto detail = !stream.last_error().empty() ? stream.last_error() : stderr_summary(result.errors);
         finish(AgentUpdate::Type::Error, detail.empty() ? label + " 异常退出（代码 " + std::to_string(result.code) + "）" : detail);
     }

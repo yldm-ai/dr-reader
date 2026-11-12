@@ -8,6 +8,14 @@
 // flags and event shapes below were verified against codex-cli 0.167, Claude Code 2.1 and
 // opencode 1.19, and opencode (which NeoRead does not support) is configured through
 // OPENCODE_CONFIG_CONTENT.
+//
+// Streaming: Claude Code's `-p --include-partial-messages` already prints text deltas. `codex exec
+// --json` and `opencode run --format json` only print finished messages, so those two CLIs are run
+// as servers instead and driven over stdio: Codex through `app-server` (JSON-RPC; `thread/start`,
+// `turn/start`, deltas in `item/agentMessage/delta`, checked against the schema `codex app-server
+// generate-json-schema` prints) and opencode through `acp`, the Agent Client Protocol
+// (`session/new`, `session/set_config_option`, `session/prompt`, deltas in `agent_message_chunk`;
+// see packages/opencode/src/acp/event.ts and config-option.ts in opencode 1.19).
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,8 +43,9 @@ void validate_agent_effort(std::string_view effort);
 /**
  * Arguments after the executable. They contain no shell metacharacters, so they also survive
  * an npm `.cmd` shim launched through cmd.exe. The prompt itself is written to stdin.
- * `effort` is the reasoning effort: Claude `--effort`, Codex `model_reasoning_effort`, opencode
- * `--variant`. `codex_mcp_servers` are the user's configured Codex MCP servers, which are
+ * `effort` is the reasoning effort: Claude `--effort`; Codex and opencode, which run as servers,
+ * receive model and effort in their protocol requests (see AgentStream::start). They are still
+ * validated here. `codex_mcp_servers` are the user's configured Codex MCP servers, which are
  * switched off by name.
  */
 std::vector<std::string> agent_arguments(AgentKind kind, std::string_view model, std::string_view effort = {},
@@ -57,13 +66,29 @@ struct AgentEvent
     Type type;
     std::string text;
 };
-/** Turns one CLI's JSONL stdout into answer text, progress and failure. */
+/**
+ * Turns one CLI's JSONL stdout into answer text, progress and failure. For Codex and opencode it
+ * also holds the server side of the conversation: write `start()` to stdin, feed each stdout line
+ * to `line()`, write back `take_reply()`, and end the server once `finished()`.
+ */
 class AgentStream
 {
   public:
     explicit AgentStream(AgentKind kind) : kind_(kind) {}
+    /** Codex and opencode keep stdin open for requests; Claude Code reads the prompt and EOF. */
+    bool interactive() const { return kind_ != AgentKind::Claude; }
+    /**
+     * The first stdin input: the prompt itself for Claude Code, the protocol's opening request for
+     * the servers, which then ask the question with `model` and `effort` (empty: the CLI's
+     * default). `cwd` is the process's working directory; ACP sessions need it as an absolute path.
+     */
+    std::string start(std::string prompt, std::string model = {}, std::string effort = {}, std::string cwd = {});
     /** Parses one stdout line; lines that are not JSON objects are ignored. */
     std::vector<AgentEvent> line(std::string_view text);
+    /** Input to write back after the last `line()`, possibly empty. */
+    std::string take_reply() { return std::exchange(reply_, {}); }
+    /** The turn is over, either way; a server may then be ended. */
+    bool finished() const { return succeeded_ || failed_; }
     /** True once the provider reported a successful end of its turn. */
     bool succeeded() const { return succeeded_ && !failed_; }
     bool failed() const { return failed_; }
@@ -74,12 +99,18 @@ class AgentStream
   private:
     void append(std::vector<AgentEvent> &events, std::string text, bool new_block);
     void fail(std::vector<AgentEvent> &events, std::string message);
+    void send(int id, const char *method, const std::string &params);
+    /** opencode: the request after `after` (model → effort → prompt), skipping unset options. */
+    void opencode_next(int after);
     AgentKind kind_;
     bool succeeded_ = false;
     bool failed_ = false;
     std::string answer_;
     std::string last_error_;
     std::string last_part_;
+    std::string prompt_, model_, effort_, cwd_;
+    std::string session_; // Codex thread id or ACP session id
+    std::string reply_;
 };
 
 /** A model an agent CLI offers; `id` is what `--model` takes. */

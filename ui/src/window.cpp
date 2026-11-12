@@ -1,6 +1,7 @@
 #include "dr/window.h"
 #include <algorithm>
 #include <dwmapi.h>
+#include <timeapi.h>
 #include <windowsx.h>
 namespace dr
 {
@@ -8,6 +9,9 @@ namespace
 {
 constexpr UINT dispatch = WM_APP + 1;
 constexpr UINT_PTR caption_tip_timer = 43;
+constexpr UINT resize_cursor_tick = WM_APP + 2;
+// The thread-wide cursor hook is installed by the one Window that owns the message loop.
+Window *resize_cursor_owner = nullptr;
 }
 int Window::scale(int x) const
 {
@@ -175,6 +179,87 @@ void Window::set_fullscreen(bool enabled)
     target_.Reset();
     if (on_resize) on_resize();
     InvalidateRect(hwnd_, nullptr, TRUE);
+}
+void Window::set_resize_cursor(bool enabled)
+{
+    if (resize_cursor_ == enabled) return;
+    resize_cursor_ = enabled;
+    if (enabled)
+    {
+        resize_cursor_owner = this;
+        // WebView2 applies the CSS cursor from its own window procedure. A thread hook that
+        // runs after that procedure lets this window own the cursor while the page relayouts,
+        // even for messages delivered to the WebView2 child windows rather than the shell.
+        if (!resize_cursor_hook_)
+            resize_cursor_hook_ = SetWindowsHookExW(WH_CALLWNDPROCRET, resize_cursor_hook,
+                                                    nullptr, GetCurrentThreadId());
+        if (!resize_cursor_message_hook_)
+            resize_cursor_message_hook_ = SetWindowsHookExW(WH_GETMESSAGE, resize_cursor_message_hook,
+                                                            nullptr, GetCurrentThreadId());
+        // WebView2 can also apply the page's cursor without a WM_SETCURSOR round trip, and a
+        // WM_TIMER would be starved by the continuous input during a drag. A timer-queue
+        // thread posts a high-priority repaint tick so the cursor is reset within a frame.
+        timeBeginPeriod(1);
+        CreateTimerQueueTimer(&resize_cursor_timer_, nullptr, resize_cursor_tick_proc, this, 0, 4,
+                              WT_EXECUTEINTIMERTHREAD);
+        SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+    }
+    else
+    {
+        resize_cursor_owner = nullptr;
+        if (resize_cursor_timer_)
+        {
+            DeleteTimerQueueTimer(nullptr, resize_cursor_timer_, nullptr);
+            resize_cursor_timer_ = nullptr;
+        }
+        timeEndPeriod(1);
+        if (resize_cursor_hook_)
+        {
+            UnhookWindowsHookEx(resize_cursor_hook_);
+            resize_cursor_hook_ = nullptr;
+            // Let the window under the pointer choose again now that the page has settled,
+            // instead of leaving the resize arrow until the next mouse movement.
+            POINT point{};
+            if (GetCursorPos(&point))
+            {
+                const auto target = WindowFromPoint(point);
+                if (target && GetAncestor(target, GA_ROOT) == hwnd_)
+                    SendMessageW(target, WM_SETCURSOR, reinterpret_cast<WPARAM>(target),
+                                 MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+            }
+        }
+        if (resize_cursor_message_hook_)
+        {
+            UnhookWindowsHookEx(resize_cursor_message_hook_);
+            resize_cursor_message_hook_ = nullptr;
+        }
+    }
+}
+LRESULT CALLBACK Window::resize_cursor_hook(int code, WPARAM wparam, LPARAM lparam)
+{
+    if (code >= 0)
+    {
+        const auto *info = reinterpret_cast<const CWPRETSTRUCT *>(lparam);
+        const auto *owner = resize_cursor_owner;
+        if (info && owner && owner->resize_cursor_ && info->message == WM_SETCURSOR &&
+            GetAncestor(info->hwnd, GA_ROOT) == owner->hwnd_)
+            SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+    }
+    return CallNextHookEx(nullptr, code, wparam, lparam);
+}
+LRESULT CALLBACK Window::resize_cursor_message_hook(int code, WPARAM wparam, LPARAM lparam)
+{
+    if (code >= 0)
+    {
+        const auto *owner = resize_cursor_owner;
+        if (owner && owner->resize_cursor_) SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+    }
+    return CallNextHookEx(nullptr, code, wparam, lparam);
+}
+void CALLBACK Window::resize_cursor_tick_proc(PVOID parameter, BOOLEAN)
+{
+    const auto *self = static_cast<const Window *>(parameter);
+    if (self && self->resize_cursor_) PostMessageW(self->hwnd_, resize_cursor_tick, 0, 0);
 }
 void Window::set_borderless(bool enabled)
 {
@@ -515,8 +600,20 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             fn();
         return 0;
     }
+    if (m == resize_cursor_tick)
+    {
+        if (resize_cursor_) SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+        return 0;
+    }
     switch (m)
     {
+    case WM_SETCURSOR:
+        if (resize_cursor_)
+        {
+            SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+            return TRUE;
+        }
+        break;
     case WM_SETTINGCHANGE:
     case WM_THEMECHANGED:
         if (follow_system_theme_) set_theme("system");
@@ -607,6 +704,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
     }
     case WM_SIZE:
     {
+        if (w == SIZE_MINIMIZED) set_resize_cursor(false);
         if (target_)
             target_->Resize(D2D1::SizeU(LOWORD(l), HIWORD(l)));
         if (on_resize)
@@ -628,9 +726,11 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         }
         break;
     case WM_ACTIVATE:
+        if (LOWORD(w) == WA_INACTIVE) set_resize_cursor(false);
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;
     case WM_DESTROY:
+        set_resize_cursor(false);
         if (small_icon_)
             DestroyIcon(small_icon_);
         if (large_icon_)

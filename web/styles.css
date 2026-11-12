@@ -1040,6 +1040,11 @@ body[data-toc-resizing="true"],
 body[data-toc-resizing="true"] * {
   cursor: ew-resize !important;
 }
+/* The book iframe is a separate renderer; neither the inherited cursor nor the shield stops
+   its own hover/cursor updates while the panel changes its width. */
+body[data-toc-resizing="true"] #book-frame {
+  pointer-events: none;
+}
 body[data-toc-resizing="true"] .toc-panel {
   transition: none;
 }

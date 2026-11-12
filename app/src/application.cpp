@@ -218,6 +218,14 @@ void Application::receive(const Json &request)
         webview_.send({{"id", id}, {"result", hidden}});
         return;
     }
+    if (method == "toc.resize")
+    {
+        // The page fixes the CSS cursor, but WebView2 re-applies its own cursor while the
+        // sidebar reflows under the pointer. Lock it at the window level for the drag.
+        window_.set_resize_cursor(params.value("active", false));
+        webview_.send({{"id", id}, {"result", true}});
+        return;
+    }
     if (method.starts_with("agent.") && receive_agent(id, method, params)) return;
     if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;

@@ -1,6 +1,7 @@
 #pragma once
 #include <d2d1.h>
 #include <dwrite.h>
+#include <atomic>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -34,6 +35,12 @@ class Window
     const char *resolved_theme() const { return resolved_theme_; }
     void set_fullscreen(bool enabled);
     bool fullscreen() const { return fullscreen_; }
+    /**
+     * Keeps the system cursor on the horizontal-resize shape until released. WebView2
+     * re-selects the CSS cursor whenever the page reflows under the pointer, so a resize
+     * handle that changes the layout would otherwise flicker between two cursor images.
+     */
+    void set_resize_cursor(bool enabled);
     // Hides the title bar of either shell while keeping the window, its content position,
     // shadow, rounded corners, snapping and side/bottom resize borders.
     void set_borderless(bool enabled);
@@ -61,6 +68,9 @@ class Window
     double height_ratio_ = 0.75;
     bool follow_system_theme_ = false;
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
+    static LRESULT CALLBACK resize_cursor_hook(int, WPARAM, LPARAM);
+    static LRESULT CALLBACK resize_cursor_message_hook(int, WPARAM, LPARAM);
+    static void CALLBACK resize_cursor_tick_proc(PVOID, BOOLEAN);
     LRESULT message(UINT, WPARAM, LPARAM);
     void paint();
     void paint_placeholder(float top);
@@ -81,6 +91,10 @@ class Window
     bool mica_available_ = false;
     bool fullscreen_ = false;
     bool borderless_ = false;
+    std::atomic<bool> resize_cursor_ = false;
+    HHOOK resize_cursor_hook_ = nullptr;
+    HHOOK resize_cursor_message_hook_ = nullptr;
+    HANDLE resize_cursor_timer_ = nullptr;
     WINDOWPLACEMENT windowed_placement_{sizeof(WINDOWPLACEMENT)};
     LONG_PTR windowed_style_ = 0;
     UINT32 caption_background_ = 0xffffff;

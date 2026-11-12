@@ -43,6 +43,10 @@ package.
   call, which after a reversed single-page flip is the page being left. The loop also requests its next
   frame even when a frame throws; upstream requested it after drawing, so one failed frame (degenerate
   geometry at the page edge) stopped the book and froze a turn mid-flight.
+- **Fractional page sizes.** `FlipCalculation` keeps the page width and height as given; upstream cut
+  them to whole pixels with `parseInt`. A spread of odd width has half-pixel pages, and the fold was then
+  computed for a page 0.5px narrower than the one drawn and cropped: close to the spine one sample of
+  the turn showed a stale curl of the old page, a one-frame flash (`tests/page_flip_tests.ts`).
 - **Shadow start points.** `Flip.do` skips the shadow when the fold has no start point, where upstream
   passed `null` on and failed while drawing.
 - **TypeScript.** Converted to the project's settings: `const enum` became `as const` objects, strict null

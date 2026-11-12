@@ -35,8 +35,11 @@ export class FlipCalculation {
     constructor(direction: FlipDirection, corner: FlipCorner, pageWidth: string, pageHeight: string) {
         this.direction = direction;
         this.corner = corner;
-        this.pageWidth = parseInt(pageWidth, 10);
-        this.pageHeight = parseInt(pageHeight, 10);
+        // dr-reader: keep fractional sizes. A spread of odd width has half-pixel pages; upstream's
+        // parseInt cut them to whole pixels, so the fold was computed for a page 0.5px narrower than
+        // the one drawn and cropped, and near the spine a turn showed a stale curl for a frame.
+        this.pageWidth = Number(pageWidth);
+        this.pageHeight = Number(pageHeight);
     }
 
     /**

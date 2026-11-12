@@ -176,6 +176,8 @@ export class SettingsPanel {
   * model (or the CLI's default model). 自动选择 has no single CLI to configure.
   */
  syncAgent(){const a=this.value!.application,agent=a.agent||'auto',auto=agent==='auto';
+ // The saved tool is shown on every open, not only the select's first option.
+ $<HTMLSelectElement>('app-agent').value=agent;this.selectControls.get('agent')?.sync();
  const state=auto?undefined:this.agentModels.get(agent),models=state?.models;
  const savedModel=auto?'':a.agentModels?.[agent]??'',savedEffort=auto?'':a.agentEfforts?.[agent]??'';
  const fallback=models?.find(m=>m.default),model=savedModel?models?.find(m=>m.id===savedModel):fallback;

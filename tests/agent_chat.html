@@ -118,6 +118,12 @@ try {
   await until(() => trigger.textContent === 'opus[1m]（自定义）');
   check(modelQueries().length === queries, 'model lists are kept for the session');
   doc.getElementById('application-settings-close').click();
+  // A fresh start shows the saved tool, not the select's first option (自动选择).
+  agent.value = 'auto';
+  doc.getElementById('open-settings').click();
+  doc.getElementById('app-tab-agent').click();
+  check(agent.value === 'claude' && doc.getElementById('app-agent-trigger').textContent === 'Claude Code', 'saved tool shown when settings reopen');
+  doc.getElementById('application-settings-close').click();
 
   // Ask about a selected passage.
   doc.querySelector('.book-card').click();
@@ -169,6 +175,9 @@ try {
   submit('慢慢说');
   await until(() => doc.querySelector('.ask-panel').dataset.busy === 'true' && doc.querySelectorAll('.ask-answer-body')[2]?.textContent.includes('这是'), 'slow answer started');
   check(doc.querySelector('.ask-send').getAttribute('aria-label') === '停止回答', 'send turns into stop');
+  const stopStyle = win.getComputedStyle(doc.querySelector('.ask-send'));
+  check(stopStyle.color !== stopStyle.backgroundColor && doc.querySelector('.ask-send .ui-icon').dataset.renderIcon === 'stop',
+    'stop square contrasts with its button');
   doc.querySelector('.ask-send').click();
   await until(() => probe.requests.some(item => item.method === 'agent.cancel'), 'cancel sent');
   await until(() => doc.querySelector('.ask-panel').dataset.busy === 'false');

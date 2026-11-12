@@ -1124,8 +1124,19 @@ body[data-toc-resizing="true"] .toc-panel {
   margin-bottom: 8px;
 }
 .toc-header .toc-tabs { position: relative; flex: 1; min-width: 0; border: 0; margin: 0; }
-.toc-header .toc-tabs button { padding: 12px 4px; min-width: 0; }
-.toc-pin { flex: none; width: 28px; height: 28px; justify-content: center; padding: 4px; }
+/* Tab labels never wrap into a vertical column; TOC_MIN_WIDTH in reader.ts leaves room for all five. */
+.toc-header .toc-tabs button { padding: 12px 2px; min-width: 0; white-space: nowrap; }
+/* The pin is no taller than the tab labels beside it. */
+.toc-pin {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+}
+.toc-pin .ui-icon { width: 14px; height: 14px; }
 .toc-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
 .toc-pin[aria-pressed="false"] .ui-icon { transform: rotate(35deg); }
 .toc-tabs {
@@ -3203,7 +3214,10 @@ body[data-animations="false"] .reader-footer { transition: none; }
 .ask-hint { flex: 1; color: var(--muted); font-size: var(--text-caption); text-align: right; }
 .ask-send { width: 30px; height: 30px; background: var(--primary); color: var(--on-primary); }
 .ask-send:hover { background: var(--primary-hover); color: var(--on-primary); }
-.ask-panel[data-busy="true"] .ask-send { background: var(--text); }
+/* Stopping inverts the text colours in either theme, so the filled square always reads. */
+.ask-panel[data-busy="true"] .ask-send,
+.ask-panel[data-busy="true"] .ask-send:hover { background: var(--text); color: var(--surface); }
+.ask-panel[data-busy="true"] .ask-send .ui-icon { --icon-size: 18px; }
 .ask-thread[hidden] { display: none; }
 /* 历史: the book's saved conversations, in place of the thread. */
 .ask-history { flex: 1; padding: 0 0 12px; }

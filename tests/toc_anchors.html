@@ -56,6 +56,16 @@ try {
   check(!root.querySelector('.toc-row:has(> .toc-toggle) > .toc-entry.active'), 'collapsed ancestor stays unhighlighted');
   toggles[0].click();
   check(marker.style.opacity === '1', 'expanding restores the leaf capsule');
+  // At its narrowest the sidebar keeps every tab label on one line, and the pin is no taller than a label.
+  const workspace = doc.querySelector('.reader-workspace');
+  workspace.style.setProperty('--toc-panel-width', '220px');
+  const tabs = [...doc.querySelectorAll('.toc-header .toc-tabs button')];
+  const lineHeight = parseFloat(frame.contentWindow.getComputedStyle(tabs[0]).lineHeight) || 20;
+  for (const tab of tabs) {
+    const range = doc.createRange(); range.selectNodeContents(tab);
+    check(range.getClientRects().length === 1 && tab.scrollWidth <= tab.clientWidth + 1, `tab label ${tab.textContent} stays on one line`);
+  }
+  check(doc.getElementById('pin-toc').getBoundingClientRect().height <= lineHeight, 'pin is no taller than the tab text');
   check(!frame.contentWindow.runtimeErrors.length, frame.contentWindow.runtimeErrors.join('\n'));
   document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS unique TOC anchors';
 } catch (error) {

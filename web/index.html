@@ -12,6 +12,14 @@
     <script type="module" src="app.ts"></script>
   </head>
   <body class="booting">
+    <!-- The WebView2 title bar: drawn here, hit-tested and operated by the native window, which
+         reports its hover and window state (app.ts). Hidden from the page's pointer and readers. -->
+    <header id="web-caption" class="web-caption" aria-hidden="true">
+      <span class="web-caption-title">DR Reader</span>
+      <span class="web-caption-button" data-caption-button="minimize">&#xE921;</span>
+      <span class="web-caption-button" data-caption-button="maximize">&#xE922;</span>
+      <span class="web-caption-button" data-caption-button="close">&#xE8BB;</span>
+    </header>
     <div id="app" class="app">
       <!-- The library home keeps Segoe Fluent glyphs; the reader uses Material Symbols. -->
       <aside class="sidebar" data-icon-set="fluent">

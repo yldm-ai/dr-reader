@@ -23,6 +23,8 @@ class Application
     fs::path pick_notes_path(const std::string &title, bool &markdown);
     fs::path pick_notes_import_path();
     void apply_settings(const Json &settings);
+    void send_caption();
+    void release_cursor();
     bool receive_agent(const Json &id, const std::string &method, const Json &params);
     Window window_;
     WebView webview_;
@@ -30,6 +32,13 @@ class Application
     fs::path assets_;
     std::vector<fs::path> initial_files_;
     std::string shell_override_;
+    bool page_ready_ = false;
+    HCURSOR cursor_hold_ = nullptr;
+    UINT32 cursor_hold_id_ = 0;
+    bool cursor_releasing_ = false;
+    bool cursor_released_up_ = false;
+    POINT cursor_release_point_{};
+    Json last_caption_;
     std::mutex mutex_;
     std::condition_variable_any wake_;
     std::queue<std::function<void()>> queue_;

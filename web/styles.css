@@ -169,9 +169,45 @@ button {
 }
 .app {
   display: flex;
-  height: 100vh;
+  height: calc(100vh - var(--caption-height, 0px));
+  margin-top: var(--caption-height, 0px);
   overflow: hidden;
 }
+/* The WebView2 title bar mirrors the Direct2D one (ui/src/window.cpp, Window::paint): the
+   window's --bg, a 12px title from 10px, and 46px Segoe Fluent Icons buttons. The native window
+   hit-tests it, so it never takes pointer input; hover comes from data-hot. */
+.web-caption {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  inset: 0 0 auto;
+  height: var(--caption-height, 0px);
+  background: var(--bg);
+  color: var(--text);
+  font: 400 12px/1 "Microsoft YaHei", "Microsoft YaHei UI", "Noto Sans SC", "Noto Sans CJK SC", "Segoe UI", sans-serif;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+:root[data-caption="web"] .web-caption { display: flex; }
+.web-caption-title {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  padding-left: 10px;
+  margin-right: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.web-caption-button {
+  display: grid;
+  place-items: center;
+  width: var(--caption-button-width, 46px);
+  font: 400 10px/1 "Segoe Fluent Icons", "Segoe MDL2 Assets";
+}
+.web-caption-button[data-hot] { background: var(--hover); }
+.web-caption-button[data-caption-button="close"][data-hot] { background: #c42b1c; color: #fff; }
 /* The library home and the reader toolbar are application chrome, not readable content:
    labels, titles and counts are not selectable. Text fields stay editable and selectable. */
 :is(.sidebar, .library-view, .book-context-menu, .reader-toolbar, .corner-button) { -webkit-user-select: none; user-select: none; }
@@ -836,7 +872,7 @@ body[data-animations="false"] :is(.book-title-tooltip, .book-context-menu) { ani
 }
 .reader-view {
   position: fixed;
-  inset: 0;
+  inset: var(--caption-height, 0px) 0 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2325,7 +2361,7 @@ body[data-animations="false"] .toast { animation: none; }
 }
 .busy {
   position: fixed;
-  inset: 0;
+  inset: var(--caption-height, 0px) 0 0;
   background: var(--scrim);
   display: flex;
   flex-direction: column;

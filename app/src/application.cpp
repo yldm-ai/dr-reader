@@ -46,6 +46,10 @@ void copy_text(HWND owner,const std::string& text){if(text.size()>65536)throw st
  if(!OpenClipboard(owner)){GlobalFree(memory);throw std::runtime_error("剪贴板正被其他程序使用");}EmptyClipboard();if(!SetClipboardData(CF_UNICODETEXT,memory)){CloseClipboard();GlobalFree(memory);throw std::runtime_error("无法写入剪贴板");}CloseClipboard();}
 // Matches the toolbar: titles past 20 characters (code points, not UTF-16 units) end in an ellipsis.
 std::wstring short_title(const std::wstring& title,size_t max=20){size_t count=0;for(size_t i=0;i<title.size();++i){if(IS_LOW_SURROGATE(title[i]))continue;if(count++==max)return title.substr(0,i)+L"…";}return title;}
+ShellStyle shell_style(const std::string &shell)
+{
+    return shell == "direct2d" ? ShellStyle::Direct2D : shell == "webview2" ? ShellStyle::WebView2 : ShellStyle::Mica;
+}
 }
 Application::Application(fs::path root, fs::path assets, std::vector<fs::path> files, std::string shell)
     : library_(std::move(root)), assets_(std::move(assets)), initial_files_(std::move(files)),
@@ -86,10 +90,30 @@ void Application::enqueue(std::function<void()> work)
 void Application::apply_settings(const Json &s)
 {
     auto app=s.at("application");
-    window_.set_style(app.value("shell", std::string("mica")) == "direct2d" ? ShellStyle::Direct2D
-                                                                          : ShellStyle::Mica);
+    window_.set_style(shell_style(app.value("shell", std::string("mica"))));
     window_.set_theme(app.value("theme", std::string("light")));
     webview_.set_theme(window_.resolved_theme());
+    if (page_ready_) webview_.set_background(window_.background());
+}
+void Application::release_cursor()
+{
+    if (!cursor_releasing_) return;
+    cursor_releasing_ = false;
+    cursor_hold_ = nullptr;
+    window_.update_cursor();
+}
+void Application::send_caption()
+{
+    const auto state = window_.caption_state();
+    const double scale = 96.0 / GetDpiForWindow(window_.handle());
+    const char *hot = state.hot == HTMINBUTTON ? "minimize" : state.hot == HTMAXBUTTON ? "maximize"
+                    : state.hot == HTCLOSE ? "close" : "";
+    Json caption{{"event", "caption"}, {"visible", state.visible}, {"height", state.height * scale},
+                 {"buttonWidth", state.button_width * scale}, {"hot", hot}, {"maximized", state.maximized},
+                 {"title", narrow(state.title)}};
+    if (caption == last_caption_) return;
+    last_caption_ = caption;
+    webview_.send(caption);
 }
 std::vector<fs::path> Application::pick_books()
 {
@@ -199,6 +223,12 @@ void Application::receive(const Json &request)
         // The page has rendered the library (or failed to load it) and covers the window's
         // startup placeholder, which no longer needs drawing behind the transparent view.
         window_.set_placeholder(false);
+        // The page now paints an opaque body. An opaque default background lets Chromium keep
+        // subpixel (ClearType) text in the composition-hosted view.
+        page_ready_ = true;
+        webview_.set_background(window_.background());
+        last_caption_ = nullptr;
+        send_caption();
         webview_.send({{"id", id}, {"result", true}});
         return;
     }
@@ -218,11 +248,35 @@ void Application::receive(const Json &request)
         webview_.send({{"id", id}, {"result", hidden}});
         return;
     }
-    if (method == "toc.resize")
+    if (method == "cursor.hold")
     {
-        // The page fixes the CSS cursor, but WebView2 re-applies its own cursor while the
-        // sidebar reflows under the pointer. Lock it at the window level for the drag.
-        window_.set_resize_cursor(params.value("active", false));
+        // While a page drag relayouts the book, Chromium briefly reports the book frame's own
+        // cursor. The page holds the drag's cursor here until its layout has settled.
+        const auto cursor = params.value("cursor", std::string());
+        if (cursor == "ew-resize")
+        {
+            cursor_hold_ = LoadCursorW(nullptr, IDC_SIZEWE);
+            cursor_hold_id_ = 32644; // OCR_SIZEWE
+            cursor_releasing_ = false;
+            cursor_released_up_ = false;
+            window_.update_cursor();
+        }
+        else if (cursor.empty())
+        {
+            // Chromium may still hold the frame's stale cursor. A fresh move at the pointer makes
+            // it hit-test again; hand over once it reports the held cursor, or after a moment.
+            if (cursor_hold_ && !cursor_releasing_)
+            {
+                cursor_releasing_ = true;
+                if (window_.relay_pointer()) window_.after(200, [this] { release_cursor(); });
+                else release_cursor();
+            }
+        }
+        else
+        {
+            webview_.send({{"id", id}, {"error", "不支持的光标"}});
+            return;
+        }
         webview_.send({{"id", id}, {"result", true}});
         return;
     }
@@ -500,9 +554,7 @@ int Application::run(HINSTANCE instance)
     auto settings = library_.settings();
     if (!shell_override_.empty())
         settings["application"]["shell"] = shell_override_;
-    if (!window_.create(instance, settings["application"].value("shell", std::string("mica")) == "direct2d"
-                                      ? ShellStyle::Direct2D
-                                      : ShellStyle::Mica, IDI_DR_READER,
+    if (!window_.create(instance, shell_style(settings["application"].value("shell", std::string("mica"))), IDI_DR_READER,
                          settings["window"]["widthRatio"].get<double>(),
                          settings["window"]["heightRatio"].get<double>(),
                          settings["application"].value("theme", std::string("light"))))
@@ -521,8 +573,40 @@ int Application::run(HINSTANCE instance)
     // the caption; positions are converted from client pixels to CSS pixels.
     window_.on_caption_tooltip = [this](const std::wstring &text, RECT button) {
         const double scale = 96.0 / GetDpiForWindow(window_.handle());
+        // A Direct2D button ends where the page begins; a WebView2 caption is inside the page.
+        const auto caption = window_.caption_state();
+        const bool web = caption.visible && page_ready_;
         webview_.send({{"event", "caption-tooltip"}, {"text", narrow(text)},
-                       {"left", button.left * scale}, {"width", (button.right - button.left) * scale}});
+                       {"left", button.left * scale}, {"width", (button.right - button.left) * scale},
+                       {"top", web ? 0.0 : -1.0}, {"height", web ? caption.height * scale : 1.0}});
+    };
+    window_.on_caption_change = [this] { if (page_ready_) send_caption(); };
+    // The page is composition-hosted: this window relays its mouse input and applies its cursor.
+    window_.on_mouse = [this](UINT message, WPARAM w, POINT point) {
+        webview_.mouse(message, w, point);
+        if (!cursor_hold_) return;
+        // A held cursor is for a still pointer. Once the pointer moves away from where the drag
+        // ended, each move hit-tests afresh, so the page's own cursor is current again.
+        POINT screen{};
+        GetCursorPos(&screen);
+        if (message == WM_LBUTTONUP) { cursor_release_point_ = screen; cursor_released_up_ = true; }
+        else if (message == WM_MOUSEMOVE && cursor_released_up_ && !(w & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) &&
+                 (std::abs(screen.x - cursor_release_point_.x) > 4 || std::abs(screen.y - cursor_release_point_.y) > 4))
+        {
+            cursor_releasing_ = true;
+            release_cursor();
+        }
+    };
+    window_.on_cursor = [this] {
+        if (!cursor_hold_) return webview_.cursor();
+        SetCursor(cursor_hold_);
+        return true;
+    };
+    window_.on_focus = [this] { webview_.focus(); };
+    window_.on_move = [this] { webview_.notify_move(); };
+    webview_.on_cursor_changed = [this] {
+        if (cursor_releasing_ && webview_.system_cursor() == cursor_hold_id_) release_cursor();
+        else window_.update_cursor();
     };
     window_.set_theme(settings["application"].value("theme", std::string("light")));
     webview_.set_theme(window_.resolved_theme());
@@ -531,6 +615,10 @@ int Application::run(HINSTANCE instance)
     { MessageBoxW(window_.handle(), error.c_str(), L"DR Reader", MB_OK | MB_ICONERROR); };
     window_.on_close = [this] { webview_.send({{"event", "closing"}}); };
     webview_.resize(window_.content_bounds());
+    {
+        const auto caption = window_.caption_state();
+        webview_.set_caption_height(caption.visible ? caption.height * 96.0 / GetDpiForWindow(window_.handle()) : 0.0);
+    }
     webview_.create(window_.handle(), assets_, library_.root(), [] {});
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0)

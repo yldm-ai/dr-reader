@@ -676,6 +676,10 @@ int main()
                 "legacy settings migration");
         rejects([&] { dr::patch_settings(defaults, {{"reading", {{"mode", "invalid"}}}}); },
                 "invalid reading mode");
+        require(dr::patch_settings(defaults, {{"application", {{"shell", "webview2"}}}})["application"]["shell"] == "webview2",
+                "the WebView2-drawn title bar is a saved shell choice");
+        rejects([&] { dr::patch_settings(defaults, {{"application", {{"shell", "electron"}}}}); },
+                "title bar shells are limited to the built-in ones");
         auto dictionary = dr::patch_settings(
             defaults,
             {{"application",

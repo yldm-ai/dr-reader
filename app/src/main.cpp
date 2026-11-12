@@ -29,8 +29,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
             else if (arg == L"--shell" && i + 1 < argc)
             {
                 shell = dr::narrow(argv[++i]);
-                if (shell != "mica" && shell != "direct2d")
-                    throw std::runtime_error("--shell 仅支持 mica 或 direct2d");
+                if (shell != "mica" && shell != "direct2d" && shell != "webview2")
+                    throw std::runtime_error("--shell 仅支持 mica、direct2d 或 webview2");
             }
             else if (arg.starts_with(L"--"))
                 throw std::runtime_error("未知命令行参数");

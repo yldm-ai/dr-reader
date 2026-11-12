@@ -1,7 +1,6 @@
 #pragma once
 #include <d2d1.h>
 #include <dwrite.h>
-#include <atomic>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -13,7 +12,21 @@ namespace dr
 enum class ShellStyle
 {
     Mica,
-    Direct2D
+    Direct2D,
+    // The page draws the caption; this window still owns its hit testing and buttons.
+    WebView2
+};
+/** What a page-drawn caption shows. Sizes are in physical pixels. */
+struct CaptionState
+{
+    bool visible = false;
+    int height = 0;
+    int button_width = 0;
+    // HTMINBUTTON, HTMAXBUTTON, HTCLOSE or HTNOWHERE.
+    int hot = HTNOWHERE;
+    bool maximized = false;
+    std::wstring title;
+    bool operator==(const CaptionState &) const = default;
 };
 // The native shell knows nothing about books or WebView2.
 class Window
@@ -35,12 +48,14 @@ class Window
     const char *resolved_theme() const { return resolved_theme_; }
     void set_fullscreen(bool enabled);
     bool fullscreen() const { return fullscreen_; }
-    /**
-     * Keeps the system cursor on the horizontal-resize shape until released. WebView2
-     * re-selects the CSS cursor whenever the page reflows under the pointer, so a resize
-     * handle that changes the layout would otherwise flicker between two cursor images.
-     */
-    void set_resize_cursor(bool enabled);
+    /** The caption a WebView2-drawn title bar should show now. */
+    CaptionState caption_state() const;
+    /** Re-applies the cursor for the pointer's current position, e.g. after the page changed it. */
+    void update_cursor();
+    /** Gives the page a mouse move at the pointer's position; false if the pointer is elsewhere. */
+    bool relay_pointer();
+    /** Runs `action` once after `ms`; a later call replaces a pending one. */
+    void after(UINT ms, std::function<void()> action);
     // Hides the title bar of either shell while keeping the window, its content position,
     // shadow, rounded corners, snapping and side/bottom resize borders.
     void set_borderless(bool enabled);
@@ -58,6 +73,15 @@ class Window
     // Hover tip for a Direct2D caption button: its text and client-pixel rectangle, or an
     // empty text to hide it. The tip is drawn below the caption, over the web content.
     std::function<void(const std::wstring &, RECT)> on_caption_tooltip;
+    // Called whenever caption_state() may have changed.
+    std::function<void()> on_caption_change;
+    // The composition-hosted page has no window of its own: the shell relays mouse input over
+    // the content (in client pixels; wheel messages keep their screen position) and asks the
+    // page for the cursor. on_mouse receives the point relative to the content's top-left.
+    std::function<void(UINT message, WPARAM, POINT)> on_mouse;
+    std::function<bool()> on_cursor;
+    std::function<void()> on_focus;
+    std::function<void()> on_move;
     bool mica_available() const
     {
         return mica_available_;
@@ -68,10 +92,11 @@ class Window
     double height_ratio_ = 0.75;
     bool follow_system_theme_ = false;
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
-    static LRESULT CALLBACK resize_cursor_hook(int, WPARAM, LPARAM);
-    static LRESULT CALLBACK resize_cursor_message_hook(int, WPARAM, LPARAM);
-    static void CALLBACK resize_cursor_tick_proc(PVOID, BOOLEAN);
     LRESULT message(UINT, WPARAM, LPARAM);
+    bool relay_mouse(UINT, WPARAM, LPARAM);
+    void leave_content();
+    RECT input_bounds() const;
+    void caption_changed();
     void paint();
     void paint_placeholder(float top);
     int caption_hit(POINT point) const;
@@ -81,8 +106,16 @@ class Window
     void update_icons();
     int scale(int dip) const;
     int caption_height() const;
-    // The custom caption is drawn only by a windowed Direct2D shell that shows its title bar.
-    bool draws_caption() const { return style_ == ShellStyle::Direct2D && !fullscreen_ && !borderless_; }
+    // A windowed Direct2D or WebView2 shell that shows its title bar handles the caption itself.
+    bool custom_caption() const
+    {
+        return (style_ == ShellStyle::Direct2D || style_ == ShellStyle::WebView2) && !fullscreen_ && !borderless_;
+    }
+    // Direct2D draws it; a WebView2 caption is drawn natively only until the page is ready.
+    bool draws_caption() const
+    {
+        return custom_caption() && (style_ == ShellStyle::Direct2D || placeholder_);
+    }
     RECT screen_content() const;
     HWND hwnd_ = nullptr;
     int icon_resource_ = 0;
@@ -91,10 +124,9 @@ class Window
     bool mica_available_ = false;
     bool fullscreen_ = false;
     bool borderless_ = false;
-    std::atomic<bool> resize_cursor_ = false;
-    HHOOK resize_cursor_hook_ = nullptr;
-    HHOOK resize_cursor_message_hook_ = nullptr;
-    HANDLE resize_cursor_timer_ = nullptr;
+    // The pointer is over the page, and the page holds the mouse capture after a press in it.
+    bool content_hovered_ = false;
+    bool content_captured_ = false;
     WINDOWPLACEMENT windowed_placement_{sizeof(WINDOWPLACEMENT)};
     LONG_PTR windowed_style_ = 0;
     UINT32 caption_background_ = 0xffffff;
@@ -111,6 +143,7 @@ class Window
     Microsoft::WRL::ComPtr<IDWriteFactory> write_;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> caption_icons_;
+    std::function<void()> delayed_;
     std::mutex mutex_;
     std::vector<std::function<void()>> pending_;
 };

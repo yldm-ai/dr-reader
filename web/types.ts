@@ -53,7 +53,7 @@ export type LibrarySort = 'added' | 'read' | 'title' | 'author';
 
 export interface ApplicationSettings {
   theme: Theme;
-  shell: 'mica' | 'direct2d';
+  shell: 'mica' | 'direct2d' | 'webview2';
   animations: boolean;
   bookOpeningEnabled?: boolean;
   bookOpeningAnimation?: BookOpeningAnimation;

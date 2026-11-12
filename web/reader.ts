@@ -104,7 +104,7 @@ export class Reader {
   tocScrollbar?: OverlayScrollbar;
   askScrollbar?: OverlayScrollbar;
   tocResize?: { pointer: number; startX: number; startWidth: number; width: number };
-  tocResizeUnlockTimer?: Timer;
+  tocCursorRevision = 0;
   tapStart: { x: number; y: number; time: number; selected: boolean } | null = null;
   saveTimer?: Timer;
   tapTimer?: Timer;
@@ -277,12 +277,9 @@ export class Reader {
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      clearTimeout(this.tocResizeUnlockTimer);
-      this.tocResizeUnlockTimer = undefined;
-      // WebView2 re-selects the CSS cursor as the panel reflows, which flickers between the
-      // resize arrow and the default arrow. The host holds the native cursor through the drag.
-      call("toc.resize", { active: true }).catch(() => { /* The browser test host has no window. */ });
-      this.setFrameResizeCursor(true);
+      // The shield (styles.css) keeps one cursor over the whole page, book frame included, while
+      // the panel reflows under the pointer. The native window applies only that cursor.
+      this.holdTocCursor();
       this.setTocExpanded(true);
       keepOpen();
       try { handle.setPointerCapture(event.pointerId); } catch { /* Window listeners still track the drag. */ }
@@ -306,14 +303,8 @@ export class Reader {
       if (!drag || (event && event.pointerId !== drag.pointer)) return;
       this.tocResize = undefined;
       delete document.body.dataset.tocResizing;
-      // Keep the native cursor through the reflow that follows pointerup. The page stays
-      // interactive, so releasing later only affects the cursor, not the layout.
-      clearTimeout(this.tocResizeUnlockTimer);
-      this.tocResizeUnlockTimer = setTimeout(() => {
-        this.tocResizeUnlockTimer = undefined;
-        this.setFrameResizeCursor(false);
-        call("toc.resize", { active: false }).catch(() => { /* The browser test host has no window. */ });
-      }, 500);
+      this.releaseTocCursor();
+
       try {
         if (handle.hasPointerCapture(drag.pointer)) handle.releasePointerCapture(drag.pointer);
       } catch { /* The pointer may already have been released by the host. */ }
@@ -345,23 +336,29 @@ export class Reader {
     });
   }
 
+
   /**
-   * The book iframe is a separate renderer, so the page-level resize cursor rule does not
-   * reach it. Its own relayout otherwise resets the cursor to the default arrow mid-drag.
+   * Re-laying out the book frame for a new width makes Chromium briefly report that frame's
+   * own cursor, even with the shield above it. The native window, the only one setting the
+   * cursor, holds the resize cursor from the press until the relayout has gone quiet.
    */
-  setFrameResizeCursor(active: boolean) {
-    const doc = this.doc;
-    if (!doc) return;
-    const existing = doc.getElementById("dr-toc-resize-cursor");
-    if (active) {
-      if (existing) return;
-      const style = doc.createElement("style");
-      style.id = "dr-toc-resize-cursor";
-      style.textContent = "html, body, body * { cursor: ew-resize !important; }";
-      (doc.head || doc.documentElement).appendChild(style);
-    } else {
-      existing?.remove();
-    }
+  holdTocCursor() {
+    ++this.tocCursorRevision;
+    call("cursor.hold", { cursor: "ew-resize" }).catch(() => { /* The browser test host has no window. */ });
+  }
+
+  releaseTocCursor() {
+    const revision = ++this.tocCursorRevision;
+    const started = performance.now();
+    let quietSince = started;
+    const check = () => {
+      if (revision !== this.tocCursorRevision) return;
+      const now = performance.now();
+      if (this.reflowTimer || this.reflowing || this.loading) quietSince = now;
+      if (now - quietSince < 250 && now - started < 3000) { requestAnimationFrame(check); return; }
+      call("cursor.hold", { cursor: "" }).catch(() => { /* The browser test host has no window. */ });
+    };
+    requestAnimationFrame(check);
   }
 
   /** Keeps a wide sidebar useful without squeezing the book below a readable width. */
@@ -1467,6 +1464,7 @@ export class Reader {
     clearTimeout(this.reflowTimer);
     const doc = this.doc, generation = this.generation;
     this.reflowTimer = setTimeout(() => {
+      this.reflowTimer = undefined;
       // Loading restores its own anchor after fonts/layout are ready. An old resize timer
       // must not consume that anchor in the outgoing document.
       if (doc !== this.doc || generation !== this.generation || this.loading || $("app").hidden) return;

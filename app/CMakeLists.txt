@@ -4,7 +4,7 @@ FetchContent_Declare(webview2 URL "https://www.nuget.org/api/v2/package/Microsof
 FetchContent_MakeAvailable(webview2)
 add_executable(dr-reader WIN32 src/main.cpp src/application.cpp src/webview.cpp src/agent_runner.cpp app.rc)
 target_include_directories(dr-reader PRIVATE src "${webview2_SOURCE_DIR}/build/native/include")
-target_link_libraries(dr-reader PRIVATE dr_engine dr_shell "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib" ole32 shell32 shlwapi comdlg32 version)
+target_link_libraries(dr-reader PRIVATE dr_engine dr_shell "${webview2_SOURCE_DIR}/build/native/x64/WebView2LoaderStatic.lib" ole32 shell32 shlwapi comdlg32 version dcomp)
 target_link_options(dr-reader PRIVATE /MANIFEST:NO)
 set_target_properties(dr-reader PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 find_program(DR_PNPM_EXECUTABLE NAMES pnpm.cmd pnpm REQUIRED)

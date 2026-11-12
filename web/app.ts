@@ -112,16 +112,36 @@ reader.onOpenSettings = () => settingsPanel.open("reading");
 window.chrome?.webview?.addEventListener("message", async ({ data }: { data: HostMessage }) => {
   if (data.event === "fullscreen") document.body.dataset.fullscreen = String(data.enabled);
   if (data.event === "titlebar") document.body.dataset.titlebar = data.hidden ? "hidden" : "shown";
-  // A Direct2D caption button's tip: the button ends at the top edge of the web content.
+  // A native caption button's tip, under the button: a Direct2D button ends at the top edge
+  // of the web content, a WebView2 one is the page's own caption strip.
   if (data.event === "caption-tooltip") {
-    if (data.text) tooltips.show({ left: Number(data.left), width: Number(data.width), top: -1, height: 1 }, String(data.text));
+    if (data.text) tooltips.show({ left: Number(data.left), width: Number(data.width), top: Number(data.top ?? -1), height: Number(data.height ?? 1) }, String(data.text));
     else tooltips.hide();
   }
+  if (data.event === "caption") showCaption(data);
   if (data.event === "closing") {
     await Promise.allSettled([reader.flush(), settingsPanel.flush()]);
     call("close").catch(() => {});
   }
 });
+
+/** Draws the WebView2 title bar from the native window's caption state. */
+function showCaption(state: HostMessage) {
+  const root = document.documentElement;
+  const visible = Boolean(state.visible);
+  if (visible) root.dataset.caption = "web";
+  else delete root.dataset.caption;
+  root.style.setProperty("--caption-height", `${visible ? Number(state.height) || 0 : 0}px`);
+  const caption = $("web-caption");
+  if (!visible) return;
+  caption.style.setProperty("--caption-button-width", `${Number(state.buttonWidth) || 46}px`);
+  caption.querySelector(".web-caption-title")!.textContent = String(state.title || "DR Reader");
+  caption.querySelectorAll<HTMLElement>("[data-caption-button]").forEach(button => {
+    button.toggleAttribute("data-hot", button.dataset.captionButton === state.hot);
+  });
+  // Segoe Fluent Icons ChromeMaximize / ChromeRestore, as the Direct2D caption draws them.
+  caption.querySelector('[data-caption-button="maximize"]')!.textContent = state.maximized ? "" : "";
+}
 
 function cover(book: Book, className = "cover-image") {
   return book.cover

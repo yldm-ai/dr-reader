@@ -1,7 +1,6 @@
 #include "dr/window.h"
 #include <algorithm>
 #include <dwmapi.h>
-#include <timeapi.h>
 #include <windowsx.h>
 namespace dr
 {
@@ -9,9 +8,31 @@ namespace
 {
 constexpr UINT dispatch = WM_APP + 1;
 constexpr UINT_PTR caption_tip_timer = 43;
-constexpr UINT resize_cursor_tick = WM_APP + 2;
-// The thread-wide cursor hook is installed by the one Window that owns the message loop.
-Window *resize_cursor_owner = nullptr;
+constexpr UINT_PTR delayed_timer = 44;
+bool mouse_message(UINT m)
+{
+    switch (m)
+    {
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN: case WM_LBUTTONUP: case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN: case WM_RBUTTONUP: case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN: case WM_MBUTTONUP: case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN: case WM_XBUTTONUP: case WM_XBUTTONDBLCLK:
+    case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
+    case WM_MOUSELEAVE:
+        return true;
+    }
+    return false;
+}
+bool button_down(UINT m)
+{
+    return m == WM_LBUTTONDOWN || m == WM_RBUTTONDOWN || m == WM_MBUTTONDOWN || m == WM_XBUTTONDOWN ||
+           m == WM_LBUTTONDBLCLK || m == WM_RBUTTONDBLCLK || m == WM_MBUTTONDBLCLK || m == WM_XBUTTONDBLCLK;
+}
+bool button_up(UINT m)
+{
+    return m == WM_LBUTTONUP || m == WM_RBUTTONUP || m == WM_MBUTTONUP || m == WM_XBUTTONUP;
+}
 }
 int Window::scale(int x) const
 {
@@ -100,9 +121,112 @@ RECT Window::content_bounds() const
 {
     RECT r{};
     GetClientRect(hwnd_, &r);
-    if (draws_caption())
+    // A WebView2 caption is part of the page, which therefore covers the whole client area.
+    if (custom_caption() && style_ == ShellStyle::Direct2D)
         r.top = caption_height();
     return r;
+}
+RECT Window::input_bounds() const
+{
+    RECT r = content_bounds();
+    // The caption strip, whoever draws it, is hit-tested and handled here.
+    if (custom_caption())
+        r.top = std::max<LONG>(r.top, caption_height());
+    return r;
+}
+CaptionState Window::caption_state() const
+{
+    CaptionState state;
+    state.visible = style_ == ShellStyle::WebView2 && custom_caption();
+    if (!state.visible) return state;
+    state.height = caption_height();
+    state.button_width = scale(46);
+    state.hot = hot_ == HTMINBUTTON || hot_ == HTMAXBUTTON || hot_ == HTCLOSE ? hot_ : HTNOWHERE;
+    state.maximized = IsZoomed(hwnd_) != FALSE;
+    state.title = title_;
+    return state;
+}
+void Window::caption_changed()
+{
+    if (on_caption_change) on_caption_change();
+}
+void Window::update_cursor()
+{
+    POINT p{};
+    if (!GetCursorPos(&p) || WindowFromPoint(p) != hwnd_) return;
+    const auto hit = SendMessageW(hwnd_, WM_NCHITTEST, 0, MAKELPARAM(p.x, p.y));
+    SendMessageW(hwnd_, WM_SETCURSOR, reinterpret_cast<WPARAM>(hwnd_), MAKELPARAM(hit, WM_MOUSEMOVE));
+}
+bool Window::relay_pointer()
+{
+    POINT p{};
+    if (!on_mouse || !GetCursorPos(&p) || WindowFromPoint(p) != hwnd_) return false;
+    ScreenToClient(hwnd_, &p);
+    const RECT input = input_bounds();
+    if (!PtInRect(&input, p)) return false;
+    WPARAM keys = 0;
+    if (GetKeyState(VK_LBUTTON) & 0x8000) keys |= MK_LBUTTON;
+    if (GetKeyState(VK_RBUTTON) & 0x8000) keys |= MK_RBUTTON;
+    if (GetKeyState(VK_MBUTTON) & 0x8000) keys |= MK_MBUTTON;
+    if (GetKeyState(VK_SHIFT) & 0x8000) keys |= MK_SHIFT;
+    if (GetKeyState(VK_CONTROL) & 0x8000) keys |= MK_CONTROL;
+    const RECT content = content_bounds();
+    on_mouse(WM_MOUSEMOVE, keys, POINT{p.x - content.left, p.y - content.top});
+    return true;
+}
+void Window::after(UINT ms, std::function<void()> action)
+{
+    delayed_ = std::move(action);
+    SetTimer(hwnd_, delayed_timer, ms, nullptr);
+}
+void Window::leave_content()
+{
+    if (!content_hovered_ || content_captured_) return;
+    content_hovered_ = false;
+    if (on_mouse) on_mouse(WM_MOUSELEAVE, 0, POINT{});
+}
+// Follows the visual-hosting input relay of Microsoft's WebView2APISample (ViewComponent::
+// OnMouseMessage): points become WebView-relative, a press inside the page captures the mouse
+// so drags continue outside the window, and leaving the page is reported once.
+bool Window::relay_mouse(UINT m, WPARAM w, LPARAM l)
+{
+    if (!on_mouse || !mouse_message(m)) return false;
+    if (m == WM_MOUSELEAVE)
+    {
+        leave_content();
+        return false;
+    }
+    POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+    if (m == WM_MOUSEWHEEL || m == WM_MOUSEHWHEEL) ScreenToClient(hwnd_, &p);
+    const RECT input = input_bounds();
+    if (!content_captured_ && !PtInRect(&input, p))
+    {
+        leave_content();
+        return false;
+    }
+    if (button_down(m) && !content_captured_)
+    {
+        if (on_focus) on_focus();
+        content_captured_ = true;
+        SetCapture(hwnd_);
+    }
+    if (!content_hovered_ && m != WM_MOUSEWHEEL && m != WM_MOUSEHWHEEL)
+    {
+        content_hovered_ = true;
+        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd_, 0};
+        TrackMouseEvent(&track);
+    }
+    const RECT content = content_bounds();
+    on_mouse(m, w, POINT{p.x - content.left, p.y - content.top});
+    if (button_up(m) && content_captured_ &&
+        !(w & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON | MK_XBUTTON1 | MK_XBUTTON2)))
+    {
+        content_captured_ = false;
+        ReleaseCapture();
+        // A drag that ended outside the page leaves it now.
+        if (!PtInRect(&input, p)) leave_content();
+    }
+    return true;
 }
 RECT Window::screen_content() const
 {
@@ -115,17 +239,20 @@ void Window::set_title(const std::wstring &title)
     title_ = title;
     SetWindowTextW(hwnd_, title.c_str());
     InvalidateRect(hwnd_, nullptr, FALSE);
+    caption_changed();
 }
 void Window::set_style(ShellStyle style)
 {
     if(style_==style)return;
     caption_tip(HTNOWHERE);
     style_ = style;
+    hot_ = pressed_ = HTNOWHERE;
     target_.Reset();
     apply_frame();
     if (on_resize)
         on_resize();
     InvalidateRect(hwnd_, nullptr, TRUE);
+    caption_changed();
 }
 void Window::set_theme(const std::string &theme)
 {
@@ -179,87 +306,7 @@ void Window::set_fullscreen(bool enabled)
     target_.Reset();
     if (on_resize) on_resize();
     InvalidateRect(hwnd_, nullptr, TRUE);
-}
-void Window::set_resize_cursor(bool enabled)
-{
-    if (resize_cursor_ == enabled) return;
-    resize_cursor_ = enabled;
-    if (enabled)
-    {
-        resize_cursor_owner = this;
-        // WebView2 applies the CSS cursor from its own window procedure. A thread hook that
-        // runs after that procedure lets this window own the cursor while the page relayouts,
-        // even for messages delivered to the WebView2 child windows rather than the shell.
-        if (!resize_cursor_hook_)
-            resize_cursor_hook_ = SetWindowsHookExW(WH_CALLWNDPROCRET, resize_cursor_hook,
-                                                    nullptr, GetCurrentThreadId());
-        if (!resize_cursor_message_hook_)
-            resize_cursor_message_hook_ = SetWindowsHookExW(WH_GETMESSAGE, resize_cursor_message_hook,
-                                                            nullptr, GetCurrentThreadId());
-        // WebView2 can also apply the page's cursor without a WM_SETCURSOR round trip, and a
-        // WM_TIMER would be starved by the continuous input during a drag. A timer-queue
-        // thread posts a high-priority repaint tick so the cursor is reset within a frame.
-        timeBeginPeriod(1);
-        CreateTimerQueueTimer(&resize_cursor_timer_, nullptr, resize_cursor_tick_proc, this, 0, 4,
-                              WT_EXECUTEINTIMERTHREAD);
-        SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
-    }
-    else
-    {
-        resize_cursor_owner = nullptr;
-        if (resize_cursor_timer_)
-        {
-            DeleteTimerQueueTimer(nullptr, resize_cursor_timer_, nullptr);
-            resize_cursor_timer_ = nullptr;
-        }
-        timeEndPeriod(1);
-        if (resize_cursor_hook_)
-        {
-            UnhookWindowsHookEx(resize_cursor_hook_);
-            resize_cursor_hook_ = nullptr;
-            // Let the window under the pointer choose again now that the page has settled,
-            // instead of leaving the resize arrow until the next mouse movement.
-            POINT point{};
-            if (GetCursorPos(&point))
-            {
-                const auto target = WindowFromPoint(point);
-                if (target && GetAncestor(target, GA_ROOT) == hwnd_)
-                    SendMessageW(target, WM_SETCURSOR, reinterpret_cast<WPARAM>(target),
-                                 MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
-            }
-        }
-        if (resize_cursor_message_hook_)
-        {
-            UnhookWindowsHookEx(resize_cursor_message_hook_);
-            resize_cursor_message_hook_ = nullptr;
-        }
-    }
-}
-LRESULT CALLBACK Window::resize_cursor_hook(int code, WPARAM wparam, LPARAM lparam)
-{
-    if (code >= 0)
-    {
-        const auto *info = reinterpret_cast<const CWPRETSTRUCT *>(lparam);
-        const auto *owner = resize_cursor_owner;
-        if (info && owner && owner->resize_cursor_ && info->message == WM_SETCURSOR &&
-            GetAncestor(info->hwnd, GA_ROOT) == owner->hwnd_)
-            SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
-    }
-    return CallNextHookEx(nullptr, code, wparam, lparam);
-}
-LRESULT CALLBACK Window::resize_cursor_message_hook(int code, WPARAM wparam, LPARAM lparam)
-{
-    if (code >= 0)
-    {
-        const auto *owner = resize_cursor_owner;
-        if (owner && owner->resize_cursor_) SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
-    }
-    return CallNextHookEx(nullptr, code, wparam, lparam);
-}
-void CALLBACK Window::resize_cursor_tick_proc(PVOID parameter, BOOLEAN)
-{
-    const auto *self = static_cast<const Window *>(parameter);
-    if (self && self->resize_cursor_) PostMessageW(self->hwnd_, resize_cursor_tick, 0, 0);
+    caption_changed();
 }
 void Window::set_borderless(bool enabled)
 {
@@ -290,6 +337,7 @@ void Window::set_borderless(bool enabled)
     }
     if (on_resize) on_resize();
     InvalidateRect(hwnd_, nullptr, TRUE);
+    caption_changed();
 }
 void Window::apply_frame()
 {
@@ -435,7 +483,7 @@ void Window::paint()
     GetClientRect(hwnd_, &rc);
     // The Direct2D shell owns the whole client area: until WebView2 paints, the content
     // area shows the theme background (the page's --bg) instead of an uncleared black target.
-    if (style_ == ShellStyle::Direct2D && rc.right > 0 && rc.bottom > 0)
+    if (style_ != ShellStyle::Mica && rc.right > 0 && rc.bottom > 0)
     {
         if (!factory_)
             D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory_.GetAddressOf());
@@ -517,7 +565,7 @@ void Window::paint()
             target_->BeginDraw();
             target_->Clear(D2D1::ColorF(caption_background_));
             if (placeholder_)
-                paint_placeholder(draws_caption() ? height : 0);
+                paint_placeholder(custom_caption() ? height : 0);
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush;
             target_->CreateSolidColorBrush(D2D1::ColorF(caption_background_), &brush);
             if (brush && draws_caption())
@@ -600,18 +648,36 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             fn();
         return 0;
     }
-    if (m == resize_cursor_tick)
-    {
-        if (resize_cursor_) SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
+    // A press that started in the page keeps the mouse until released, even over the caption.
+    if (content_captured_ && relay_mouse(m, w, l))
         return 0;
-    }
     switch (m)
     {
     case WM_SETCURSOR:
-        if (resize_cursor_)
+        // Over the page, the cursor is the one the page asks for, and only this window sets it:
+        // nothing else can switch it back while the page relayouts under a still pointer.
+        if (LOWORD(l) == HTCLIENT && reinterpret_cast<HWND>(w) == hwnd_ && on_cursor)
         {
-            SetCursor(LoadCursorW(nullptr, IDC_SIZEWE));
-            return TRUE;
+            POINT p{};
+            GetCursorPos(&p);
+            ScreenToClient(hwnd_, &p);
+            const RECT input = input_bounds();
+            if ((content_captured_ || PtInRect(&input, p)) && on_cursor())
+                return TRUE;
+        }
+        break;
+    case WM_SETFOCUS:
+        if (on_focus) on_focus();
+        break;
+    case WM_MOVE:
+        caption_tip(HTNOWHERE);
+        if (on_move) on_move();
+        break;
+    case WM_CAPTURECHANGED:
+        if (reinterpret_cast<HWND>(l) != hwnd_ && content_captured_)
+        {
+            content_captured_ = false;
+            leave_content();
         }
         break;
     case WM_SETTINGCHANGE:
@@ -629,7 +695,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         if (fullscreen_) return 0;
         // The Direct2D caption and a hidden title bar both keep the invisible side and bottom
         // resize borders while the caption height becomes client area.
-        if (w && (style_ == ShellStyle::Direct2D || borderless_))
+        if (w && (style_ != ShellStyle::Mica || borderless_))
         {
             auto p = reinterpret_cast<NCCALCSIZE_PARAMS *>(l);
             auto top = p->rgrc[0].top;
@@ -664,10 +730,16 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             DestroyWindow(hwnd_);
             return 0;
         }
+        if (w == delayed_timer)
+        {
+            KillTimer(hwnd_, delayed_timer);
+            if (auto action = std::move(delayed_)) action();
+            return 0;
+        }
         if (w == caption_tip_timer)
         {
             KillTimer(hwnd_, caption_tip_timer);
-            if (tip_ != HTNOWHERE && pressed_ == HTNOWHERE && draws_caption() && on_caption_tooltip)
+            if (tip_ != HTNOWHERE && pressed_ == HTNOWHERE && custom_caption() && on_caption_tooltip)
                 on_caption_tooltip(tip_ == HTMINBUTTON   ? L"最小化"
                                    : tip_ == HTCLOSE     ? L"关闭"
                                    : IsZoomed(hwnd_)     ? L"向下还原"
@@ -700,16 +772,17 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER);
         if (on_resize)
             on_resize();
+        caption_changed();
         return 0;
     }
     case WM_SIZE:
     {
-        if (w == SIZE_MINIMIZED) set_resize_cursor(false);
         if (target_)
             target_->Resize(D2D1::SizeU(LOWORD(l), HIWORD(l)));
         if (on_resize)
             on_resize();
         InvalidateRect(hwnd_, nullptr, FALSE);
+        caption_changed();
         return 0;
     }
     case WM_MOUSEACTIVATE:
@@ -721,16 +794,15 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             POINT p{};
             GetCursorPos(&p);
             ScreenToClient(hwnd_, &p);
-            if (!(draws_caption() && client_caption_button(caption_hit(p))))
+            if (!(custom_caption() && client_caption_button(caption_hit(p))))
                 return MA_ACTIVATEANDEAT;
         }
         break;
     case WM_ACTIVATE:
-        if (LOWORD(w) == WA_INACTIVE) set_resize_cursor(false);
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;
     case WM_DESTROY:
-        set_resize_cursor(false);
+        content_captured_ = false;
         if (small_icon_)
             DestroyIcon(small_icon_);
         if (large_icon_)
@@ -739,8 +811,15 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         PostQuitMessage(0);
         return 0;
     }
-    if (draws_caption())
+    if (custom_caption())
     {
+        // A WebView2 caption repaints from caption_state(), so report hover changes to it.
+        struct HotChange
+        {
+            Window *self;
+            int before;
+            ~HotChange() { if (self->hot_ != before) self->caption_changed(); }
+        } hot_change{this, hot_};
         switch (m)
         {
         case WM_NCHITTEST:
@@ -810,6 +889,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             const auto hit = caption_hit(p);
             if (client_caption_button(hit))
             {
+                leave_content();
                 if (hot_ != hit)
                 {
                     hot_ = hit;
@@ -859,6 +939,8 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
             break;
         }
     }
+    if (relay_mouse(m, w, l))
+        return 0;
     return DefWindowProcW(hwnd_, m, w, l);
 }
 } // namespace dr

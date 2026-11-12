@@ -51,7 +51,7 @@ const material: Record<string, string> = {
   type: 'text_fields', tune: 'tune', cookie: 'cookie', close: 'close', play: 'play_arrow', edit: 'edit', delete: 'delete',
   collapse: 'keyboard_double_arrow_up', expand: 'keyboard_double_arrow_down',
   palette: 'palette', 'private-shelf': 'domino_mask', highlighter: 'ink_highlighter', info: 'info', 'book-info': 'info',
-  'page-single': 'crop_portrait', 'page-double': 'two_pager',
+  'page-single': 'page_single', 'page-double': 'two_pager',
   pin: 'keep', copy: 'content_copy', note: 'edit_note', underline: 'format_underlined',
   'note-off': 'speaker_notes_off', ask: 'forum', stop: 'stop-fill', refresh: 'refresh', agent: 'smart_toy', 'caption-close': 'close',
   dictionary: 'dictionary', fullscreen: 'fullscreen', 'fullscreen-exit': 'fullscreen_exit',

@@ -954,6 +954,9 @@ body[data-animations="false"] .selection-menu {
 .quick-dropdown:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: -2px; }
 .quick-dropdown-icon { display: inline-flex; color: var(--muted); }
 .quick-dropdown-icon :is(svg, .ui-icon) { width: 18px; height: 18px; }
+/* CJK glyphs sit low in their line box (单页 / 双页 ink centres ~1px below the box centre);
+   lifting the label lines it up with the icon and chevron, which are centred on the button. */
+.quick-dropdown-label { position: relative; top: -1px; }
 .quick-chevron { display: inline-flex; color: var(--muted); }
 .quick-chevron :is(svg, .ui-icon) { width: 16px; height: 16px; transition: transform 160ms var(--ease-ui); }
 .quick-dropdown[aria-expanded="true"] .quick-chevron :is(svg, .ui-icon) { transform: rotate(180deg); }

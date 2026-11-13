@@ -99,7 +99,6 @@ export class Reader {
   inactive = false;
   activatedAt = -Infinity;
   tapDismissed = false;
-  activationPress = false;
   quickMenus?: QuickMenus;
   tocScrollbar?: OverlayScrollbar;
   askScrollbar?: OverlayScrollbar;
@@ -125,7 +124,10 @@ export class Reader {
     this.trackActivation(window);
     document.addEventListener("reader-dismiss-selection", () => this.hideSelection());
     document.addEventListener("pointerdown", (event) => {
+      // Elsewhere (toolbar, sidebar, dialogs) the activating press acts normally; it still uses up
+      // the activation, or the next tap on the page would be taken for it.
       if ((event.target as Element).closest(".reading-area")) this.beginPageTap(event);
+      else if (event.button === 0) this.takeActivationPress();
       // The custom colour picker belongs to the menu that opened it.
       if (!(event.target as Element).closest("#selection-menu, .color-picker")) this.hideSelection();
       if (!(event.target as Element).closest("#note-peek")) this.hideNotePeek();
@@ -970,11 +972,7 @@ export class Reader {
       if (doc.getSelection()?.isCollapsed && !this.selection?.pinned) this.hideSelection();
     });
     doc.addEventListener("mouseup", (event) => {
-      // The press that activated the window turns no page, but text it dragged over is a real
-      // selection and still gets the menu.
-      const activation = this.activationPress;
-      this.activationPress = false;
-      if (this.tapDismissed && !activation) return;
+      if (this.tapDismissed) return;
       if ((event.target as Element | null)?.closest?.("a")) return;
       this.selectionTimer = setTimeout(() => this.readSelection(), 0);
     });
@@ -1236,9 +1234,8 @@ export class Reader {
   }
 
   /**
-   * Remembers when the app loses and regains focus. Window.cpp eats the activating click through
-   * WM_MOUSEACTIVATE, but WebView2's own child window may answer that message without asking us,
-   * so the page also ignores the press that brought the app back to the foreground.
+   * Remembers when the app loses and regains focus, so the press that brought the app back to the
+   * foreground can be told apart: it acts like any other press except that it turns no page.
    * Both the shell and each chapter frame report blur/focus; focus moving between them keeps
    * document.hasFocus() true and is not a deactivation.
    */
@@ -1265,14 +1262,9 @@ export class Reader {
 
   beginPageTap(event: PointerEvent): void {
     clearTimeout(this.tapTimer);
-    this.activationPress = false;
-    if (event.button === 0 && this.takeActivationPress()) {
-      this.activationPress = true;
-      // Activation only: no page turn, link, note or selection menu from this press.
-      this.tapDismissed = true;
-      this.tapStart = null;
-      return;
-    }
+    // The press that brought the app back does what any press does (links, notes, closing popups,
+    // selecting text) except turn the page: the reader was looking elsewhere and clicked to come back.
+    const activating = event.button === 0 && this.takeActivationPress();
     const tip = (event.target as Element | null)?.closest?.<HTMLElement>(".dr-note-tip");
     const editsNote = Boolean(tip && this.annotationLayer?.ranges.has(tip.dataset.id!));
     const dismissed = event.button === 0 && event.isPrimary !== false && this.dismissPagePopups();
@@ -1283,7 +1275,7 @@ export class Reader {
       this.tapStart = null;
       return;
     }
-    this.tapStart = event.button === 0 && event.isPrimary !== false
+    this.tapStart = !activating && event.button === 0 && event.isPrimary !== false
       ? { x: event.clientX, y: event.clientY, time: performance.now(), selected: Boolean(this.doc?.getSelection()?.toString()) }
       : null;
   }

@@ -194,8 +194,12 @@ export class ReaderMotion {
     if (pane) {
       try {
         pane.style.visibility = shown ? 'visible' : 'hidden';
-        parent.moveBefore(pane, null);
+        // Scroll while the copy is still laid out where it was made. A page shell StPageFlip has not
+        // shown yet is display: none, and a frame without layout ignores scrollTo: the copy kept the
+        // page it was made of, so turning back to a chapter's first page showed the page being left
+        // under the turning sheet until it landed.
         pane.querySelector('iframe')!.contentWindow!.scrollTo(from!.scrollX, from!.scrollY);
+        parent.moveBefore(pane, null);
         return pane;
       } catch { pane.remove(); }
     }

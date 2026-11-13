@@ -115,7 +115,8 @@ try {
   check(savedNote.style === 'note' && savedNote.note === '旧笔记' && !document.getElementById('annotation-dialog').open,
     'the chosen segmented style must be saved');
 
-  // A click that brings the app back to the foreground only activates it; the next one taps.
+  // A click that brings the app back to the foreground acts like any other but turns no page;
+  // the next one taps.
   const press = () => ({ button: 0, isPrimary: true, target: document.body, clientX: 300, clientY: 200, preventDefault() {} });
   const realHasFocus = document.hasFocus;
   reader.trackActivation(window);
@@ -130,11 +131,21 @@ try {
   document.hasFocus = realHasFocus;
   window.dispatchEvent(new Event('focus'));
   reader.beginPageTap(press());
-  check(!reader.tapStart && reader.tapDismissed, 'the activating press must not start a page tap');
-  check(reader.activationPress, 'a selection dragged by the activating press must still get the menu');
-  check(reader.consumeDismissedTap(new MouseEvent('click')), 'the activating click must be consumed');
+  check(!reader.tapStart, 'the activating press must not start a page tap');
+  check(!reader.tapDismissed && !reader.consumeDismissedTap(new MouseEvent('click')),
+    'the activating click must still reach links, notes and selection');
   reader.beginPageTap(press());
-  check(reader.tapStart && !reader.tapDismissed && !reader.activationPress, 'the press after activation must tap normally');
+  check(reader.tapStart && !reader.tapDismissed, 'the press after activation must tap normally');
+  // Coming back with a click on the toolbar uses up the activation; the next page tap turns.
+  document.hasFocus = () => false;
+  window.dispatchEvent(new Event('blur'));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  document.hasFocus = realHasFocus;
+  window.dispatchEvent(new Event('focus'));
+  document.body.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 450));
+  reader.beginPageTap(press());
+  check(reader.tapStart, 'an activating press outside the page must not swallow the next page tap');
 
   // “查词典” follows its setting and hands the selected text to DR Dict's popup through the host.
   reader.appSettings = { selectionActions: { drDict: false }, dictionaries: [] };

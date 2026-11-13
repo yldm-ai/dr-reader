@@ -785,19 +785,9 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         caption_changed();
         return 0;
     }
-    case WM_MOUSEACTIVATE:
-        // A left click into an inactive client area only activates the window.
-        // Eat its button-down before WebView2 can interpret it as a page tap.
-        // Keyboard activation and native caption controls keep their usual behavior.
-        if (LOWORD(l) == HTCLIENT && HIWORD(l) == WM_LBUTTONDOWN && GetForegroundWindow() != hwnd_)
-        {
-            POINT p{};
-            GetCursorPos(&p);
-            ScreenToClient(hwnd_, &p);
-            if (!(custom_caption() && client_caption_button(caption_hit(p))))
-                return MA_ACTIVATEANDEAT;
-        }
-        break;
+    // A click into the inactive window activates it and still reaches what it was on (buttons, links,
+    // the sidebar). Only the page tap is skipped, by the reader itself (Reader.beginPageTap): eating
+    // the button-down here (MA_ACTIVATEANDEAT) also swallowed every other control's click.
     case WM_ACTIVATE:
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;

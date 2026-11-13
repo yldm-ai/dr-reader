@@ -468,6 +468,24 @@ try {
   check(!host.querySelector('.page-motion-standby'), 'turning motion off must drop the ready copy');
   PageFlip.prototype.getRender = getRender;
   check(landed === 2, 'both soft-spread directions must paint their flat landing frame');
+  // Spread turns with every ready copy placed. StPageFlip keeps the pages it has not shown yet at
+  // display: none, and a copy scrolled only after moving there kept the spread it was made of: turning
+  // back to a chapter's first spread showed the spread being left under the turning page.
+  host.style.width = '980px';
+  for (const effect of ['turn', 'turn-hard']) for (const direction of [1, -1]) {
+    await load(spreadHtml);
+    frame.contentWindow.scrollTo(980, 0);
+    motion.prepare(host, effect, `pool-${effect}-${direction}`, true);
+    await until(() => motion.standby?.pool.length === 5);
+    const target = direction > 0 ? 1960 : 0;
+    pending = motion.change(host, effect, 500, direction, () => frame.contentWindow.scrollTo(target, 0), false, 'bottom', true);
+    await until(() => host.querySelector('.stpageflip-host')?.dataset.state === 'flipping');
+    const offsets = [...host.querySelectorAll('.stpageflip-page .motion-page iframe')].map(item => item.contentWindow.scrollX);
+    const expected = direction > 0 ? [980, 980, target, target] : [target, target, 980, 980];
+    check(offsets.join() === expected.join(), `${effect} ${direction}: pooled spread copies must show their own pages (${offsets})`);
+    await pending;
+  }
+  motion.prepare(host, 'none', '');
   host.style.width = '600px';
   motion.setAllowed(false);
   await motion.change(host, 'slide', 600, 1, () => updates++);

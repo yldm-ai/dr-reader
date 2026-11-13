@@ -39,7 +39,7 @@ export interface ReadingSettings {
   animation: 'none' | 'slide' | 'cover' | 'fade' | 'turn' | 'turn-fold' | 'turn-fold-edge' | 'turn-hard';
   animationDuration: number;
   /** Two-page spreads only turn like a book: StPageFlip's soft or hard pages, or not at all. */
-  doubleAnimation: 'none' | 'turn' | 'turn-fold' | 'turn-fold-edge' | 'turn-hard';
+  doubleAnimation: 'none' | 'slide' | 'cover' | 'fade' | 'turn' | 'turn-fold' | 'turn-fold-edge' | 'turn-hard';
   /** Page curls need far longer than slides and fades, so they keep their own duration. */
   turnDuration: number;
   publisherStyles: boolean;

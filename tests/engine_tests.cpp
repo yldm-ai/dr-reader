@@ -709,6 +709,12 @@ int main()
                     dr::patch_settings(defaults, {{"reading", {{"turnDuration", 5000}}}})["reading"]["turnDuration"] == 2000 &&
                     dr::patch_settings(defaults, {{"reading", {{"turnDuration", 1234}}}})["reading"]["turnDuration"] == 1234,
                 "page turns default to 500 ms and keep a custom duration within 300-2000 ms");
+        require(dr::patch_settings(defaults, {{"reading", {{"animationDuration", 1200}}}})["reading"]["animationDuration"] == 1200 &&
+                    dr::patch_settings(defaults, {{"reading", {{"animationDuration", 5000}}}})["reading"]["animationDuration"] == 1500,
+                "slides, covers and fades keep a custom duration up to 1500 ms");
+        for (const char *effect : {"slide", "cover", "fade"})
+            require(dr::patch_settings(defaults, {{"reading", {{"doubleAnimation", effect}}}})["reading"]["doubleAnimation"] == effect,
+                    "two-page spreads also slide, cover and fade");
         require(defaults["application"]["highlightColors"].size() == 5 &&
                     dr::patch_settings(defaults, {{"application", {{"highlightColors", {"#ABCDEF", "#fbf3db"}}}}})
                             ["application"]["highlightColors"][0] == "#abcdef" &&

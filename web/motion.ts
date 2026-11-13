@@ -651,17 +651,21 @@ export class ReaderMotion {
     // In-chapter slides and covers run on the resident strip: they start in the same frame and
     // a further turn retargets them instead of waiting for them to finish.
     const revision = this.revision, key = this.stripKey;
-    const resident = (effect === 'slide' || effect === 'cover') && animated && !retainPage && !spread &&
+    // A spread slides and covers as one sheet, the whole reading width, like a single page does.
+    const resident = (effect === 'slide' || effect === 'cover') && animated && !retainPage &&
       await this.strip.readyForTurn(element, frame, key);
     if (revision !== this.revision || key !== this.stripKey) return;
     if (resident) {
       if (this.active) { this.active.controller.abort(); this.cleanup(this.active); }
-      await this.strip.turn(frame, effect, direction, duration, update);
+      await this.strip.turn(frame, effect, direction, duration, update, spread);
       return;
     }
     const ready = this.takeStandby(frame);
     this.cancel();
     const overlay = ready?.overlay ?? document.createElement('div'); overlay.className = `page-motion page-motion-${effect}`;
+    // Sliding, covering or fading spreads each carry their own spine (styles.css); page turns keep
+    // one spine copy of their own (see below).
+    overlay.dataset.spread = String(spread && !effect.startsWith('turn'));
     overlay.setAttribute('aria-hidden', 'true'); overlay.style.visibility = 'hidden'; overlay.style.opacity = '';
     if (!ready) element.append(overlay);
     const transaction: Transition = { controller: new AbortController(), overlay, frame,

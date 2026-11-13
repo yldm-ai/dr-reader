@@ -3115,6 +3115,19 @@ body > .page-surface { max-width: none; }
   pointer-events: none;
   background: linear-gradient(to right, transparent, #00000008 45%, #0000000c 50%, #00000008 55%, transparent);
 }
+/* A spread that slides, covers or fades moves as one sheet; each copy carries its own spine,
+   since the live spine sits under the motion layer (page-strip.ts, motion.ts). */
+:is(.motion-strip, .page-motion)[data-spread="true"] > .motion-page::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 18px);
+  width: 36px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, #00000008 45%, #0000000c 50%, #00000008 55%, transparent);
+}
 /* Above StPageFlip's pages (1–5) and curl shadows (10). */
 .stpageflip-host .stpageflip-spine { z-index: 11; }
 /* grabfold fold (motion.ts foldPage, fold-turn.ts): sheet face (1), the uncovered page and the

@@ -343,6 +343,8 @@ try {
       // One spine copy rides above the engine's pages and curl shadows, so its first and last
       // frames match the live spine; soft flaps fade it while they slide across (checked at landing).
       const spines = host.querySelectorAll('.stpageflip-spine');
+      // The per-copy spines of sliding spreads stay off: the landing copy would double this one.
+      check(engine.closest('.page-motion').dataset.spread === 'false', `${effect} ${direction}: a page turn must not give its copies spines`);
       check(spines.length === 1 && spines[0].parentElement === engine.querySelector('.stf__block') &&
         Number(getComputedStyle(spines[0]).zIndex) > 10, `${effect} ${direction}: the spine must sit above the turning pages and shadows`);
       const landed = await landingFade(host.querySelector('.page-motion'));
@@ -484,6 +486,30 @@ try {
     const expected = direction > 0 ? [980, 980, target, target] : [target, target, 980, 980];
     check(offsets.join() === expected.join(), `${effect} ${direction}: pooled spread copies must show their own pages (${offsets})`);
     await pending;
+  }
+  motion.prepare(host, 'none', '');
+  // Spreads also slide, cover and fade: the whole spread moves as one sheet, each copy with its spine.
+  for (const effect of ['slide', 'cover', 'fade']) for (const direction of [1, -1]) {
+    await load(spreadHtml);
+    frame.contentWindow.scrollTo(980, 0);
+    motion.prepare(host, effect, `spread-${effect}-${direction}`, true);
+    const target = direction > 0 ? 1960 : 0;
+    pending = motion.change(host, effect, 600, direction, () => frame.contentWindow.scrollTo(target, 0), false, 'top', true);
+    const layer = () => effect === 'fade' ? host.querySelector('.page-motion') : host.querySelector('.motion-strip.active');
+    await until(() => layer()?.getAnimations({ subtree: true }).length);
+    const panes = [...layer().querySelectorAll(':scope > .motion-page')].filter(pane => getComputedStyle(pane).visibility === 'visible');
+    const offsets = panes.map(pane => pane.querySelector('iframe').contentWindow.scrollX).sort((a, b) => a - b).join();
+    check(offsets === [980, target].sort((a, b) => a - b).join(), `${effect} ${direction}: the old and new spreads must both move (${offsets})`);
+    check(panes.every(pane => getComputedStyle(pane, '::after').backgroundImage.includes('gradient') &&
+      getComputedStyle(pane, '::after').left === '472px'), `${effect} ${direction}: each moving spread must carry its spine`);
+    if (effect !== 'fade') {
+      const moves = layer().getAnimations({ subtree: true }).map(animation => animation.effect.getKeyframes())
+        .map(frames => Math.abs(new DOMMatrixReadOnly(frames[0].transform).m41 - new DOMMatrixReadOnly(frames.at(-1).transform).m41));
+      check(moves.some(distance => Math.abs(distance - 980) < 1), `${effect} ${direction}: a spread must travel the whole reading width (${moves})`);
+    }
+    await pending; await motion.finished();
+    await until(() => !host.querySelector('.motion-strip.active, .page-motion'));
+    check(frame.style.visibility === '' && frame.contentWindow.scrollX === target, `${effect} ${direction}: the turn must land on the live spread`);
   }
   motion.prepare(host, 'none', '');
   host.style.width = '600px';

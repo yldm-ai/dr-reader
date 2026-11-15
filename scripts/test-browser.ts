@@ -1261,9 +1261,51 @@ try {
         if (!await app.locator('#reader-view').evaluate((el: HTMLElement) => el.hidden)) throw Error('delete button opened the book');
         await capture('delete-book-confirmation.png');
         await app.locator('#delete-book-dialog button[value="cancel"]').click();
-        if (await app.evaluate(() => window.nativeProbe.requests.some(r => r.method === 'book.delete'))) throw Error('cancel must preserve book');
+        if (await app.evaluate(() => window.nativeProbe.requests.some(r => r.method === 'books.delete'))) throw Error('cancel must preserve book');
         await app.locator('#list-view').click();
         await capture('library-list-delete.png');
+        // Batch selection: cards toggle instead of opening; Escape leaves without deleting.
+        await page.mouse.move(400, 500);
+        if (await app.locator('#select-books').evaluate((el: HTMLElement) => getComputedStyle(el).opacity) !== '0')
+          throw Error('the select button stays hidden until the pointer comes near');
+        await app.locator('#grid-view').hover();
+        await app.locator('#select-books').evaluate((el: HTMLElement) => new Promise(done => setTimeout(done, 250)));
+        if (await app.locator('#select-books').evaluate((el: HTMLElement) => getComputedStyle(el).opacity) !== '1')
+          throw Error('the select button appears when the pointer is near');
+        await app.locator('#select-books').click();
+        await app.locator('#batch-bar').waitFor({ state: 'visible' });
+        if (await app.locator('#book-add').count()) throw Error('selection mode hides the add card');
+        await app.locator('.book-card').click();
+        if (!await app.locator('#reader-view').evaluate((el: HTMLElement) => el.hidden) ||
+          await app.locator('.book-card').getAttribute('aria-pressed') !== 'true' ||
+          await app.locator('#batch-count').textContent() !== '已选择 1 本' ||
+          await app.locator('#batch-delete').isDisabled())
+          throw Error('selection mode must select a book without opening it');
+        await capture('library-batch-selection.png');
+        await app.locator('#batch-delete').click();
+        await app.locator('#delete-book-dialog').waitFor({ state: 'visible' });
+        await app.locator('#delete-book-dialog button[value="cancel"]').click();
+        await app.locator('body').press('Escape');
+        await app.locator('#batch-bar').waitFor({ state: 'hidden' });
+        if (await app.evaluate(() => window.nativeProbe.requests.some(r => r.method === 'books.delete')) ||
+          await app.locator('.book-card').getAttribute('aria-pressed') !== null)
+          throw Error('leaving selection mode must keep books and restore normal cards');
+        // The context menu enters selection with the book already checked.
+        await app.locator('#grid-view').click();
+        await app.locator('.book-card').click({ button: 'right' });
+        await app.locator('#book-menu-select').click();
+        if (await app.locator('.book-card').getAttribute('aria-pressed') !== 'true' || await app.locator('#batch-bar').isHidden())
+          throw Error('context menu 选择 must select the book');
+        await page.mouse.move(400, 600);
+        await capture('library-batch-selection-grid.png');
+        await app.evaluate(() => { document.body.dataset.theme = 'dark'; });
+        await capture('library-batch-selection-dark.png');
+        await app.evaluate(() => { document.body.dataset.theme = 'sepia'; });
+        await capture('library-batch-selection-sepia.png');
+        await app.evaluate(() => { document.body.dataset.theme = 'light'; });
+        await app.locator('body').press('Escape');
+        await app.locator('#batch-bar').waitFor({ state: 'hidden' });
+        await app.locator('#list-view').click();
         await app.locator('.book-card').focus();
         await app.locator('.book-card').press('Shift+F10');
         await app.locator('#book-menu-delete').click();

@@ -16,6 +16,9 @@ class Library
     Json save_shelves(const Json &shelves);
     Json import_book(const fs::path &archive);
     void remove_book(const std::string &id);
+    // Deletes each library entry independently (original EPUB files are never touched):
+    // {"deleted": [ids], "errors": [{"id", "message"}]}; one failure leaves the others deleted.
+    Json remove_books(const Json &ids);
     Json get(const std::string &id) const;
     Json save_position(const std::string &id, const Json &position);
     Json toggle_bookmark(const std::string &id, const Json &mark);

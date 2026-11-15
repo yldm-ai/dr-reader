@@ -404,6 +404,8 @@ void Application::receive(const Json &request)
                     library_.remove_book(params.at("id"));
                     result = true;
                 }
+                else if (method == "books.delete")
+                    result = library_.remove_books(params.at("ids"));
                 else if (method == "close")
                 {
                     window_.post([this] { DestroyWindow(window_.handle()); });

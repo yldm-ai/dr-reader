@@ -272,6 +272,13 @@ void WebView::configure(const fs::path &web_root, const fs::path &data_root, std
     Microsoft::WRL::ComPtr<ICoreWebView2Settings5> settings5;
     if (SUCCEEDED(settings.As(&settings5)))
         settings5->put_IsPinchZoomEnabled(FALSE);
+    // Browser autofill would offer earlier search terms ("Saved info") under every text field.
+    Microsoft::WRL::ComPtr<ICoreWebView2Settings4> settings4;
+    if (SUCCEEDED(settings.As(&settings4)))
+    {
+        settings4->put_IsGeneralAutofillEnabled(FALSE);
+        settings4->put_IsPasswordAutosaveEnabled(FALSE);
+    }
     settings->put_AreDefaultContextMenusEnabled(FALSE);
     settings->put_IsStatusBarEnabled(FALSE);
     settings->put_AreHostObjectsAllowed(FALSE);

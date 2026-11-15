@@ -80,6 +80,11 @@ export function installNativeMock(data: Fixture = bootstrapFixture()) {
       }
       if (method === 'annotation.delete') data.annotations = data.annotations.filter(item => item.id !== params.annotationId);
       if (method === 'book.delete') data.books = data.books.filter(book => book.id !== params.id);
+      if (method === 'books.delete') {
+        const deleted = data.books.filter(book => params.ids.includes(book.id)).map(book => book.id);
+        data.books = data.books.filter(book => !deleted.includes(book.id));
+        result = { deleted, errors: [] };
+      }
       if (method === 'open') result = structuredClone(data.books[0]);
       if (method === 'position') {
         data.books[0].position = params.position;

@@ -13,6 +13,8 @@ export interface LibraryActions {
   unhide?: BookAction;
   exportNotes?: BookAction;
   importNotes?: BookAction;
+  /** Enters batch selection with this book already selected. */
+  select?: BookAction;
 }
 export interface LibraryOverlays {
   dismiss(): void;
@@ -54,6 +56,7 @@ export function createLibraryOverlays(onRemove: BookAction, actions: LibraryActi
   category.setAttribute("aria-expanded", "false");
   category.setAttribute("aria-controls", "book-shelf-menu");
   const hide = item(menu, "book-menu-hide", "隐藏图书", "hide");
+  const select = item(menu, "book-menu-select", "选择", "check");
   const divider = document.createElement("div");
   divider.className = "book-menu-divider";
   divider.setAttribute("role", "separator");
@@ -183,13 +186,14 @@ export function createLibraryOverlays(onRemove: BookAction, actions: LibraryActi
   exportNotes.onclick = () => choose(book => actions.exportNotes?.(book));
   importNotes.onclick = () => choose(book => actions.importNotes?.(book));
   hide.onclick = () => choose(hide.dataset.hidden === "true" ? actions.unhide : actions.hide);
+  select.onclick = () => choose(actions.select);
   remove.onclick = () => choose(onRemove);
   category.onclick = () => showSubmenu(true);
   category.onpointerenter = () => showSubmenu();
   category.onpointerleave = () => { submenuTimer = setTimeout(hideSubmenu, 220); };
   submenu.onpointerenter = () => clearTimeout(submenuTimer);
   submenu.onpointerleave = () => { submenuTimer = setTimeout(hideSubmenu, 220); };
-  for (const button of [open, details, exportNotes, importNotes, hide, remove]) button.onpointerenter = hideSubmenu;
+  for (const button of [open, details, exportNotes, importNotes, hide, select, remove]) button.onpointerenter = hideSubmenu;
   menu.onkeydown = event => {
     const nested = submenu.contains(event.target as Node | null);
     if (event.key === "ArrowRight" && event.target === category) {

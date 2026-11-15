@@ -971,6 +971,15 @@ int main()
             auto reimported = reopened.import_book(epub);
             require(reimported.value("lastRead", 0) == 0 && reopened.annotations(id).empty() &&
                         reopened.get(id)["bookmarks"].empty(), "reimport starts with clean reading data");
+            reopened.toggle_bookmark(id, {{"chapter", 1}, {"ratio", 0.2}});
+            const auto batch = reopened.remove_books(dr::Json::array({"../library", id, id, "0000000000000000"}));
+            require(batch["deleted"] == dr::Json::array({id}), "batch deletion removes each listed book once");
+            require(batch["errors"].size() == 2 && batch["errors"][0]["id"] == "../library",
+                    "batch deletion reports unsafe and missing IDs without stopping");
+            require(reopened.list().empty() && dr::AnnotationStore(root / "library" / "reader.sqlite3").bookmarks(id).empty() &&
+                        dr::fs::exists(epub),
+                    "batch deletion clears reading data and keeps the original EPUB");
+            rejects([&] { reopened.remove_books(dr::Json::object()); }, "batch deletion requires a list");
         }
         }
         auto bad = root / "bad.epub";

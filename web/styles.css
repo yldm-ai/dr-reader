@@ -3182,6 +3182,50 @@ body[data-animations="false"] :is(button, a, .select-popup, .select-option) {
 .shelf-add .cover-wrap { border: 1px dashed var(--control-border); background: transparent; }
 .shelf-add .ui-icon { font-size: 30px; width: 32px; height: 32px; color: var(--muted); }
 .shelf-actions { display: flex; justify-content: space-between; margin-bottom: 20px; }
+/* Batch selection: a quiet bar above the grid; cards toggle instead of opening. */
+.batch-bar { display: flex; align-items: center; gap: 4px; min-height: 36px; margin: -6px 0 18px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.batch-count { margin-right: 8px; color: var(--muted); font-size: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.batch-bar-spacer { flex: 1; }
+.batch-bar .text-button { font-size: var(--text-secondary); gap: 6px; }
+.batch-delete:not(:disabled) { color: var(--danger); }
+.batch-delete:not(:disabled):hover { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+.batch-delete:disabled { color: var(--muted); opacity: .5; cursor: default; }
+/* The 选择 entry stays out of sight until the pointer reaches the toolbar's right side
+   (the padded zone below extends "near" a little above and below), keyboard focus lands on
+   it, or selection mode is on. It keeps its space, so nothing shifts when it appears. */
+.toolbar-right { padding-block: 10px; margin-block: -10px; }
+#select-books { color: var(--muted); font-size: var(--text-secondary); gap: 6px; opacity: 0; transition: opacity 160ms var(--ease-ui), background-color 120ms; }
+.toolbar-right:hover #select-books, #select-books:focus-visible, #select-books[aria-pressed="true"] { opacity: 1; }
+#select-books[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+/* Square checkboxes in the app's own checkbox language (settings, shelf editor): 18px,
+   control border, accent fill and a drawn tick in the surface colour, so light, sepia and dark
+   themes each get their own pairing. Over a cover a hairline halo keeps the edge readable. */
+.book-card[aria-pressed] { position: relative; }
+.select-mark {
+  position: absolute; top: 10px; left: 10px; z-index: 1;
+  display: grid; place-content: center;
+  width: 18px; height: 18px; border-radius: 4px;
+  border: 1.5px solid var(--control-border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--surface) 55%, transparent), 0 1px 2px #0000001f;
+  transition: background-color 120ms var(--ease-ui), border-color 120ms var(--ease-ui);
+  pointer-events: none;
+}
+.select-mark::after {
+  content: ""; width: 4.5px; height: 9px; margin-top: -2px;
+  border: solid var(--surface); border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0); transform-origin: 60% 60%;
+  transition: transform 140ms var(--ease-ui);
+}
+.book-card[aria-pressed="false"]:hover .select-mark { border-color: var(--muted); }
+.book-card[aria-pressed="true"] .select-mark { border-color: var(--accent); background: var(--accent); }
+.book-card[aria-pressed="true"] .select-mark::after { transform: rotate(45deg) scale(1); }
+.book-card[aria-pressed="true"] .cover-wrap { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+/* In the list the box takes its own leading column instead of covering the thumbnail. */
+.list-mode .book-item .book-card[aria-pressed] { grid-template-columns: 18px 65px minmax(0, 1fr) 130px 100px; }
+.list-mode .select-mark { position: static; }
+@media (prefers-reduced-motion: reduce) { #select-books, .select-mark, .select-mark::after { transition: none; } }
+body[data-animations="false"] :is(#select-books, .select-mark, .select-mark::after) { transition: none; }
 .shelf-name-label { display: grid; gap: 8px; }
 .shelf-name-label input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 .shelf-books { max-height: min(320px, 35vh); overflow: auto; }

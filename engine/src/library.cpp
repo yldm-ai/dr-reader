@@ -209,6 +209,28 @@ void Library::remove_book(const std::string &id)
     std::error_code error;
     fs::remove_all(removed, error);
 }
+Json Library::remove_books(const Json &ids)
+{
+    if (!ids.is_array())
+        throw std::runtime_error("图书列表格式无效");
+    Json deleted = Json::array(), errors = Json::array();
+    for (const auto &value : ids)
+    {
+        const auto id = value.is_string() ? value.get<std::string>() : std::string();
+        if (std::find(deleted.begin(), deleted.end(), id) != deleted.end())
+            continue;
+        try
+        {
+            remove_book(id);
+            deleted.push_back(id);
+        }
+        catch (const std::exception &e)
+        {
+            errors.push_back({{"id", id}, {"message", e.what()}});
+        }
+    }
+    return {{"deleted", deleted}, {"errors", errors}};
+}
 Json Library::save_position(const std::string &id, const Json &position)
 {
     auto book = get(id);

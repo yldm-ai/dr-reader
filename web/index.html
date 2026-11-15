@@ -94,6 +94,7 @@
             /><kbd>Ctrl K</kbd></label
           >
           <div class="toolbar-right">
+            <button id="select-books" class="text-button" type="button" aria-pressed="false" title="选择多本图书以批量删除"><span data-icon="check"></span>选择</button>
             <select id="sort" aria-label="图书排序">
               <option value="added">最近添加</option>
               <option value="read">最近阅读</option>
@@ -122,6 +123,13 @@
         <div id="shelf-actions" class="shelf-actions" hidden>
           <button id="shelves-back" class="text-button" data-icon-set="material"><span data-icon="arrow-left"></span>全部书架</button>
           <button id="shelf-edit" class="text-button">编辑书架与图书</button>
+        </div>
+        <div id="batch-bar" class="batch-bar" role="toolbar" aria-label="批量操作" hidden>
+          <span id="batch-count" class="batch-count" aria-live="polite">点击图书进行选择</span>
+          <button id="batch-all" class="text-button" type="button">全选</button>
+          <span class="batch-bar-spacer"></span>
+          <button id="batch-delete" class="text-button batch-delete" type="button" disabled><span data-icon="delete"></span>删除</button>
+          <button id="batch-done" class="text-button" type="button">完成</button>
         </div>
         <div id="shelf-grid" class="shelf-grid" hidden></div>
         <!-- Placeholder cards hold the library's shape until bootstrap; render() replaces them. -->
@@ -375,11 +383,11 @@
     <dialog id="delete-book-dialog" class="annotation-dialog" aria-labelledby="delete-book-title" aria-describedby="delete-book-description">
       <form method="dialog">
         <div class="annotation-header"><h2 id="delete-book-title">删除图书？</h2></div>
-        <p id="delete-book-description">将删除阅读器中的图书、阅读进度、书签和标注，无法撤销。原始 EPUB 文件会保留。</p>
+        <p id="delete-book-description">将删除阅读器中的图书、阅读进度、书签、标注和 AI 对话，无法撤销。电脑上的原始 EPUB 文件不会被删除。</p>
         <div class="annotation-actions">
           <span></span>
           <button value="cancel" class="text-button" autofocus>取消</button>
-          <button id="delete-book-confirm" type="button" class="danger-button">删除图书</button>
+          <button id="delete-book-confirm" type="button" class="danger-button">删除</button>
         </div>
       </form>
     </dialog>

@@ -28,13 +28,21 @@ let settings: Settings | null = null;
 let filter: Filter = "all";
 let author = "";
 let listMode = false;
-let pendingRemoval: Book | null = null;
+let pendingRemoval: Book[] = [];
+// Batch selection: only books currently on screen can stay selected, so a deletion never
+// includes books hidden by the active filter, search or shelf.
+let selecting = false;
+const selectedIds = new Set<string>();
+let selectionAnchor: string | null = null;
+let visibleIds: string[] = [];
 const shelves = new Shelves(() => books, render);
-const libraryOverlays = createLibraryOverlays(book => {
-  pendingRemoval = book;
-  $("delete-book-title").textContent = `删除《${book.title}》？`;
+function confirmRemoval(list: Book[]) {
+  if (!list.length) return;
+  pendingRemoval = list;
+  $("delete-book-title").textContent = list.length === 1 ? `删除《${list[0].title}》？` : `删除选中的 ${list.length} 本图书？`;
   dialog("delete-book-dialog").showModal();
-}, {
+}
+const libraryOverlays = createLibraryOverlays(book => confirmRemoval([book]), {
   open: book => openBook(book.id),
   showInfo: book => bookInfo.show(book),
   shelves: () => shelves.items,
@@ -43,6 +51,12 @@ const libraryOverlays = createLibraryOverlays(book => {
     catch (error) { toast(errorMessage(error), "error"); }
   },
   createShelf: book => shelves.edit(null, book.id),
+  select: book => {
+    resetSelection(true);
+    selectedIds.add(book.id);
+    selectionAnchor = book.id;
+    render();
+  },
   isHidden: book => shelves.hiddenIds().has(book.id),
   hide: async book => {
     try { await shelves.addBook(book.id, PRIVATE_SHELF); toast("已隐藏，可在分类书架的隐私书架中找到", "success"); }
@@ -188,6 +202,8 @@ function render() {
           ? (b.lastRead || 0) - (a.lastRead || 0)
           : (b.addedAt || 0) - (a.addedAt || 0),
   );
+  visibleIds = visible.map(book => book.id);
+  for (const id of [...selectedIds]) if (!visibleIds.includes(id)) selectedIds.delete(id);
   const titles: Record<Filter, string> = {
     all: "全部图书",
     recent: "最近阅读",
@@ -203,6 +219,8 @@ function render() {
   $("count-finished").textContent = String(listed.filter((book) => book.progress >= 1).length);
   $("count-unread").textContent = String(listed.filter((book) => !book.lastRead).length);
 
+  $("batch-bar").hidden = !selecting || (browsingShelves && !shelves.selected);
+  updateSelectionBar();
   if (browsingShelves && !shelves.selected) {
     shelves.render(query);
     $("empty-state").hidden = true;
@@ -218,12 +236,20 @@ function render() {
     card.className = "book-card";
     card.setAttribute("aria-label", `阅读 ${book.title}`);
     card.innerHTML = `<div class="cover-wrap">${cover(book)}</div><h3>${escape(book.title)}</h3><div class="book-author">${escape(book.author)}</div><div class="book-status">${book.lastRead ? `<span class="progress-track"><i style="width:${(book.progress >= 1 ? 100 : Math.min(99, Math.round(book.progress * 100)))}%"></i></span><span>已读 ${(book.progress >= 1 ? 100 : Math.min(99, Math.round(book.progress * 100)))}%</span>` : '<span class="new-label">未读</span><span>EPUB</span>'}</div>`;
-    card.onclick = () => openBook(book.id, card.querySelector<HTMLElement>(".cover-image"));
-    libraryOverlays.bind(card, book);
+    card.dataset.bookId = book.id;
+    if (selecting) {
+      card.setAttribute("aria-label", `选择 ${book.title}`);
+      card.setAttribute("aria-pressed", String(selectedIds.has(book.id)));
+      card.insertAdjacentHTML("afterbegin", '<span class="select-mark" aria-hidden="true"></span>');
+      card.onclick = event => toggleSelection(book.id, event.shiftKey);
+    } else {
+      card.onclick = () => openBook(book.id, card.querySelector<HTMLElement>(".cover-image"));
+      libraryOverlays.bind(card, book);
+    }
     item.append(card);
     cards.append(item);
   }
-  if (filter === "all" && !author) {
+  if (filter === "all" && !author && !selecting) {
     const item = document.createElement("div");
     item.className = "book-item";
     const add = document.createElement("button");
@@ -256,6 +282,7 @@ function render() {
     const button = document.createElement("button");
     button.textContent = `${name} · ${authorCounts.get(name)}`;
     button.onclick = () => {
+      resetSelection();
       author = name;
       filter = "all";
       setNavigation();
@@ -326,21 +353,81 @@ async function openBook(id: string, coverElement: HTMLElement | null = null) {
   }
 }
 
-dialog("delete-book-dialog").addEventListener("close", () => { pendingRemoval = null; });
+/** Changes selection mode without rendering; callers render afterwards. */
+function resetSelection(enabled = false) {
+  selecting = enabled;
+  selectedIds.clear();
+  selectionAnchor = null;
+  $("select-books").setAttribute("aria-pressed", String(enabled));
+}
+function setSelecting(enabled: boolean) {
+  resetSelection(enabled);
+  render();
+}
+
+function updateSelectionBar() {
+  const count = selectedIds.size;
+  $("batch-count").textContent = count ? `已选择 ${count} 本` : "点击图书进行选择，按住 Shift 可连续选择";
+  $("batch-all").textContent = count && count === visibleIds.length ? "取消全选" : "全选";
+  $("batch-all").toggleAttribute("disabled", !visibleIds.length);
+  $<HTMLButtonElement>("batch-delete").disabled = !count;
+}
+
+function syncSelectionCards() {
+  $("book-grid").querySelectorAll<HTMLElement>(".book-card[data-book-id]").forEach(card =>
+    card.setAttribute("aria-pressed", String(selectedIds.has(card.dataset.bookId!))));
+  updateSelectionBar();
+}
+
+function toggleSelection(id: string, range: boolean) {
+  const from = selectionAnchor ? visibleIds.indexOf(selectionAnchor) : -1;
+  const to = visibleIds.indexOf(id);
+  if (range && from >= 0 && to >= 0) {
+    // Shift extends the anchor's state over the range, as in Explorer.
+    const select = selectedIds.has(selectionAnchor!);
+    for (const item of visibleIds.slice(Math.min(from, to), Math.max(from, to) + 1))
+      select ? selectedIds.add(item) : selectedIds.delete(item);
+  } else {
+    selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id);
+    selectionAnchor = id;
+  }
+  syncSelectionCards();
+}
+
+function selectAll() {
+  const all = selectedIds.size === visibleIds.length;
+  selectedIds.clear();
+  if (!all) visibleIds.forEach(id => selectedIds.add(id));
+  syncSelectionCards();
+}
+
+$("select-books").onclick = () => setSelecting(!selecting);
+$("batch-done").onclick = () => setSelecting(false);
+$("batch-all").onclick = selectAll;
+$("batch-delete").onclick = () => confirmRemoval(books.filter(book => selectedIds.has(book.id)));
+
+dialog("delete-book-dialog").addEventListener("close", () => { pendingRemoval = []; });
 $("delete-book-confirm").onclick = async () => {
-  const book = pendingRemoval;
-  if (!book) return;
+  const list = pendingRemoval;
+  if (!list.length) return;
   dialog("delete-book-dialog").close();
-  busy(true, "正在删除图书…");
+  busy(true, list.length === 1 ? "正在删除图书…" : `正在删除 ${list.length} 本图书…`);
   try {
-    await call("book.delete", { id: book.id });
-    books = books.filter(item => item.id !== book.id);
+    const result = await call<{ deleted: string[]; errors: { id: string; message: string }[] }>("books.delete", { ids: list.map(book => book.id) });
+    const deleted = new Set(result.deleted);
+    books = books.filter(item => !deleted.has(item.id));
+    deleted.forEach(id => selectedIds.delete(id));
     if (author && !books.some(item => item.author === author)) {
       author = "";
       setNavigation();
     }
-    render();
-    toast("图书已从书库删除", "success");
+    if (selecting && !result.errors.length) setSelecting(false);
+    else render();
+    if (result.errors.length) {
+      const title = (id: string) => list.find(book => book.id === id)?.title || id;
+      const failed = result.errors.map(error => `《${title(error.id)}》：${error.message}`).join("\n");
+      toast(`${deleted.size ? `已删除 ${deleted.size} 本，` : ""}${result.errors.length} 本删除失败\n${failed}`, "error");
+    } else toast(list.length === 1 ? "图书已从书库删除" : `已从书库删除 ${deleted.size} 本图书`, "success");
   } catch (error) {
     toast(`删除图书失败：${errorMessage(error)}`, "error");
   } finally {
@@ -377,6 +464,7 @@ $("library-nav").onclick = (event) => {
   const target = (event.target as Element).closest<HTMLElement>("[data-filter]");
   if (!target) return;
   shelves.selected = null;
+  resetSelection();
   input("library-search").value = "";
   filter = target.dataset.filter as Filter;
   author = "";
@@ -458,6 +546,13 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (document.querySelector("dialog[open]") || editing) return;
+  if (selecting && $("reader-view").hidden) {
+    if (event.key === "Escape") { event.preventDefault(); setSelecting(false); return; }
+    if (event.ctrlKey && event.key.toLowerCase() === "a") { event.preventDefault(); selectAll(); return; }
+    if (event.key === "Delete" && selectedIds.size) {
+      event.preventDefault(); confirmRemoval(books.filter(book => selectedIds.has(book.id))); return;
+    }
+  }
   if (!$("reader-view").hidden) {
     if (event.key === "Escape") {
       event.preventDefault();

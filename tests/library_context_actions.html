@@ -36,7 +36,7 @@ try {
   context();
   await new Promise(resolve => setTimeout(resolve, 450));
   check(!titleFlashes && menu.matches(':popover-open'), 'right click focus must never flash the title tooltip');
-  check(menu.querySelectorAll(':scope > button').length === 7, 'all seven actions are present');
+  check(menu.querySelectorAll(':scope > button').length === 8, 'all eight actions are present');
   const infoDialog = doc.getElementById('book-info-dialog');
   click('book-menu-info');
   check(!menu.matches(':popover-open') && infoDialog.open, 'view info closes the menu and opens the details dialog');

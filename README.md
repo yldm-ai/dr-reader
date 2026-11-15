@@ -40,6 +40,22 @@ pnpm test:browser
 ./scripts/package.ps1
 ```
 
+## Logo 资源
+
+`resources/dr-reader.svg` 是原始矢量 logo，应用侧栏、“关于”页面和网页图标直接使用 SVG；`resources/dr-reader.png` 是透明背景的 1024 × 1024 PNG，`resources/dr-reader.ico` 用于 Windows 程序图标，包含 16–256 px 的多种尺寸。
+
+安装 ImageMagick 并将 `magick` 加入 PATH 后，运行以下命令从 SVG 重新生成 PNG 和 ICO（保留 SVG 原件）：
+
+```powershell
+./tools/generate_icon.ps1
+```
+
+通用转换脚本 `scripts/convert-png-to-ico.ps1` 来自 MSIME-Windows 项目的同名脚本，支持 PNG / SVG 输入；例如：
+
+```powershell
+./scripts/convert-png-to-ico.ps1 ./resources/dr-reader.svg ./resources/dr-reader.ico -Force
+```
+
 ## 当前功能
 
 - 书架网格/列表、封面、书名/作者搜索、排序、作者筛选、最近阅读、未读/已读筛选。图书右键菜单支持打开阅读、导入/导出笔记与标注、通过二级菜单添加至分类（含新建分类）。支持确认后删除图书及其阅读数据，保留原始 EPUB 文件。
@@ -67,7 +83,7 @@ ui/           不依赖业务的 Win32 / Direct2D / DirectWrite 窗口外壳
 engine/       不依赖 WebView2 的 C++ EPUB、DOM 拆分、书库、检索、SQLite 标注与设置
 web/          JS/TypeScript 书架和阅读器；Vite 入口与严格类型的通用组件
 dist/         Vite 生成的部署静态资源（不提交）
-resources/    可再分发的原创示例 EPUB
+resources/    SVG / PNG / ICO logo 和可再分发的原创示例 EPUB
 tests/        C++ 集成测试，运行时生成 EPUB / 恶意 ZIP 测试夹具
 tools/        无界面 EPUB 导入检查工具 dr-epub
 scripts/      本地构建、示例书生成

@@ -8,6 +8,7 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' https://books.dr-reader.local 'unsafe-inline'; img-src 'self' https://books.dr-reader.local data:; connect-src 'self' https://books.dr-reader.local; font-src 'self' https://books.dr-reader.local; frame-src 'self' about:; object-src 'none'"
     />
     <title>DR Reader</title>
+    <link rel="icon" type="image/svg+xml" href="../resources/dr-reader.svg" />
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="app.ts"></script>
   </head>
@@ -24,7 +25,7 @@
       <!-- The library home keeps Segoe Fluent glyphs; the reader uses Material Symbols. -->
       <aside class="sidebar" data-icon-set="fluent">
         <div class="brand">
-          <span class="brand-mark" data-icon="book"></span>
+          <img class="brand-mark" src="../resources/dr-reader.svg" alt="" width="30" height="32" />
           <div>DR Reader<small>留一点时间给阅读</small></div>
         </div>
         <button id="import-side" class="primary import-button">

@@ -15,6 +15,8 @@ export default defineConfig({
   base: './',
   customLogger: process.env.DR_ASCII_LOG ? asciiLogger() : undefined,
   build: {
+    // Keep the original SVG as a shared file for the sidebar, About page and favicon.
+    assetsInlineLimit: (file) => /[/\\]dr-reader\.svg$/.test(file) ? false : undefined,
     outDir: '../dist',
     emptyOutDir: true,
     target: 'es2022',

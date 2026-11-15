@@ -67,7 +67,6 @@
 }
 .fluent-icon[data-icon-font="fluent"] { font-family: "Segoe Fluent Icons"; }
 .fluent-icon[data-icon-font="mdl2"] { font-family: "Segoe MDL2 Assets"; }
-.brand-mark { --icon-size: 20px; }
 .empty-state > span { --icon-size: 40px; }
 .selection-action { --icon-size: 16px; }
 * {
@@ -244,18 +243,11 @@ button {
   margin-top: 2px;
 }
 .brand-mark {
-  display: flex !important;
+  display: block;
   width: 30px;
   height: 32px;
-  border-radius: 6px;
-  background: var(--primary);
-  color: var(--on-primary);
-  align-items: center;
-  justify-content: center;
-}
-.brand-mark :is(svg, .ui-icon) {
-  width: 21px !important;
-  height: 21px !important;
+  flex-shrink: 0;
+  object-fit: contain;
 }
 .primary {
   justify-content: center;

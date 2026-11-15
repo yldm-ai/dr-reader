@@ -10,7 +10,8 @@ set_target_properties(dr-reader PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BIN
 find_program(DR_PNPM_EXECUTABLE NAMES pnpm.cmd pnpm REQUIRED)
 file(GLOB_RECURSE DR_FRONTEND_SOURCES CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/web/*.ts"
-  "${PROJECT_SOURCE_DIR}/web/*.css" "${PROJECT_SOURCE_DIR}/web/*.html")
+  "${PROJECT_SOURCE_DIR}/web/*.css" "${PROJECT_SOURCE_DIR}/web/*.html"
+  "${PROJECT_SOURCE_DIR}/resources/*.svg")
 # MSBuild decodes custom-build output with the OEM code page whatever chcp says, so Vite's UTF-8
 # "✓ built in" would show as "Γ£ô"; DR_ASCII_LOG makes vite.config.ts print ASCII instead.
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/frontend.stamp"

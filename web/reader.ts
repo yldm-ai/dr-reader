@@ -46,6 +46,41 @@ const TOC_MIN_WIDTH = 220;
 const TOC_MAX_WIDTH = 640;
 const TOC_KEYBOARD_STEP = 16;
 
+/**
+ * Where a popup about the selected text goes, in CSS pixels of the top-level viewport: left and
+ * bottom from the selection's last line (so it opens right below the word, or below the end of a
+ * passage) and top from its first line (so a popup flipped above clears all of it). Null when
+ * the selection has no visible box, e.g. it was scrolled or paged out of view.
+ */
+export function selectionLineRect(range: Range): { left: number; top: number; right: number; bottom: number } | null {
+  const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+  if (!rects.length) return null;
+  const last = rects[rects.length - 1];
+  // The pieces of the last line: boxes overlapping its vertical middle.
+  const middle = (last.top + last.bottom) / 2;
+  const line = rects.filter((rect) => rect.top <= middle && rect.bottom >= middle);
+  const box = {
+    left: Math.min(...line.map((rect) => rect.left)),
+    right: Math.max(...line.map((rect) => rect.right)),
+    top: Math.min(...rects.map((rect) => rect.top)),
+    bottom: Math.max(...line.map((rect) => rect.bottom)),
+  };
+  // The book renders in an iframe: shift into the top-level viewport and keep to what shows.
+  let view: Window | null = range.startContainer.ownerDocument?.defaultView ?? null;
+  while (view && view.frameElement && view !== view.parent) {
+    const frame = view.frameElement.getBoundingClientRect();
+    if (box.bottom <= 0 || box.top >= frame.height || box.right <= 0 || box.left >= frame.width) return null;
+    box.left += frame.left;
+    box.right += frame.left;
+    box.top += frame.top;
+    box.bottom += frame.top;
+    view = view.parent;
+  }
+  const top = view ?? window;
+  if (box.bottom <= 0 || box.top >= top.innerHeight || box.right <= 0 || box.left >= top.innerWidth) return null;
+  return box;
+}
+
 export class Reader {
   onUpdate: (book: Book) => void;
   onReadingSetting?: (patch: Partial<ReadingSettings>) => void;
@@ -2197,13 +2232,20 @@ export class Reader {
     this.search();
   }
 
-  // DR Dict's lookup popup opens beside the pointer, which is on this menu.
+  // DR Dict's lookup popup opens right below the selected text: the page sends the selection's
+  // box in CSS pixels of this viewport and the host maps it to the screen (DR Dict's "caret",
+  // see ../dr-dict/app/src/popup.h). Without a usable box the popup opens beside the pointer,
+  // which is on this menu.
   async lookupInDrDict() {
     const text = this.selection?.text.trim();
     if (!text) return;
+    const rect = this.selection?.range ? selectionLineRect(this.selection.range) : null;
     this.hideSelection();
     try {
-      await call("dict.popup", { text: text.slice(0, 1024) });
+      await call("dict.popup", {
+        text: text.slice(0, 1024),
+        ...(rect ? { rect, scale: devicePixelRatio } : {}),
+      });
     } catch (error) {
       toast(errorMessage(error), "error");
     }

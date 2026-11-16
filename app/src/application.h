@@ -16,7 +16,7 @@ class Application
     int run(HINSTANCE instance);
 
   private:
-    void receive(const Json &request);
+    void receive(const Json &request, std::vector<fs::path> dropped);
     void enqueue(std::function<void()> work);
     void worker(std::stop_token stop);
     std::vector<fs::path> pick_books();

@@ -792,6 +792,7 @@ LRESULT Window::message(UINT m, WPARAM w, LPARAM l)
         InvalidateRect(hwnd_, nullptr, FALSE);
         break;
     case WM_DESTROY:
+        RevokeDragDrop(hwnd_); // the page's drop target, if one was registered
         content_captured_ = false;
         if (small_icon_)
             DestroyIcon(small_icon_);

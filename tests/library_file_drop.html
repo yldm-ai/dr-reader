@@ -1,0 +1,83 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Library file drop import</title>
+<pre id="result">RUNNING</pre>
+<script type="module">
+import { bootstrapFixture } from './frontend-fixtures.ts';
+const output = document.getElementById('result');
+const check = (value, message) => { if (!value) throw Error(message); };
+const until = async (predicate, what) => {
+  for (let i = 0; i < 300; i++) {
+    if (predicate()) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw Error(`Timed out waiting for ${what}`);
+};
+try {
+  const bundled = await (await fetch('../dist/index.html')).text();
+  const frame = document.createElement('iframe');
+  frame.style.cssText = 'width:1200px;height:800px';
+  const mock = `<script type="module">import { installNativeMock } from '/tests/frontend-fixtures.ts';window.nativeProbe=installNativeMock(${JSON.stringify(bootstrapFixture())});<\/script>`;
+  frame.srcdoc = bundled.replace('<head>', `<head><base href="${location.origin}/dist/">${mock}`);
+  document.body.append(frame);
+  await until(() => frame.contentDocument?.querySelector('.book-card') && !frame.contentDocument.body.classList.contains('booting'), 'library');
+  const win = frame.contentWindow, doc = frame.contentDocument;
+  const overlay = doc.getElementById('file-drop');
+  const grid = doc.getElementById('book-grid');
+  // Outside a real drag Chromium keeps dropEffect at "none"; an own property records the page's choice.
+  const transfer = (...names) => {
+    const data = new win.DataTransfer();
+    for (const name of names) data.items.add(new win.File(['x'], name));
+    Object.defineProperty(data, 'dropEffect', { value: 'none', writable: true });
+    return data;
+  };
+  const fire = (type, dataTransfer, target = grid, init = {}) => {
+    const event = new win.DragEvent(type, { bubbles: true, cancelable: true, dataTransfer, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const dropped = () => win.nativeProbe.requests.filter(request => request.method === 'import.dropped');
+
+  // Files held over the library are taken as a copy and show the drop overlay.
+  let data = transfer('一本书.epub', 'notes.txt');
+  const enter = fire('dragenter', data);
+  check(enter.defaultPrevented, 'files over the library are handled');
+  check(data.dropEffect === 'copy', 'files over the library are taken as a copy');
+  check(!overlay.hidden, 'the drop overlay shows while files are held over the library');
+  fire('dragover', data, doc.querySelector('.sidebar'));
+  check(!overlay.hidden, 'the sidebar is part of the drop area');
+  fire('dragleave', data, grid, { relatedTarget: doc.querySelector('.sidebar') });
+  check(!overlay.hidden, 'moving between elements keeps the overlay');
+  fire('dragleave', data);
+  check(overlay.hidden, 'leaving the window hides the overlay');
+
+  // Dropping sends the File objects to the host and reports what was not imported.
+  fire('dragenter', data);
+  const drop = fire('drop', data);
+  check(drop.defaultPrevented && overlay.hidden, 'the drop is handled and the overlay hides');
+  await until(() => dropped().length === 1 && doc.getElementById('busy').hidden, 'the dropped import');
+  check(JSON.stringify(dropped()[0].files) === JSON.stringify(['一本书.epub', 'notes.txt']), 'every dropped file reaches the host');
+  const message = doc.querySelector('#toast .toast-message')?.textContent || '';
+  check(message.includes('已导入 1 本') && message.includes('notes.txt'), `partial import is reported: ${message}`);
+
+  // A drag that carries no files (text from the page) is left to the browser.
+  data = new win.DataTransfer();
+  data.setData('text/plain', '一段文字');
+  check(!fire('dragover', data).defaultPrevented && overlay.hidden, 'text drags are not treated as imports');
+
+  // Outside the library (here: while reading) files are refused and nothing is imported.
+  doc.getElementById('reader-view').hidden = false;
+  data = transfer('另一本.epub');
+  data.dropEffect = 'copy';
+  check(fire('dragover', data).defaultPrevented && data.dropEffect === 'none', 'the reader refuses dropped files');
+  check(overlay.hidden, 'no overlay while reading');
+  fire('drop', data);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  check(dropped().length === 1, 'a drop on the reader imports nothing');
+  doc.getElementById('reader-view').hidden = true;
+
+  document.documentElement.dataset.result = 'pass'; output.textContent = 'PASS library file drop import';
+} catch (error) {
+  document.documentElement.dataset.result = 'fail'; output.textContent = error.stack;
+}
+</script>

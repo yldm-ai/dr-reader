@@ -11,6 +11,7 @@ import { SelectControl } from "./select-control.ts";
 import { Shelves, PRIVATE_SHELF } from "./shelves.ts";
 import { readingPalette, resolveTheme } from "./reading-palette.ts";
 import { BookInfo } from "./book-info.ts";
+import { installFileDrop } from "./file-drop.ts";
 import type { ApplicationSettings, Book, Bootstrap, LibrarySort, Settings } from "./types.ts";
 
 type Filter = "all" | "recent" | "unread" | "finished" | "shelves";
@@ -256,7 +257,7 @@ function render() {
     add.id = "book-add";
     add.className = "shelf-card shelf-add book-add";
     add.innerHTML = '<div class="cover-wrap"><span data-icon="plus"></span></div><strong>添加新书</strong><small>选择 EPUB 文件</small>';
-    add.onclick = importBooks;
+    add.onclick = () => importBooks();
     item.append(add);
     cards.append(item);
   }
@@ -435,14 +436,17 @@ $("delete-book-confirm").onclick = async () => {
   }
 };
 
-async function importBooks() {
+/** Imports the books chosen in the file picker, or the files dropped on the library. */
+async function importBooks(dropped?: File[]) {
   busy(true, "正在导入 EPUB，C++ 正在解析与拆分章节…");
   try {
-    const result = await call<{ books: Book[]; errors: string[] }>("import");
+    const result = await call<{ books: Book[]; errors: string[]; imported: number }>(
+      dropped ? "import.dropped" : "import", {}, dropped);
     books = result.books;
     render();
-    if (result.errors.length) toast(result.errors.join("\n"), "error");
-    else toast("书库已更新", "success");
+    if (result.errors.length)
+      toast((result.imported ? `已导入 ${result.imported} 本，以下未导入：\n` : "") + result.errors.join("\n"), "error");
+    else if (result.imported || !dropped) toast("书库已更新", "success");
   } catch (error) {
     toast(errorMessage(error), "error");
   } finally {
@@ -459,7 +463,14 @@ async function returnLibrary() {
 }
 
 for (const id of ["import-side", "import-empty"])
-  $(id).onclick = importBooks;
+  $(id).onclick = () => importBooks();
+// EPUB files or folders dragged from Explorer onto the library import like the picker.
+installFileDrop({
+  overlay: $("file-drop"),
+  accepts: () => !document.body.classList.contains("booting") && $("reader-view").hidden && $("busy").hidden &&
+    !settingsPanel.applicationOpen && !document.querySelector("dialog[open]"),
+  drop: files => importBooks(files),
+});
 $("library-nav").onclick = (event) => {
   const target = (event.target as Element).closest<HTMLElement>("[data-filter]");
   if (!target) return;

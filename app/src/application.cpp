@@ -1,6 +1,9 @@
 #include "application.h"
 #include "../resource.h"
 #include "dr/settings.h"
+#include <algorithm>
+#include <cmath>
+#include <optional>
 #include <shobjidl.h>
 #include <stdexcept>
 #include <set>
@@ -60,11 +63,40 @@ std::wstring command_line_argument(const std::wstring &text)
     quoted.append(backslashes, L'\\');
     return quoted + L"\"";
 }
-// “查词典”: shows the word in DR Dict's lookup popup (../dr-dict, app/src/popup.h) beside the
-// pointer, which is on the selection menu just clicked. A running DR Dict is asked through
-// WM_COPYDATA to its popup host; otherwise DR Dict is started with --lookup, found through the
-// App Paths entry DR Dict registers when it runs.
-void lookup_in_dr_dict(HWND owner, const std::string &word)
+// The selected text's box from the page (CSS pixels of the WebView's viewport, see
+// selectionLineRect in web/reader.ts) in screen pixels, or nothing when the page sent none or a
+// box that makes no sense. `content` is where the WebView sits in the window's client area.
+std::optional<RECT> selection_screen_rect(HWND window, RECT content, const Json &params)
+{
+    if (!params.contains("rect") || !params["rect"].is_object()) return std::nullopt;
+    const auto &rect = params["rect"];
+    const double scale = params.contains("scale") && params["scale"].is_number() ? params["scale"].get<double>() : 0;
+    if (!std::isfinite(scale) || scale <= 0 || scale > 16) return std::nullopt;
+    double side[4]{};
+    const char *names[4]{"left", "top", "right", "bottom"};
+    for (int i = 0; i < 4; ++i)
+    {
+        if (!rect.contains(names[i]) || !rect[names[i]].is_number()) return std::nullopt;
+        side[i] = rect[names[i]].get<double>();
+        if (!std::isfinite(side[i]) || std::abs(side[i]) > 100000) return std::nullopt;
+    }
+    if (side[0] > side[2] || side[1] > side[3]) return std::nullopt;
+    POINT origin{content.left, content.top};
+    if (!ClientToScreen(window, &origin)) return std::nullopt;
+    return RECT{origin.x + static_cast<LONG>(std::floor(side[0] * scale)),
+                origin.y + static_cast<LONG>(std::floor(side[1] * scale)),
+                origin.x + static_cast<LONG>(std::ceil(side[2] * scale)),
+                origin.y + static_cast<LONG>(std::ceil(side[3] * scale))};
+}
+// “查词典”: shows the word in DR Dict's lookup popup (../dr-dict, app/src/popup.h). With the
+// selection's box the popup opens right below the text (DR Dict's "caret" anchor, flipped above
+// when there is no room); otherwise beside the pointer, which is on the selection menu just
+// clicked. The caret-anchored popup is not near the pointer, so it is sent as "keyboard": DR Dict
+// then skips its pointer-leave auto-hide (which would close it at once) and closes it on Esc, a
+// click elsewhere or focus moving on. A running DR Dict is asked through WM_COPYDATA to its popup
+// host; otherwise DR Dict is started with --lookup, found through the App Paths entry DR Dict
+// registers when it runs.
+void lookup_in_dr_dict(HWND owner, const std::string &word, const std::optional<RECT> &caret)
 {
     constexpr ULONG_PTR lookup_request = 0x4B4C5244; // "DRLK", DR Dict's dr::lookup_request
     POINT at{};
@@ -74,14 +106,23 @@ void lookup_in_dr_dict(HWND owner, const std::string &word)
         DWORD process = 0;
         GetWindowThreadProcessId(popup, &process);
         AllowSetForegroundWindow(process); // so the popup may take focus from us
-        const auto payload = Json{{"word", word}, {"x", at.x}, {"y", at.y}}.dump();
+        Json request{{"word", word}, {"x", at.x}, {"y", at.y}};
+        if (caret)
+        {
+            request["caret"] = Json::array({caret->left, caret->top, caret->right, caret->bottom});
+            request["keyboard"] = true;
+        }
+        const auto payload = request.dump();
         COPYDATASTRUCT data{lookup_request, static_cast<DWORD>(payload.size()), const_cast<char *>(payload.data())};
         DWORD_PTR handled = 0;
         if (SendMessageTimeoutW(popup, WM_COPYDATA, reinterpret_cast<WPARAM>(owner), reinterpret_cast<LPARAM>(&data),
                                 SMTO_ABORTIFHUNG, 3000, &handled) && handled)
             return;
     }
-    const auto arguments = L"--lookup " + command_line_argument(widen(word));
+    auto arguments = L"--lookup " + command_line_argument(widen(word));
+    if (caret)
+        arguments += L" --caret " + std::to_wstring(caret->left) + L"," + std::to_wstring(caret->top) + L"," +
+                     std::to_wstring(caret->right) + L"," + std::to_wstring(caret->bottom) + L" --keyboard";
     SHELLEXECUTEINFOW info{sizeof(info)};
     info.fMask = SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC;
     info.hwnd = owner;
@@ -94,6 +135,40 @@ void lookup_in_dr_dict(HWND owner, const std::string &word)
 }
 // Matches the toolbar: titles past 20 characters (code points, not UTF-16 units) end in an ellipsis.
 std::wstring short_title(const std::wstring& title,size_t max=20){size_t count=0;for(size_t i=0;i<title.size();++i){if(IS_LOW_SURROGATE(title[i]))continue;if(count++==max)return title.substr(0,i)+L"…";}return title;}
+bool is_epub(const fs::path &path)
+{
+    return _wcsicmp(path.extension().c_str(), L".epub") == 0;
+}
+// The books among files dropped from Explorer: EPUB files as given, and the EPUB files inside
+// dropped folders (recursively, in path order), as calibre's "add books from directories"
+// collects them (gui2/add.py, ebooks/metadata/meta.py find_books_in_directory). Other files
+// are reported rather than silently ignored.
+std::vector<fs::path> dropped_books(const std::vector<fs::path> &dropped, Json &errors)
+{
+    std::vector<fs::path> books;
+    std::set<fs::path> seen;
+    auto add = [&](const fs::path &path) { if (seen.insert(path).second) books.push_back(path); };
+    for (auto &path : dropped)
+    {
+        std::error_code error;
+        if (fs::is_directory(path, error))
+        {
+            std::vector<fs::path> found;
+            for (fs::recursive_directory_iterator it(path, fs::directory_options::skip_permission_denied, error), end;
+                 !error && it != end; it.increment(error))
+                if (is_epub(it->path()) && it->is_regular_file(error)) found.push_back(it->path());
+            if (error) errors.push_back(utf8(path.filename()) + ": 无法读取文件夹");
+            else if (found.empty()) errors.push_back(utf8(path.filename()) + ": 文件夹中没有 EPUB 文件");
+            std::sort(found.begin(), found.end());
+            for (auto &book : found) add(book);
+        }
+        else if (!is_epub(path))
+            errors.push_back(utf8(path.filename()) + ": 不是 EPUB 文件");
+        else
+            add(path);
+    }
+    return books;
+}
 ShellStyle shell_style(const std::string &shell)
 {
     return shell == "direct2d" ? ShellStyle::Direct2D : shell == "webview2" ? ShellStyle::WebView2 : ShellStyle::Mica;
@@ -258,7 +333,7 @@ fs::path Application::pick_notes_import_path()
     CoTaskMemFree(path);
     return source;
 }
-void Application::receive(const Json &request)
+void Application::receive(const Json &request, std::vector<fs::path> dropped)
 {
     if (!request.is_object() || !request.contains("id") || !request["id"].is_number_unsigned() ||
         !request.contains("method") || !request["method"].is_string())
@@ -333,7 +408,8 @@ void Application::receive(const Json &request)
     {
         try
         {
-            lookup_in_dr_dict(window_.handle(), params.at("text").get<std::string>());
+            lookup_in_dr_dict(window_.handle(), params.at("text").get<std::string>(),
+                              selection_screen_rect(window_.handle(), window_.content_bounds(), params));
             webview_.send({{"id", id}, {"result", true}});
         }
         catch (const std::exception &e) { webview_.send({{"id", id}, {"error", e.what()}}); }
@@ -342,6 +418,8 @@ void Application::receive(const Json &request)
     if(method=="copy"){try{copy_text(window_.handle(),params.at("text"));webview_.send({{"id",id},{"result",true}});}catch(const std::exception& e){webview_.send({{"id",id},{"error",e.what()}});}return;}
     std::vector<fs::path> files;
     fs::path notes_file;
+    // Books dropped on the library: the paths come only from the File objects of the drop.
+    if (method == "import.dropped") files = std::move(dropped);
     if (method == "import" || method == "notes.import")
     {
         try
@@ -411,23 +489,26 @@ void Application::receive(const Json &request)
                     window_.post([this] { DestroyWindow(window_.handle()); });
                     return;
                 }
-                else if (method == "import")
+                else if (method == "import" || method == "import.dropped")
                 {
                     // Reference: calibre gui2/actions/add.py AddAction.add_books/_add_books.
                     // Independently use our Win32 selection and serial worker to import the full batch.
                     Json errors = Json::array();
-                    for (auto &path : files)
+                    const auto books = method == "import" ? files : dropped_books(files, errors);
+                    size_t imported = 0;
+                    for (auto &path : books)
                     {
                         try
                         {
                             library_.import_book(path);
+                            ++imported;
                         }
                         catch (const std::exception &e)
                         {
                             errors.push_back(utf8(path.filename()) + ": " + e.what());
                         }
                     }
-                    result = {{"books", library_.list()}, {"errors", errors}};
+                    result = {{"books", library_.list()}, {"errors", errors}, {"imported", imported}};
                 }
                 else if (method == "open")
                 {
@@ -670,7 +751,7 @@ int Application::run(HINSTANCE instance)
     };
     window_.set_theme(settings["application"].value("theme", std::string("light")));
     webview_.set_theme(window_.resolved_theme());
-    webview_.on_message = [this](auto &request) { receive(request); };
+    webview_.on_message = [this](auto &request, auto dropped) { receive(request, std::move(dropped)); };
     webview_.on_error = [this](const auto &error)
     { MessageBoxW(window_.handle(), error.c_str(), L"DR Reader", MB_OK | MB_ICONERROR); };
     window_.on_close = [this] { webview_.send({{"event", "closing"}}); };

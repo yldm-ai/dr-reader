@@ -38,7 +38,8 @@ class WebView
     UINT32 system_cursor();
     void focus();
     void notify_move();
-    std::function<void(const Json &)> on_message;
+    /** A page message and the paths of the DOM File objects posted with it (dropped files). */
+    std::function<void(const Json &, std::vector<fs::path>)> on_message;
     std::function<void(const std::wstring &)> on_error;
     std::function<void()> on_toggle_borderless;
     std::function<void()> on_cursor_changed;
@@ -50,11 +51,13 @@ class WebView
     Microsoft::WRL::ComPtr<IDCompositionDevice> device_;
     Microsoft::WRL::ComPtr<IDCompositionTarget> target_;
     Microsoft::WRL::ComPtr<IDCompositionVisual> root_;
+    Microsoft::WRL::ComPtr<IDropTarget> drop_target_;
     RECT bounds_{};
     std::string theme_ = "light";
     double caption_height_ = 0;
     void fail(HRESULT error, const wchar_t *step);
     void place();
+    void register_drop_target(HWND window);
     void configure(const fs::path &web_root, const fs::path &data_root, std::function<void()> ready);
 };
 std::wstring widen(std::string_view text);

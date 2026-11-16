@@ -11,6 +11,8 @@ export interface HostMessage {
 interface WebView {
   addEventListener(type: 'message', listener: (event: { data: HostMessage }) => void): void;
   postMessage(message: unknown): void;
+  /** Posts DOM objects with the message; the host reads a File's native path. */
+  postMessageWithAdditionalObjects(message: unknown, objects: ArrayLike<unknown>): void;
 }
 declare global {
   interface Window { chrome?: { webview?: WebView } }
@@ -34,8 +36,11 @@ export function onHostEvent(name: string, handler: (message: HostMessage) => voi
     if (data?.event === name) handler(data);
   });
 }
-/** Calls a native method; `T` is the caller's view of the JSON result. */
-export function call<T = unknown>(method: string, params: object = {}): Promise<T> {
+/**
+ * Calls a native method; `T` is the caller's view of the JSON result. Files (such as dropped
+ * ones) travel as WebView2 additional objects, so the host gets their native paths.
+ */
+export function call<T = unknown>(method: string, params: object = {}, files?: readonly File[]): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     if (!window.chrome?.webview) {
       reject(new Error("请通过 DR Reader 桌面程序打开界面。"));
@@ -47,7 +52,8 @@ export function call<T = unknown>(method: string, params: object = {}): Promise<
       reject(new Error("处理超时，请稍后重试。"));
     }, 300000);
     pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
-    window.chrome.webview.postMessage({ id, method, params });
+    if (files?.length) window.chrome.webview.postMessageWithAdditionalObjects({ id, method, params }, files);
+    else window.chrome.webview.postMessage({ id, method, params });
   });
 }
 export function bookUrl(book: { id: string }, href: string): string {

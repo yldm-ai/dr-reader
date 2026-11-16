@@ -18,7 +18,7 @@ const port = (server.httpServer.address() as AddressInfo).port;
 // Same compositing switch as the app's WebView2 environment (app/src/webview.cpp).
 const browser = await chromium.launch({ executablePath: edge, headless: true, args: ['--disable-prefer-compositing-to-lcd-text'] });
 try {
-  for (const name of ['toc_motion', 'toc_anchors', 'reader_touchpad', 'library_context_actions', 'library_back_to_top', 'library_sort', 'toc_hierarchy', 'icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'agent_chat', 'production_smoke']) {
+  for (const name of ['toc_motion', 'toc_anchors', 'reader_touchpad', 'library_context_actions', 'library_back_to_top', 'library_sort', 'library_file_drop', 'toc_hierarchy', 'icon_fallback', 'footer_auto_hide', 'notifications', 'settings_interactions', 'system_theme', 'reader_completion', 'shelves', 'reader_layout', 'reader_interactions', 'settings_controls', 'reader_motion', 'book_opening', 'agent_chat', 'production_smoke']) {
     if (process.env.DR_BROWSER_TEST && name !== process.env.DR_BROWSER_TEST) continue;
     const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
     const errors: string[] = [];

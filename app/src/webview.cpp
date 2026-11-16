@@ -1,10 +1,84 @@
 #include "webview.h"
 #include <WebView2EnvironmentOptions.h>
 #include <algorithm>
+#include <shlobj.h>
 #include <sstream>
 namespace dr
 {
 using Microsoft::WRL::Callback;
+namespace
+{
+/**
+ * A composition-hosted WebView2 has no window to receive OLE drag and drop, so the shell
+ * window registers this target and forwards each step to the page, as WebView2APISample's
+ * DropTarget/ViewComponent do for visual hosting. The page's own drag events then decide
+ * the effect; the shell's drag image helper draws the dragged files over the window.
+ */
+class DropTarget : public Microsoft::WRL::RuntimeClass<
+                       Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IDropTarget>
+{
+  public:
+    DropTarget(HWND window, Microsoft::WRL::ComPtr<ICoreWebView2CompositionController3> view,
+               std::function<POINT(POINTL)> to_view)
+        : window_(window), view_(std::move(view)), to_view_(std::move(to_view))
+    {
+        CoCreateInstance(CLSID_DragDropHelper, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&helper_));
+    }
+    STDMETHODIMP DragEnter(IDataObject *data, DWORD keys, POINTL at, DWORD *effect) override
+    {
+        auto hr = view_->DragEnter(data, keys, to_view_(at), effect);
+        if (helper_)
+        {
+            POINT screen{at.x, at.y};
+            helper_->DragEnter(window_, data, &screen, *effect);
+        }
+        return hr;
+    }
+    STDMETHODIMP DragOver(DWORD keys, POINTL at, DWORD *effect) override
+    {
+        auto hr = view_->DragOver(keys, to_view_(at), effect);
+        if (helper_)
+        {
+            POINT screen{at.x, at.y};
+            helper_->DragOver(&screen, *effect);
+        }
+        return hr;
+    }
+    STDMETHODIMP DragLeave() override
+    {
+        if (helper_) helper_->DragLeave();
+        return view_->DragLeave();
+    }
+    STDMETHODIMP Drop(IDataObject *data, DWORD keys, POINTL at, DWORD *effect) override
+    {
+        auto hr = view_->Drop(data, keys, to_view_(at), effect);
+        if (helper_)
+        {
+            POINT screen{at.x, at.y};
+            helper_->Drop(data, &screen, *effect);
+        }
+        return hr;
+    }
+
+  private:
+    HWND window_;
+    Microsoft::WRL::ComPtr<ICoreWebView2CompositionController3> view_;
+    Microsoft::WRL::ComPtr<IDropTargetHelper> helper_;
+    std::function<POINT(POINTL)> to_view_;
+};
+}
+void WebView::register_drop_target(HWND window)
+{
+    Microsoft::WRL::ComPtr<ICoreWebView2CompositionController3> view;
+    if (FAILED(composition_.As(&view))) return;
+    // OLE gives screen coordinates; the page takes them relative to the WebView's top-left.
+    drop_target_ = Microsoft::WRL::Make<DropTarget>(window, view, [this, window](POINTL at) {
+        POINT point{at.x, at.y};
+        ScreenToClient(window, &point);
+        return POINT{point.x - bounds_.left, point.y - bounds_.top};
+    });
+    RegisterDragDrop(window, drop_target_.Get());
+}
 std::wstring widen(std::string_view s)
 {
     if (s.empty())
@@ -193,6 +267,7 @@ void WebView::create(HWND window, const fs::path &web_root, const fs::path &data
                                         if (on_cursor_changed) on_cursor_changed();
                                         return S_OK;
                                     }).Get(), &cursor_token);
+                            register_drop_target(window);
                             configure(web_root, data_root, ready);
                             return S_OK;
                         }).Get());
@@ -296,10 +371,29 @@ void WebView::configure(const fs::path &web_root, const fs::path &data_root, std
                 CoTaskMemFree(raw);
                 if (origin != L"https://app.dr-reader.local/index.html" || text.size() > 256 * 1024)
                     return S_OK;
+                // Files dropped on the page arrive as DOM File objects posted with the message;
+                // only these native paths are trusted, never paths written into the JSON.
+                std::vector<fs::path> files;
+                Microsoft::WRL::ComPtr<ICoreWebView2WebMessageReceivedEventArgs2> args2;
+                Microsoft::WRL::ComPtr<ICoreWebView2ObjectCollectionView> objects;
+                UINT32 count = 0;
+                if (SUCCEEDED(args->QueryInterface(IID_PPV_ARGS(&args2))) &&
+                    SUCCEEDED(args2->get_AdditionalObjects(&objects)) && objects &&
+                    SUCCEEDED(objects->get_Count(&count)))
+                    for (UINT32 i = 0; i < count; ++i)
+                    {
+                        Microsoft::WRL::ComPtr<IUnknown> object;
+                        Microsoft::WRL::ComPtr<ICoreWebView2File> file;
+                        LPWSTR path = nullptr;
+                        if (SUCCEEDED(objects->GetValueAtIndex(i, &object)) && object &&
+                            SUCCEEDED(object.As(&file)) && SUCCEEDED(file->get_Path(&path)) && path)
+                            files.emplace_back(path);
+                        CoTaskMemFree(path);
+                    }
                 try
                 {
                     if (on_message)
-                        on_message(Json::parse(text));
+                        on_message(Json::parse(text), std::move(files));
                 }
                 catch (const std::exception &)
                 { /* malformed messages never cross the native boundary */

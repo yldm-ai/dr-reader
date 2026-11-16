@@ -2393,6 +2393,27 @@ body[data-animations="false"] .toast { animation: none; }
   z-index: 20;
   backdrop-filter: blur(3px);
 }
+/* Files held over the library (file-drop.ts): a quiet inset outline over the whole window.
+   It takes no pointer events, so the drag keeps targeting the page underneath. */
+.file-drop {
+  position: fixed;
+  inset: calc(var(--caption-height, 0px) + 12px) 12px 12px;
+  z-index: 19;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  color: var(--text);
+  pointer-events: none;
+}
+.file-drop > span { color: var(--accent); }
+.file-drop > span :is(svg, .ui-icon) { width: 28px; height: 28px; }
+.file-drop p { margin: 6px 0 0; font-size: var(--text-section); font-weight: 600; }
+.file-drop small { color: var(--muted); font-size: var(--text-secondary); }
 .spinner {
   width: 28px;
   height: 28px;

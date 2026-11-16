@@ -3,7 +3,8 @@
 #include <shlobj.h>
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
 {
-    auto initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    // OLE (an apartment-threaded COM) so the window can register as a drag-and-drop target.
+    auto initialized = OleInitialize(nullptr);
     if (FAILED(initialized))
         return 1;
     int result = 1;
@@ -50,6 +51,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int)
     {
         MessageBoxW(nullptr, dr::widen(e.what()).c_str(), L"DR Reader", MB_OK | MB_ICONERROR);
     }
-    CoUninitialize();
+    OleUninitialize();
     return result;
 }

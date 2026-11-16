@@ -159,7 +159,42 @@ try {
   await reader.lookupInDrDict();
   check(requests.length === 1 && requests[0].method === 'dict.popup' && requests[0].params.text === '原创词条',
     'the DR Dict action must send the trimmed selection');
+  check(!('rect' in requests[0].params), 'without a selection box DR Dict falls back to the pointer');
   check(document.getElementById('selection-menu').hidden, 'the selection menu closes when DR Dict opens');
+  // With the selection's box the popup is placed right below the text: the box is the selected
+  // line in the top-level viewport.
+  text.scrollIntoView({ block: 'center' });
+  reader.showSelectionMenu(range);
+  requests.length = 0;
+  await reader.lookupInDrDict();
+  const sent = requests[0]?.params;
+  const lines = [...range.getClientRects()].filter(r => r.width && r.height);
+  const frameBox = { top: 0, left: 0 };
+  const lastLine = lines[lines.length - 1];
+  check(sent?.rect && sent.scale === devicePixelRatio &&
+    Math.abs(sent.rect.bottom - (frameBox.top + lastLine.bottom)) < 1 &&
+    Math.abs(sent.rect.top - (frameBox.top + lines[0].top)) < 1 &&
+    sent.rect.left >= frameBox.left && sent.rect.left <= frameBox.left + lastLine.right,
+    'the DR Dict action must send the selection box in top-level viewport pixels');
+  {
+    // Book text renders in an iframe: the box shifts by the frame's offset, and a selection paged
+    // out of the frame's view has no box (DR Dict then opens at the pointer).
+    const { selectionLineRect } = await import('../web/reader.ts');
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed;left:40px;top:60px;width:300px;height:200px;border:0';
+    frame.srcdoc = '<p style="margin:10px;font:16px/24px sans-serif">词语<span id="w">选中</span>其后</p>' +
+      '<p id="far" style="position:absolute;top:900px">远处</p>';
+    await new Promise(resolve => { frame.onload = resolve; document.body.append(frame); });
+    const inner = frame.contentDocument.createRange();
+    inner.selectNodeContents(frame.contentDocument.getElementById('w'));
+    const word = inner.getBoundingClientRect();
+    const box = selectionLineRect(inner);
+    check(box && Math.abs(box.left - (40 + word.left)) < 1 && Math.abs(box.bottom - (60 + word.bottom)) < 1 &&
+      Math.abs(box.top - (60 + word.top)) < 1, 'the selection box must be offset by the book frame');
+    inner.selectNodeContents(frame.contentDocument.getElementById('far'));
+    check(selectionLineRect(inner) === null, 'a selection out of view must fall back to the pointer');
+    frame.remove();
+  }
   reader.appSettings = { selectionActions: {}, dictionaries: [] };
 
   const dictionaries = [{ id: 'one', name: '测试词典一' }, { id: 'two', name: '测试词典二' }];
